@@ -1,0 +1,28 @@
+# Build artifacts
+backend/build/
+build/
+*.o
+*.so
+*.a
+
+# Secrets
+backend/.env
+.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+~/python_venv/
+
+# Generated fixtures (rebuilt by scripts/golden.sh)
+fixtures/*.json
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

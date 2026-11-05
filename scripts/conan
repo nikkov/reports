@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Обёртка над Conan v1. Гарантирует, что не будет вызван Conan 2 из PATH (ADR-13).
+set -euo pipefail
+
+CONAN_BIN="${CONAN_BIN:-$HOME/python_venv/bin/conan}"
+
+if [ ! -x "$CONAN_BIN" ]; then
+  echo "ERROR: Conan v1 не найден: $CONAN_BIN" >&2
+  exit 127
+fi
+
+ver="$("$CONAN_BIN" --version 2>/dev/null | tail -1 | awk '{print $3}')"
+case "$ver" in
+  1.*) ;;
+  *)
+    echo "ERROR: ожидался Conan v1, получен '$ver'. Conan 2 из PATH несовместим (кэш ~/.conan2)." >&2
+    exit 1
+    ;;
+esac
+
+exec "$CONAN_BIN" "$@"
