@@ -243,4 +243,68 @@ export function computeMerges(flat, groupCount) {
   return merges
 }
 
+/**
+ * Данные для диаграммы по тем же правилам агрегации, что и таблица (Ф3.2):
+ * категория = xField, необязательная серия = seriesField, значение = aggregate(yField).
+ * Один проход по строкам, без повторных обходов на каждую серию.
+ * @returns {{categories: string[], series: Array<{name: string, data: Array<number|null>}>}}
+ */
+export function aggregateSeries(rows, { xField, seriesField, yField, aggregate = 'sum' }) {
+  const norm = (v) => (v === null || v === undefined || v === '' ? '(пусто)' : String(v))
+  const categories = []
+  const catIndex = new Map()
+  const bySeries = new Map() // имя серии → массив ячеек {sum,count,min,max}
+
+  for (const row of rows) {
+    const x = norm(row[xField])
+    let ci = catIndex.get(x)
+    if (ci === undefined) {
+      ci = categories.length
+      catIndex.set(x, ci)
+      categories.push(x)
+      for (const arr of bySeries.values()) arr.push(null)
+    }
+
+    const name = seriesField ? norm(row[seriesField]) : ''
+    let arr = bySeries.get(name)
+    if (!arr) {
+      arr = new Array(categories.length).fill(null)
+      bySeries.set(name, arr)
+    }
+
+    const v = Number(row[yField])
+    if (!Number.isFinite(v)) continue
+    const cell = arr[ci] ?? { sum: 0, count: 0, min: Infinity, max: -Infinity }
+    cell.sum += v
+    cell.count++
+    if (v < cell.min) cell.min = v
+    if (v > cell.max) cell.max = v
+    arr[ci] = cell
+  }
+
+  const pick = (c) => {
+    if (c === null) return null
+    switch (aggregate) {
+      case 'avg':
+        return c.sum / c.count
+      case 'count':
+        return c.count
+      case 'min':
+        return c.min
+      case 'max':
+        return c.max
+      default:
+        return c.sum
+    }
+  }
+
+  return {
+    categories,
+    series: [...bySeries.entries()].map(([name, arr]) => ({
+      name: name || yField || 'value',
+      data: arr.map(pick)
+    }))
+  }
+}
+
 export default buildTableModel

@@ -86,6 +86,16 @@
       "xField": "region",
       "yField": "amount",
       "aggregate": "sum"
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "pie",
+      "title": "Доля категорий в сумме продаж",
+      "xField": "category",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "half"
     }
   ]
 }

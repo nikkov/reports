@@ -34,10 +34,7 @@
           :height="460"
         />
 
-        <div v-else-if="block.type === 'chart'" class="chart-box">
-          <h2 v-if="block.title">{{ block.title }}</h2>
-          <div :ref="(el) => setChartEl(index, el)" class="chart"></div>
-        </div>
+        <ChartBlock v-else-if="block.type === 'chart'" :block="block" :rows="rows" />
       </section>
     </template>
   </div>
@@ -45,10 +42,10 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import * as echarts from 'echarts'
 import { api } from '../api/client.js'
 import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
+import ChartBlock from './ChartBlock.vue'
 
 const params = new URLSearchParams(location.search)
 const reportId = params.get('report') || 'sales-summary'
@@ -60,7 +57,6 @@ const loading = ref(false)
 const error = ref(null)
 const elapsedMs = ref(0)
 const status = ref('')
-const charts = new Map()
 let controller = null
 
 const rowCount = computed(() => rows.value.length)
@@ -101,7 +97,6 @@ async function load() {
     status.value = 'ok'
     syncUrl()
     await nextTick()
-    renderCharts()
   } catch (e) {
     if (e.name === 'AbortError') return
     error.value = { code: e.code || 'ERROR', message: e.message }
@@ -121,7 +116,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  for (const c of charts.values()) c.dispose()
   if (controller) controller.abort()
 })
 
@@ -140,50 +134,6 @@ function tableColumns(block) {
   }))
 }
 
-// --- диаграммы ---
-
-function setChartEl(index, el) {
-  if (el) charts.set(index, el)
-}
-
-function renderCharts() {
-  for (const block of template.value.blocks) {
-    if (block.type !== 'chart') continue
-    const index = template.value.blocks.indexOf(block)
-    const el = charts.get(index)
-    if (!el) continue
-
-    const agg = new Map()
-    for (const r of rows.value) {
-      const key = String(r[block.xField] ?? '(пусто)')
-      const y = Number(r[block.yField] ?? 0) || 0
-      agg.set(key, (agg.get(key) || 0) + y)
-    }
-    const entries = [...agg.entries()].slice(0, 50)
-
-    let chart = charts.get('inst:' + index)
-    if (!chart) {
-      chart = echarts.init(el)
-      charts.set('inst:' + index, chart)
-    }
-    chart.setOption(
-      {
-        animation: false,
-        grid: { left: 80, right: 24, top: 24, bottom: 40 },
-        tooltip: { trigger: 'axis' },
-        xAxis: { type: 'category', data: entries.map((e) => e[0]) },
-        yAxis: { type: 'value' },
-        series: [{ type: block.chartType === 'pie' ? 'bar' : block.chartType, data: entries.map((e) => e[1]) }]
-      },
-      true
-    )
-    chart.resize()
-  }
-}
-
-watch(paramValues, () => {
-  for (const [, c] of charts) if (c && c.setOption) c.resize()
-})
 </script>
 
 <style>

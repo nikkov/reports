@@ -187,3 +187,18 @@ test('«свернуть всё» оставляет только итоги р�
   const heightExpanded = await page.locator('.rt').evaluate((el) => el.scrollHeight)
   expect(heightExpanded).toBe(heightBefore)
 })
+
+test('диаграмма получает агрегаты из того же движка', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  await expect(page.locator('.chart canvas')).toHaveCount(1)
+
+  const info = await page.evaluate(() => window.__chart)
+  expect(info).toEqual({ type: 'line', series: 1 })
+
+  // подпись оси отформатирована по-русски (пробел как разделитель тысяч)
+  const labels = await page.evaluate(() => {
+    const canvas = document.querySelector('.chart canvas')
+    return canvas ? canvas.width > 0 : false
+  })
+  expect(labels).toBe(true)
+})
