@@ -32,7 +32,7 @@
       <span class="metric">до интерактивности: <b id="m-interactive">{{ interactiveMs }} мс</b></span>
       <span class="metric">DOM-строк: <b id="m-dom">{{ domRows }}</b></span>
       <span v-if="paginate" class="metric">
-        стр. <b>{{ page + 1 }}</b> из <b>{{ view.pages }}</b>
+        стр. <b>{{ page + 1 }}</b> из <b>{{ view.pages }}</b> (по {{ PAGE_SIZE }})
         <button :disabled="page === 0" @click="page--">←</button>
         <button :disabled="page + 1 >= view.pages" @click="page++">→</button>
       </span>
@@ -119,7 +119,7 @@ function rowsFor(m, n) {
   return cache.get(key)
 }
 
-const PAGE_SIZE = 200
+const PAGE_SIZE = Math.min(20000, Math.max(50, Number(params.get('ps') || 200)))
 const paginate = params.get('page') !== '0'
 const page = ref(0)
 
@@ -252,7 +252,6 @@ function renderChart() {
 watch(model, () => nextTick(renderChart))
 
 onMounted(async () => {
-  interactiveMs.value = Math.round(performance.now() - tStart)
   domRows.value = countDomRows()
   try {
     chart = echarts.init(chartRef.value)
@@ -263,6 +262,8 @@ onMounted(async () => {
   await nextTick()
   // setTimeout, а не rAF: в фоновой вкладке rAF троттлится и метрика не выставляется
   setTimeout(() => {
+    // метрика после монтирования и первого рендера таблицы
+    interactiveMs.value = Math.round(performance.now() - tStart)
     domRows.value = countDomRows()
     window.__spike = {
       mergesOn: useMerges,
