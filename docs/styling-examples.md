@@ -112,6 +112,34 @@
 05.03.2026 | Восток | Аксессуары | 58 300 ₽ | 9 675 ₽ | 16,60 %
 ```
 
+## Типографика: разные размеры шрифта и все выравнивания
+
+Шаблон `sales-typography` — размеры отличаются по зонам, выравнивание задано для каждой колонки:
+
+```json
+"styles": {
+  "font": { "family": "Inter", "size": 12 },
+  "layout": { "rowHeight": 26, "headerHeight": 40, "subtotalHeight": 28, "grandtotalHeight": 32,
+              "cellPadding": "4px 10px", "borders": "grid", "numericAlign": "right" },
+  "header":     { "font": { "size": 15, "weight": 700 }, "colors": { "background": "#e8eef8" },
+                  "align": "center", "verticalAlign": "middle" },
+  "body":       { "font": { "size": 12 }, "verticalAlign": "middle" },
+  "subtotal":   { "font": { "size": 13, "weight": 600 }, "colors": { "background": "#f0f4fa" } },
+  "grandtotal": { "font": { "size": 14, "weight": 800 }, "colors": { "background": "#dfe8f5" } },
+  "columns": {
+    "order_date": { "align": "center", "headerAlign": "center" },
+    "region":     { "align": "left",   "headerAlign": "left" },
+    "category":   { "align": "center", "headerAlign": "center" },
+    "product":    { "align": "left",   "headerAlign": "left" },
+    "amount":     { "align": "right",  "headerAlign": "right" },
+    "profit":     { "align": "right",  "headerAlign": "right" }
+  }
+}
+```
+
+Что проверено в браузере: шапка 15 px / 700, тело 12 px, подытог 13 px / 600, итог 14 px / 800;
+дата и категория — по центру, регион и продукт — влево, суммы — вправо; высота шапки 40 px.
+
 ## Ограничения версии 1.1
 
 - высоты фиксированные по зонам: перенос длинного текста и переменная высота строки не поддерживаются

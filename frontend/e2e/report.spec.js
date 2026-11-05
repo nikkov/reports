@@ -460,3 +460,48 @@ test('50 000 строк: виртуализация держит окно, бю�
   await page.waitForTimeout(200)
   expect(await page.locator('.rt-table tbody tr:not(.spacer)').count()).toBeLessThan(60)
 })
+
+test('типографика: размеры шрифта по зонам и все виды выравнивания', async ({ page }) => {
+  await page.goto('/report.html?report=sales-typography')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const info = await page.evaluate(() => {
+    const th = getComputedStyle(document.querySelector('.rt-table th'))
+    const row = document.querySelector('.rt-table tbody tr.detail')
+    const cell = (i) => getComputedStyle(row.children[i])
+    return {
+      headerSize: th.fontSize,
+      headerWeight: th.fontWeight,
+      headerAlign: th.textAlign,
+      bodySize: cell(1).fontSize,
+      regionAlign: cell(0).textAlign,
+      dateAlign: cell(1).textAlign,
+      sumAlign: cell(4).textAlign
+    }
+  })
+
+  expect(info.headerSize).toBe('15px')
+  expect(info.headerWeight).toBe('700')
+  expect(info.headerAlign).toBe('center')
+  expect(info.bodySize).toBe('12px')
+  // все три вида: влево, по центру, вправо
+  expect(info.regionAlign).toBe('left')
+  expect(info.dateAlign).toBe('center')
+  expect(info.sumAlign).toBe('right')
+
+  // размеры подытога и итога отличаются от тела; строки итогов появляются после сворачивания,
+  // а строку ИТОГО достаём прокруткой — витрина виртуализирована
+  await page.getByRole('button', { name: 'Свернуть всё' }).click()
+  await expect(page.locator('tr.subtotal td').first()).toBeVisible()
+  const subtotalSize = await page.evaluate(
+    () => getComputedStyle(document.querySelector('tr.subtotal td')).fontSize
+  )
+  expect(subtotalSize).toBe('13px')
+
+  await page.locator('.rt').evaluate((el) => { el.scrollTop = el.scrollHeight })
+  await expect(page.locator('tr.grandtotal td').first()).toBeVisible()
+  const grandtotalSize = await page.evaluate(
+    () => getComputedStyle(document.querySelector('tr.grandtotal td')).fontSize
+  )
+  expect(grandtotalSize).toBe('14px')
+})
