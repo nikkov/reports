@@ -146,7 +146,12 @@ export function validateTemplate(template) {
     }
 
     if (kind === 'lookup') {
-      if (!src.queryId) errors.push({ path: `${path}.source`, message: 'для source.kind=lookup обязателен queryId' })
+      if (!src.sql) {
+        errors.push({ path: `${path}.source`, message: 'для source.kind=lookup обязателен sql (SQL списка задаётся в шаблоне)' })
+      }
+      if (src.queryId) {
+        errors.push({ path: `${path}.source`, message: 'queryId больше не поддерживается: перенесите SQL в source.sql' })
+      }
       if (src.options) errors.push({ path: `${path}.source`, message: 'lookup и options взаимоисключающие' })
       if (p.type !== 'select') {
         errors.push({ path: `${path}.type`, message: 'параметр со справочником должен иметь type=select' })
@@ -157,14 +162,14 @@ export function validateTemplate(template) {
       if (!src.options || !src.options.length) {
         errors.push({ path: `${path}.source`, message: 'для source.kind=static нужен непустой options' })
       }
-      if (src.queryId) errors.push({ path: `${path}.source`, message: 'static и queryId взаимоисключающие' })
+      if (src.queryId || src.sql) errors.push({ path: `${path}.source`, message: 'static не принимает queryId/sql' })
       if (p.type !== 'select') {
         errors.push({ path: `${path}.type`, message: 'параметр со статическим набором должен иметь type=select' })
       }
     }
 
     if (kind === 'date' || kind === 'datetime') {
-      if (src.queryId || src.options) {
+      if (src.queryId || src.sql || src.options) {
         errors.push({ path: `${path}.source`, message: 'для даты/времени queryId и options недопустимы' })
       }
       if (p.type !== 'date' && p.type !== 'datetime') {

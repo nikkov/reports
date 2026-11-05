@@ -9,7 +9,10 @@
       "type": "select",
       "label": "Регион (справочник, ID→NAME)",
       "required": true,
-      "source": { "kind": "lookup", "queryId": "lookup_regions" }
+      "source": {
+        "kind": "lookup",
+        "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name"
+      }
     },
     {
       "name": "category",
@@ -18,8 +21,8 @@
       "multiple": true,
       "source": {
         "kind": "lookup",
-        "queryId": "lookup_categories_by_region",
-        "dependsOn": "region"
+        "dependsOn": "region",
+        "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1"
       }
     },
     {
@@ -31,8 +34,14 @@
       "source": {
         "kind": "static",
         "options": [
-          { "value": "all", "label": "Все строки" },
-          { "value": "profit_only", "label": "Только прибыльные" }
+          {
+            "value": "all",
+            "label": "Все строки"
+          },
+          {
+            "value": "profit_only",
+            "label": "Только прибыльные"
+          }
         ]
       }
     },
@@ -42,7 +51,9 @@
       "label": "Период с",
       "required": true,
       "default": "2026-01-01",
-      "source": { "kind": "date" }
+      "source": {
+        "kind": "date"
+      }
     },
     {
       "name": "to",
@@ -50,7 +61,9 @@
       "label": "по",
       "required": true,
       "default": "2026-03-31",
-      "source": { "kind": "date" }
+      "source": {
+        "kind": "date"
+      }
     }
   ],
   "datasets": {
@@ -75,11 +88,35 @@
       "dataKey": "sales",
       "grandTotal": true,
       "columns": [
-        { "field": "category", "title": "Категория", "group": true, "subtotal": true },
-        { "field": "product", "title": "Продукт" },
-        { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number" },
-        { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number" },
-        { "title": "Рентабельность", "expression": "sum(profit) / sum(amount)", "format": "percent" }
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "title": "Рентабельность",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent"
+        }
       ]
     },
     {

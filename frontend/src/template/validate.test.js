@@ -120,18 +120,25 @@ describe('validateTemplate', () => {
   it('принимает справочник из БД и каскад от него', () => {
     const t = base()
     t.params = [
-      { name: 'region', type: 'select', source: { kind: 'lookup', queryId: 'lookup_regions' }, required: true },
-      { name: 'category', type: 'select', source: { kind: 'lookup', queryId: 'lookup_categories_by_region', dependsOn: 'region' } }
+      { name: 'region', type: 'select', source: { kind: 'lookup', sql: 'SELECT id::text AS value, name AS label FROM regions' }, required: true },
+      { name: 'category', type: 'select', source: { kind: 'lookup', sql: 'SELECT DISTINCT category AS value, category AS label FROM sales WHERE region_id = :region::int', dependsOn: 'region' } }
     ]
     t.datasets.sales.params = { from: '$region', to: '$region' }
     t.blocks[0].text = 'Регион {{region}}'
     expect(validateTemplate(t).errors).toEqual([])
   })
 
-  it('ловит справочник без queryId', () => {
+  it('ловит справочник без sql', () => {
     const t = base()
     t.params = [{ name: 'region', type: 'select', source: { kind: 'lookup' } }]
     expect(paths(validateTemplate(t))).toContain('params.0.source')
+  })
+
+  it('ловит устаревший queryId в справочнике', () => {
+    const t = base()
+    t.params = [{ name: 'region', type: 'select', source: { kind: 'lookup', queryId: 'lookup_regions' } }]
+    const msgs = validateTemplate(t).errors.map((e) => e.message).join(' ')
+    expect(msgs).toContain('queryId')
   })
 
   it('ловит статический набор без options', () => {

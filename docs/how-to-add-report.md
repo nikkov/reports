@@ -34,31 +34,39 @@ SQL живёт только на сервере (`backend/config/queries.json`),
 
 ### Справочник для параметра (`source.kind = "lookup"`)
 
-Отдельный запрос возвращает **ровно две колонки**: значение и подпись.
+SQL справочника живёт **в шаблоне** (ADR-24), реестр запросов для справочников не используется.
+Запрос обязан вернуть ровно две колонки: `value` (что уходит в основной запрос) и `label` (что видит пользователь).
 
 ```json
 {
-  "lookup_regions": {
-    "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name",
-    "params": {},
-    "columns": { "value": "text", "label": "text" }
+  "name": "region",
+  "type": "select",
+  "label": "Регион",
+  "source": {
+    "kind": "lookup",
+    "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name"
   }
 }
 ```
 
-Каскадный справочник принимает параметр родителя:
+Каскадный справочник принимает параметр родителя; подстановка — как в обычных запросах, через `:name`:
 
 ```json
 {
-  "lookup_categories_by_region": {
+  "name": "category",
+  "type": "select",
+  "label": "Категория",
+  "source": {
+    "kind": "lookup",
     "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1",
-    "params": { "region": { "type": "int", "required": true } },
-    "columns": { "value": "text", "label": "text" }
+    "dependsOn": "region"
   }
 }
 ```
 
-Ответ эндпоинта `GET /api/lookups/{id}` кешируется в памяти на `REP_LOOKUP_TTL_SECONDS` (по умолчанию 60 с).
+Эндпоинт — `GET /api/reports/{reportId}/lookups/{param}?<родитель>=…`. Кэша на сервере нет:
+список кэширует клиент на время сессии, каждый новый запрос идёт в БД. Шаблон, отдаваемый
+браузеру, не содержит `sql` — он вырезается на сервере.
 
 ## 2. Шаблон
 
@@ -164,7 +172,8 @@ REP_E2E=1 ./scripts/check.sh     # всё вместе: conan, запрещён�
 |---|---|
 | `404 REPORT_NOT_FOUND` | шаблон не загружен в БД или бэкенд не перезапущен после push |
 | `422 INVALID_PARAMS` | не передан обязательный параметр, либо значение не того типа (например, `region=abc`) |
-| `404 LOOKUP_NOT_FOUND` | в `source.queryId` указан запрос, которого нет в `queries.json` |
+| `404 LOOKUP_NOT_FOUND` | у параметра нет `source.sql`, либо имя параметра в URL не совпадает с шаблоном |
+| `422 INVALID_PARAMS` на справочнике | не передан параметр родителя, который используется в `sql` через `:name` |
 | `422 ROW_LIMIT` на `report/data` | выборка больше 50 000 строк — сузьте период или добавьте фильтр |
 | `504` | запрос дольше 2 с — нужен индекс или более узкая выборка |
 | пустой список отчётов | `REP_TEMPLATES_SOURCE=db`, а таблица `report_templates` пуста → повторите шаг 4 |

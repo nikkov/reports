@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <cctype>
 #include <chrono>
 #include <map>
 #include <mutex>
@@ -271,64 +272,99 @@ int main() {
             }
             auto resp = HttpResponse::newHttpResponse();
             resp->setContentTypeCode(CT_APPLICATION_JSON);
-            resp->setBody(it->second);
+            // SQL справочников остаётся на сервере: клиенту не нужен и не показывается
+            Json::CharReaderBuilder rb;
+            Json::Value body;
+            std::string errs;
+            std::istringstream in(it->second);
+            if (Json::parseFromStream(rb, in, &body, &errs)) {
+                for (auto &p : body["params"]) {
+                    if (p["source"].isObject()) p["source"].removeMember("sql");
+                }
+                Json::StreamWriterBuilder wb;
+                wb["indentation"] = "";
+                resp->setBody(Json::writeString(wb, body));
+            } else {
+                resp->setBody(it->second);
+            }
             resp->addHeader("Cache-Control", "no-store");
             cb(resp);
         },
         {Get});
 
-    // Кеш справочников (ADR-22): ключ = id + значения параметров, TTL в секундах.
-    struct LookupCache {
-        std::mutex mutex;
-        std::map<std::string, std::pair<std::chrono::steady_clock::time_point, Json::Value>> items;
-    };
-    auto lookupCache = std::make_shared<LookupCache>();
-    const int lookupTtl = std::stoi(rep::envOr("REP_LOOKUP_TTL_SECONDS", "60"));
-
+    // Справочники параметров живут в шаблоне (ADR-24): SQL берётся из source.sql.
+    // Кэша на сервере нет — списки кэширует клиент; защита от тяжёлого SQL — statement_timeout.
     app().registerHandler(
-        "/api/lookups/{id}",
-        [db, &registry, lookupCache, lookupTtl](const HttpRequestPtr &req,
-                                                std::function<void(const HttpResponsePtr &)> &&cb,
-                                                const std::string &id) {
-            const rep::CompiledQuery *query = registry.find(id);
-            if (query == nullptr) {
-                sendError(cb, k404NotFound, "LOOKUP_NOT_FOUND", "справочник '" + id + "' не зарегистрирован");
+        "/api/reports/{reportId}/lookups/{param}",
+        [db, templatesRaw](const HttpRequestPtr &req,
+                           std::function<void(const HttpResponsePtr &)> &&cb,
+                           const std::string &reportId, const std::string &param) {
+            const auto it = templatesRaw.find(reportId);
+            if (it == templatesRaw.end()) {
+                sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
                 return;
             }
 
-            rep::ParamBag bag;
-            for (const auto &d : query->binding) {
-                const std::string &v = req->getParameter(d.name);
-                if (!v.empty()) bag.set(d.name, v);
-            }
-            rep::applyDefaults(query->binding, bag);
-            const std::string err = rep::validateParams(query->binding, bag);
-            if (!err.empty()) {
-                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+            Json::CharReaderBuilder builder;
+            Json::Value body;
+            std::string errs;
+            std::istringstream in(it->second);
+            if (!Json::parseFromStream(builder, in, &body, &errs)) {
+                sendError(cb, k500InternalServerError, "TEMPLATE_BROKEN", "шаблон отчёта не разбирается");
                 return;
             }
 
-            std::string cacheKey = id;
-            std::vector<std::string> values;
-            values.reserve(query->binding.size());
-            for (const auto &d : query->binding) {
-                const auto *v = bag.find(d.name);
-                values.push_back(v != nullptr ? *v : std::string());
-                cacheKey += "\u0001" + d.name + "=" + values.back();
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(lookupCache->mutex);
-                const auto it = lookupCache->items.find(cacheKey);
-                if (it != lookupCache->items.end() && std::chrono::steady_clock::now() < it->second.first) {
-                    cb(jsonResponse(it->second.second));
-                    return;
+            std::string sql;
+            for (const auto &p : body["params"]) {
+                if (p.get("name", Json::Value("")).asString() != param) continue;
+                const Json::Value &src = p["source"];
+                if (src.isObject() && src.get("kind", Json::Value("")).asString() == "lookup") {
+                    sql = src.get("sql", Json::Value("")).asString();
                 }
+            }
+            if (sql.empty()) {
+                sendError(cb, k404NotFound, "LOOKUP_NOT_FOUND",
+                          "у параметра '" + param + "' нет source.sql (SQL справочника задаётся в шаблоне)");
+                return;
+            }
+
+            // ':name' → '$N', значения из query-строки; '::' остаётся кастом типа
+            std::string compiled;
+            std::vector<std::string> values;
+            for (size_t i = 0; i < sql.size();) {
+                const char c = sql[i];
+                if (c == ':') {
+                    if (i + 1 < sql.size() && sql[i + 1] == ':') {
+                        compiled += "::";
+                        i += 2;
+                        continue;
+                    }
+                    size_t j = i + 1;
+                    while (j < sql.size() && (std::isalnum(static_cast<unsigned char>(sql[j])) || sql[j] == '_')) ++j;
+                    const std::string name = sql.substr(i + 1, j - i - 1);
+                    if (name.empty()) {
+                        compiled.push_back(c);
+                        ++i;
+                        continue;
+                    }
+                    const std::string v = req->getParameter(name);
+                    if (v.empty()) {
+                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                  "для справочника нужен параметр '" + name + "'");
+                        return;
+                    }
+                    values.push_back(v);
+                    compiled += "$" + std::to_string(values.size());
+                    i = j;
+                    continue;
+                }
+                compiled.push_back(c);
+                ++i;
             }
 
             runQuery(
-                db, query->sql, values,
-                [cb, lookupCache, lookupTtl, cacheKey](const orm::Result &res) {
+                db, compiled, values,
+                [cb](const orm::Result &res) {
                     Json::Value list(Json::arrayValue);
                     for (const auto &row : res) {
                         const orm::Field v = row[0];
@@ -337,12 +373,6 @@ int main() {
                         item["value"] = v.isNull() ? "" : v.as<std::string>();
                         item["label"] = l.isNull() ? (v.isNull() ? "" : v.as<std::string>()) : l.as<std::string>();
                         list.append(item);
-                    }
-                    {
-                        std::lock_guard<std::mutex> lock(lookupCache->mutex);
-                        lookupCache->items[cacheKey] = {std::chrono::steady_clock::now() +
-                                                            std::chrono::seconds(lookupTtl),
-                                                        list};
                     }
                     cb(jsonResponse(list));
                 },

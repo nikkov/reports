@@ -73,27 +73,6 @@
       "done": "bool"
     }
   },
-  "lookup_regions": {
-    "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name",
-    "params": {},
-    "columns": {
-      "value": "text",
-      "label": "text"
-    }
-  },
-  "lookup_categories_by_region": {
-    "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1",
-    "params": {
-      "region": {
-        "type": "int",
-        "required": true
-      }
-    },
-    "columns": {
-      "value": "text",
-      "label": "text"
-    }
-  },
   "sales_by_region_id": {
     "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = :category) AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id",
     "params": {
@@ -208,22 +187,6 @@
       "requests": "int",
       "failures": "int",
       "avg_ms": "int"
-    }
-  },
-  "lookup_cost_centers": {
-    "sql": "SELECT '' AS value, 'Все центры' AS label UNION ALL SELECT DISTINCT f.cost_center, f.cost_center FROM finance f WHERE f.cost_center IS NOT NULL ORDER BY 2",
-    "params": {},
-    "columns": {
-      "value": "text",
-      "label": "text"
-    }
-  },
-  "lookup_services": {
-    "sql": "SELECT '' AS value, 'Все сервисы' AS label UNION ALL SELECT DISTINCT o.service, o.service FROM ops o ORDER BY 2",
-    "params": {},
-    "columns": {
-      "value": "text",
-      "label": "text"
     }
   }
 }

@@ -155,6 +155,10 @@ export default {
             "dependsOn": {
               "type": "string",
               "minLength": 1
+            },
+            "sql": {
+              "type": "string",
+              "minLength": 1
             }
           }
         },

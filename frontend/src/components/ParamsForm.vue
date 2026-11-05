@@ -72,13 +72,15 @@
 
 <script setup>
 // Параметры отчёта (ADR-22): способ получения задаётся в шаблоне.
-// lookup → GET /api/lookups/{queryId} с кешем в памяти; dependsOn → каскад от родителя.
+// lookup → GET /api/reports/{reportId}/lookups/{param}: SQL берётся из шаблона (ADR-24),
+// кеш — только на клиенте; dependsOn → каскад от родителя.
 // multiple → значение уходит строкой через запятую (в SQL: ANY(string_to_array(:p, ','))).
 import { onMounted, reactive, ref, watch } from 'vue'
 import { api } from '../api/client.js'
 import MultiSelect from './MultiSelect.vue'
 
 const props = defineProps({
+  reportId: { type: String, required: true },
   params: { type: Array, required: true },
   modelValue: { type: Object, required: true },
   loading: { type: Boolean, default: false }
@@ -127,13 +129,13 @@ async function loadOptions(p) {
   }
 
   const query = dep ? { [dep]: props.modelValue[dep] } : {}
-  const key = p.source.queryId + '|' + JSON.stringify(query)
+  const key = props.reportId + '.' + p.name + '|' + JSON.stringify(query)
 
   if (cache.has(key)) {
     fetched[p.name] = cache.get(key)
   } else {
     try {
-      const list = await api.lookups(p.source.queryId, query)
+      const list = await api.lookups(props.reportId, p.name, query)
       cache.set(key, list)
       fetched[p.name] = list
     } catch (e) {

@@ -11,6 +11,7 @@
 
     <ParamsForm
       v-if="template"
+      :report-id="reportId"
       :model-value="paramValues"
       :params="template.params || []"
       :loading="loading"

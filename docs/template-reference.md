@@ -48,8 +48,15 @@
 ### source — способ получения значений
 
 ```json
-{ "kind": "lookup", "queryId": "lookup_regions" }
-{ "kind": "lookup", "queryId": "lookup_categories_by_region", "dependsOn": "region" }
+{
+  "kind": "lookup",
+  "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name"
+}
+{
+  "kind": "lookup",
+  "sql": "SELECT DISTINCT category AS value, category AS label FROM sales WHERE region_id = :region::int ORDER BY 1",
+  "dependsOn": "region"
+}
 { "kind": "static", "options": [{ "value": "all", "label": "Все строки" }] }
 { "kind": "date" }
 ```
@@ -59,10 +66,12 @@
 | `date` | контрол `input[type=date]` | `type` = `date`, без `queryId`/`options` |
 | `datetime` | контрол `input[type=datetime-local]` | `type` = `datetime` |
 | `static` | список из `source.options` | непустой `options`, `type` = `select`, без `queryId` |
-| `lookup` | список из `GET /api/lookups/{queryId}` | обязателен `queryId`, `type` = `select`, без `options` |
+| `lookup` | список из `GET /api/reports/{reportId}/lookups/{param}` | обязателен `sql` (ровно две колонки: `value`, `label`), `type` = `select`, без `options` и `queryId` |
 
 Дополнительно:
 
+- `sql` — текст запроса списка; плейсхолдеры `:name` подставляются из query-строки (binding),
+  клиенту SQL не отдаётся: `GET /api/reports/{id}` вырезает его на сервере.
 - `dependsOn: "<имя>"` — каскад: значение родителя передаётся в запрос справочника как его параметр.
   Родитель обязан быть объявлен **выше** (это же исключает циклы) и не может быть множественным.
 - `multiple: true` — выпадающий список с чекбоксами (`MultiSelect.vue`), наружу значение уходит строкой

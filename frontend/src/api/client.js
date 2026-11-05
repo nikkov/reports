@@ -26,13 +26,17 @@ export const api = {
   health: () => request('/api/health'),
   reports: () => request('/api/reports'),
   template: (id) => request(`/api/reports/${encodeURIComponent(id)}`),
-  lookups: (id, params = {}, signal) => {
+  // справочник параметра: SQL живёт в шаблоне, адрес — отчёт + имя параметра (ADR-24)
+  lookups: (reportId, param, params = {}, signal) => {
     const q = new URLSearchParams()
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
     }
     const suffix = q.toString() ? `?${q}` : ''
-    return request(`/api/lookups/${encodeURIComponent(id)}${suffix}`, { signal })
+    return request(
+      `/api/reports/${encodeURIComponent(reportId)}/lookups/${encodeURIComponent(param)}${suffix}`,
+      { signal }
+    )
   },
   data: (reportId, params, signal) =>
     request('/api/report/data', {

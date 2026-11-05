@@ -8,7 +8,10 @@
       "name": "cost_center",
       "type": "select",
       "label": "Центр затрат",
-      "source": { "kind": "lookup", "queryId": "lookup_cost_centers" }
+      "source": {
+        "kind": "lookup",
+        "sql": "SELECT '' AS value, 'Все центры' AS label UNION ALL SELECT DISTINCT f.cost_center, f.cost_center FROM finance f WHERE f.cost_center IS NOT NULL ORDER BY 2"
+      }
     },
     {
       "name": "from",
@@ -16,7 +19,9 @@
       "label": "Период с",
       "required": true,
       "default": "2025-10-01",
-      "source": { "kind": "date" }
+      "source": {
+        "kind": "date"
+      }
     },
     {
       "name": "to",
@@ -24,27 +29,57 @@
       "label": "по",
       "required": true,
       "default": "2026-02-28",
-      "source": { "kind": "date" }
+      "source": {
+        "kind": "date"
+      }
     }
   ],
   "datasets": {
     "finance": {
       "queryId": "finance_by_cost_center",
-      "params": { "cost_center": "$cost_center", "from": "$from", "to": "$to" }
+      "params": {
+        "cost_center": "$cost_center",
+        "from": "$from",
+        "to": "$to"
+      }
     }
   },
   "blocks": [
-    { "type": "text", "text": "{{cost_center}}. Период: {{from}} — {{to}}" },
+    {
+      "type": "text",
+      "text": "{{cost_center}}. Период: {{from}} — {{to}}"
+    },
     {
       "type": "table",
       "dataKey": "finance",
       "collapsible": true,
       "grandTotal": true,
       "columns": [
-        { "field": "period", "title": "Месяц", "group": true, "subtotal": true, "type": "date" },
-        { "field": "account", "title": "Счёт" },
-        { "field": "plan_amount", "title": "План", "type": "int", "aggregate": "sum", "format": "number" },
-        { "field": "fact_amount", "title": "Факт", "type": "int", "aggregate": "sum", "format": "number" },
+        {
+          "field": "period",
+          "title": "Месяц",
+          "group": true,
+          "subtotal": true,
+          "type": "date"
+        },
+        {
+          "field": "account",
+          "title": "Счёт"
+        },
+        {
+          "field": "plan_amount",
+          "title": "План",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "field": "fact_amount",
+          "title": "Факт",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
         {
           "title": "Отклонение",
           "expression": "sum(fact_amount) - sum(plan_amount)",
