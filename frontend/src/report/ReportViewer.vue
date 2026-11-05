@@ -46,7 +46,7 @@
           :rows="rows"
           :height="460"
           :styles="stylesFor(block)"
-          :virtual="!printMode"
+          :print-mode="printMode"
         />
 
         <ChartBlock v-else-if="block.type === 'chart'" :block="block" :rows="rows" :styles="stylesFor(block)" />

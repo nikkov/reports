@@ -12,6 +12,7 @@
     v-if="styles"
     :styles="styles"
     :virtual="virtual"
+    :print-mode="printMode"
     :rows="view.rows"
     :columns="columns"
     :merges="view.merges"
@@ -25,6 +26,7 @@
   <ReportTable
     v-else
     :virtual="virtual"
+    :print-mode="printMode"
     :rows="view.rows"
     :columns="columns"
     :merges="view.merges"
@@ -52,7 +54,8 @@ const props = defineProps({
   // разрешённые стили шаблона (ADR-23): undefined = вид версии 1.0
   styles: { type: Object, default: null },
   // печать: весь отчёт без виртуализации (ADR-28)
-  virtual: { type: Boolean, default: true }
+  virtual: { type: Boolean, default: true },
+  printMode: { type: Boolean, default: false }
 })
 
 import { columnFormat, formatCell } from './format.js'

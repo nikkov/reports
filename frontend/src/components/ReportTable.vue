@@ -1,5 +1,6 @@
 <template>
-  <div class="rt" :class="['b-' + layout.borders, { zebra: layout.zebra }]" :style="rootStyle" ref="scroller" @scroll="onScroll">
+  <div class="rt-wrap">
+  <div class="rt rt-screen" :class="['b-' + layout.borders, { zebra: layout.zebra }]" :style="rootStyle" ref="scroller" @scroll="onScroll">
     <table class="rt-table" :style="{ tableLayout: layout.tableLayout }">
         <colgroup>
           <col v-for="(c, ci) in columns" :key="c.field || ci" :style="colWidth(ci)" />
@@ -54,6 +55,55 @@
         </tbody>
       </table>
   </div>
+
+    <!-- Печатный слой (ADR-28): та же модель и те же стили, но таблица нарезана на страницы,
+         шапка повторяется, объединения пересчитаны по границам страницы. Виден только в @media print. -->
+    <div v-if="printMode" class="rt-print" :class="['b-' + layout.borders, { zebra: layout.zebra }]" :style="printVars">
+      <table
+        v-for="(chunk, ci) in printChunks"
+        :key="ci"
+        class="rt-table"
+        :style="{ tableLayout: layout.tableLayout }"
+      >
+        <colgroup>
+          <col v-for="(c, x) in columns" :key="c.field || x" :style="colWidth(x)" />
+        </colgroup>
+        <thead>
+          <tr v-for="(row, ri) in headerRows" :key="ri">
+            <th
+              v-for="(cell, x) in row"
+              :key="x"
+              :colspan="cell.colspan || 1"
+              :rowspan="cell.rowspan || 1"
+              :class="{ num: cell.align === 'right' }"
+            >{{ cell.title }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="i in chunkRows(chunk)"
+            :key="i"
+            :class="[rows[i].kind, { stripe: isStripe(i, rows[i]) }]"
+          >
+            <td
+              v-for="cell in printCells(i, chunk)"
+              :key="cell.key"
+              :rowspan="cell.rowspan"
+              :colspan="cell.colspan"
+              :style="cellStyle(cell.col, i, rows[i].kind)"
+              :class="{
+                num: columns[cell.col]?.align === 'right',
+                ctr: columns[cell.col]?.align === 'center',
+                total: rows[i].kind !== 'detail',
+                inherit: cell.inherit,
+                cont: cell.continued
+              }"
+            >{{ pretty(cell.text) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -76,6 +126,8 @@ const props = defineProps({
   groupCount: { type: Number, default: 0 }, // колонки-группы (объединяются)
   height: { type: Number, default: 520 },
   overscan: { type: Number, default: 8 },
+  // печать: включаем печатный слой (ADR-28), экран остаётся виртуализированным
+  printMode: { type: Boolean, default: false },
   // печать: рендерим весь отчёт, без окна виртуализации (ADR-28)
   virtual: { type: Boolean, default: true },
   expanded: { type: Set, default: () => new Set() },
@@ -298,6 +350,100 @@ const runs = computed(() => {
 
 const firstVisibleRel = computed(() => Math.max(0, firstVisible.value - start.value))
 
+// Прогоны групп по всей модели (не по окну): нужны печатному слою.
+const allRuns = computed(() => {
+  const rows = props.rows
+  const count = props.groupCount || 0
+  const byCol = Array.from({ length: count }, () => [])
+  for (let col = 0; col < count; col++) {
+    let i = 0
+    while (i < rows.length) {
+      if (!member(rows[i], col)) {
+        i++
+        continue
+      }
+      const prefix = (rows[i].groupPath || []).slice(0, col + 1).join('\u0001')
+      let j = i + 1
+      while (
+        j < rows.length &&
+        member(rows[j], col) &&
+        (rows[j].groupPath || []).slice(0, col + 1).join('\u0001') === prefix
+      ) {
+        j++
+      }
+      byCol[col].push({ start: i, end: j })
+      i = j
+    }
+  }
+  return byCol
+})
+
+// Высота A4 landscape за вычетом полей и повторяемой шапки — по ней режем страницы.
+const PRINT_PAGE_PX = 660
+const rowsPerChunk = computed(() => {
+  const head = headerRows.value.length * layout.value.headerHeight
+  const row = layout.value.rowHeight || 24
+  return Math.max(6, Math.floor((PRINT_PAGE_PX - head) / row))
+})
+
+const printChunks = computed(() => {
+  const total = props.rows.length
+  const per = rowsPerChunk.value
+  const chunks = []
+  for (let s = 0; s < total; s += per) chunks.push({ start: s, end: Math.min(total, s + per) })
+  return chunks
+})
+
+function chunkRows(chunk) {
+  const out = []
+  for (let i = chunk.start; i < chunk.end; i++) out.push(i)
+  return out
+}
+
+// Ячейки страницы: объединение, начатое на прошлой странице, повторяется в её первой строке
+// с rowspan, обрезанным по границе страницы.
+function printCells(index, chunk) {
+  const row = props.rows[index]
+  if (!row) return []
+  const cells = []
+  for (let col = 0; col < props.columns.length; col++) {
+    const groupCol = col < (props.groupCount || 0) && member(row, col)
+    if (!groupCol) {
+      cells.push({
+        key: col,
+        col,
+        rowspan: 1,
+        colspan: 1,
+        continued: false,
+        text: props.cellText(row, props.columns[col].field),
+        inherit: row.kind === 'subtotal' && col < row.level
+      })
+      continue
+    }
+    const run = allRuns.value[col].find((r) => index >= r.start && index < r.end)
+    if (!run) continue
+    const from = Math.max(run.start, chunk.start)
+    if (index !== from) continue
+    const to = Math.min(run.end, chunk.end)
+    cells.push({
+      key: col,
+      col,
+      rowspan: to - from,
+      colspan: 1,
+      continued: from > run.start,
+      text: props.cellText(props.rows[run.start], props.columns[col].field),
+      inherit: row.kind === 'subtotal' && col < row.level
+    })
+  }
+  return cells
+}
+
+// переменные шаблона без фиксированной высоты: печатный слой течёт по страницам
+const printVars = computed(() => {
+  const { height, ...rest } = rootStyle.value
+  return rest
+})
+
 function cellsAt(index) {
   const row = props.rows[index]
   if (!row) return []
@@ -470,20 +616,32 @@ function cellsAt(index) {
   color: color-mix(in srgb, var(--rt-b-color, #8a94a3) 55%, transparent);
   font-style: italic;
 }
+/* Печатный слой: на экране скрыт, в печати заменяет экранную таблицу целиком. */
+.rt-print {
+  display: none;
+}
+@page {
+  size: A4 landscape;
+  margin: 10mm 8mm;
+}
 @media print {
-  .rt {
-    height: auto !important;
-    overflow: visible !important;
-    /* contain:strict на экране ускоряет окно виртуализации, но при печати схлопывает
-       контейнер в 0 px — браузер тогда не пагинирует таблицу и в PDF её нет */
-    contain: none !important;
-    border: 1px solid #333;
+  .rt-screen {
+    display: none !important;
   }
-  .rt-table thead {
-    position: static;
+  .rt-print {
+    display: block !important;
+    overflow: visible !important;
+    contain: none !important;
+  }
+  .rt-print .rt-table {
+    width: 100%;
+    margin: 0 0 4px;
+  }
+  .rt-print .rt-table thead {
+    position: static !important;
     display: table-header-group;
   }
-  .rt-table tr {
+  .rt-print .rt-table tr {
     break-inside: avoid;
   }
 }

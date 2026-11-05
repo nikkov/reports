@@ -599,40 +599,47 @@ test('экспорт в Excel: файл со шапкой, числами и л�
   expect(ws.properties?.outlineProperties?.summaryBelow).toBe(true)
 })
 
-test('печатный вид: интерфейс скрыт, шапка повторяется, таблица целиком', async ({ page }) => {
-  // диалог печати в тесте не нужен: подменяем его и смотрим на макет
-  await page.addInitScript(() => { window.__printed = 0; window.print = () => { window.__printed++ } })
+test('печатный вид: таблица сразу под заголовком, шапка повторяется, объединения сохранены', async ({ page, context }) => {
+  // печать идёт в этой же вкладке: подменяем диалог и смотрим печатный слой
+  await context.addInitScript(() => { window.__printed = 0; window.print = () => { window.__printed++ } })
   await page.goto('/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
   await expect(page.locator('.meta')).toContainText('строк')
-
   const total = Number((await page.locator('.meta b').first().textContent()).replace(/\s/g, ''))
+  const pagesBefore = context.pages().length
+
   await page.getByRole('button', { name: 'Печать / PDF' }).click()
   await page.waitForFunction(() => window.__printed > 0, null, { timeout: 30000 })
   await page.emulateMedia({ media: 'print' })
 
-  // без окна виртуализации в макете все строки, а контейнер не схлопнут (contain: none)
-  const layout = await page.evaluate(() => {
-    const rt = document.querySelector('.rt')
-    const tb = document.querySelector('.rt-table')
-    return { rows: tb.tBodies[0].rows.length, height: Math.round(rt.getBoundingClientRect().height), contain: getComputedStyle(rt).contain }
-  })
-  // строки данных + подытоги и общий итог
-  expect(layout.rows).toBeGreaterThanOrEqual(total)
-  expect(layout.height).toBeGreaterThan(1000)
-  expect(layout.contain).toBe('none')
-
-  const state = await page.evaluate(() => {
-    const disp = (sel) => {
-      const el = document.querySelector(sel)
-      return el ? getComputedStyle(el).display : 'нет'
+  const doc = await page.evaluate(() => {
+    const layer = document.querySelector('.rt-print')
+    const tables = Array.from(layer.querySelectorAll('table'))
+    const h1 = document.querySelector('h1').getBoundingClientRect()
+    const first = tables[0].getBoundingClientRect()
+    const spans = Array.from(layer.querySelectorAll('td[rowspan]'))
+    return {
+      screen: getComputedStyle(document.querySelector('.rt-screen')).display,
+      tables: tables.length,
+      rows: tables.reduce((sum, t) => sum + t.tBodies[0].rows.length, 0),
+      top: Math.round(first.top),
+      gap: Math.round(first.top - h1.bottom),
+      spans: spans.length,
+      maxSpan: Math.max(...spans.map((td) => td.rowSpan)),
+      chevrons: layer.querySelectorAll('.chev').length
     }
-    const thead = getComputedStyle(document.querySelector('.rt-table thead'))
-    const rt = getComputedStyle(document.querySelector('.rt'))
-    return { params: disp('.params'), tools: disp('.tools'), theadPosition: thead.position, theadDisplay: thead.display, overflow: rt.overflow }
   })
-  expect(state.params).toBe('none')
-  expect(state.tools).toBe('none')
-  expect(state.theadPosition).toBe('static')
-  expect(state.theadDisplay).toBe('table-header-group')
-  expect(state.overflow).toBe('visible')
+
+  // без окон: печать в текущей вкладке
+  expect(context.pages().length).toBe(pagesBefore)
+  expect(doc.screen).toBe('none') // экранная таблица скрыта
+  expect(doc.tables).toBeGreaterThan(1) // страницы печати
+  expect(doc.rows).toBeGreaterThanOrEqual(total)
+  expect(doc.top).toBeLessThan(140) // таблица сразу под заголовком
+  expect(doc.gap).toBeLessThan(60)
+  expect(doc.spans).toBeGreaterThan(10) // объединения сохранены
+  expect(doc.maxSpan).toBeLessThan(40) // и обрезаны по границе страницы
+  expect(doc.chevrons).toBe(0) // «▾» на бумаге не нужен
+
+  const pdf = await page.pdf({ format: 'A4', landscape: true })
+  expect(pdf.length).toBeGreaterThan(10000)
 })
