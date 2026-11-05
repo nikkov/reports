@@ -28,6 +28,8 @@ if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
   exit 1
 fi
 
+# Админка отчётов (ADR-26) включена на локальном стенде; наружу не выставлять.
+export REP_ADMIN="${REP_ADMIN:-1}"
 echo "== бэкенд =="
 ( cd "$ROOT" && REP_PORT="$PORT" ./backend/build/rep > /tmp/rep-backend.log 2>&1 ) &
 BACK_PID=$!

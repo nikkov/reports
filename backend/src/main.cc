@@ -82,6 +82,18 @@ struct TemplateInfo {
     std::map<std::string, std::string> datasetParams;  // имя параметра запроса → "$param" шаблона
 };
 
+
+// Текст ошибки из std::exception_ptr (для ответов админки).
+std::string describeError(const std::exception_ptr &e) {
+    std::string msg = "ошибка выполнения";
+    try {
+        if (e) std::rethrow_exception(e);
+    } catch (const std::exception &ex) {
+        msg = ex.what();
+    }
+    return msg;
+}
+
 bool parseTemplate(const std::string &text, const std::string &fallbackId, TemplateInfo &out) {
     Json::Value root;
     Json::CharReaderBuilder b;
@@ -192,6 +204,411 @@ int main() {
             return 1;
         }
     }
+
+    // --- Администрирование отчётов (ADR-26) ---
+    // Включается только REP_ADMIN=1; иначе маршруты записи отвечают 404.
+    const bool adminEnabled = rep::envOr("REP_ADMIN", "0") == "1";
+    const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
+    std::mutex templatesMutex;
+
+    auto adminGuard = [adminEnabled](std::function<void(const HttpResponsePtr &)> &cb) {
+        if (adminEnabled) return true;
+        sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена: запустите сервис с REP_ADMIN=1");
+        return false;
+    };
+
+    // Разрешён только чтение: админка не должна давать исполнять произвольный SQL под ролью postgres (5.9).
+    auto sqlGuard = [](const std::string &sql, std::string &err) {
+        std::string s;
+        for (char c : sql) {
+            if (!std::isspace(static_cast<unsigned char>(c))) s.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        }
+        if (s.rfind("select", 0) != 0 && s.rfind("with", 0) != 0) {
+            err = "SQL справочника должен начинаться с SELECT или WITH";
+            return false;
+        }
+        if (sql.find(';') != std::string::npos || sql.find("--") != std::string::npos ||
+            sql.find("/*") != std::string::npos) {
+            err = "SQL не может содержать ';', '--' или '/*'";
+            return false;
+        }
+        static const std::vector<std::string> forbidden = {
+            "insert", "update", "delete", "drop", "alter", "create", "truncate",
+            "grant", "revoke", "copy", "merge", "call", "do", "vacuum", "reindex"};
+        for (const auto &word : forbidden) {
+            size_t pos = 0;
+            while ((pos = s.find(word, pos)) != std::string::npos) {
+                const bool leftOk = pos == 0 || !std::isalnum(static_cast<unsigned char>(s[pos - 1]));
+                const bool rightOk = pos + word.size() >= s.size() ||
+                                     !std::isalnum(static_cast<unsigned char>(s[pos + word.size()]));
+                if (leftOk && rightOk) {
+                    err = "SQL содержит запрещённую операцию «" + word + "»";
+                    return false;
+                }
+                pos += word.size();
+            }
+        }
+        return true;
+    };
+
+    // Структурная проверка шаблона на сервере (полная семантика — на клиенте, см. ADR-26).
+    auto validateTemplate = [maxTemplateBytes, &sqlGuard](const std::string &raw, const std::string &urlId,
+                                                          std::string &err) {
+        if (raw.size() > maxTemplateBytes) {
+            err = "шаблон больше " + std::to_string(maxTemplateBytes) + " байт";
+            return false;
+        }
+        Json::CharReaderBuilder rb;
+        Json::Value root;
+        std::string parseErr;
+        std::istringstream in(raw);
+        if (!Json::parseFromStream(rb, in, &root, &parseErr) || !root.isObject()) {
+            err = "шаблон не является JSON-объектом: " + parseErr;
+            return false;
+        }
+        if (root.get("version", Json::Value(0)).asInt() != 1) {
+            err = "version должен быть 1";
+            return false;
+        }
+        if (!urlId.empty() && root.get("id", Json::Value("")).asString() != urlId) {
+            err = "id в шаблоне не совпадает с URL";
+            return false;
+        }
+        if (root.get("title", Json::Value("")).asString().empty()) {
+            err = "title обязателен";
+            return false;
+        }
+        if (!root["blocks"].isArray() || root["blocks"].empty()) {
+            err = "blocks должен быть непустым массивом";
+            return false;
+        }
+        if (!root["params"].isNull() && !root["params"].isArray()) {
+            err = "params должен быть массивом";
+            return false;
+        }
+        if (!root["datasets"].isNull() && !root["datasets"].isObject()) {
+            err = "datasets должен быть объектом";
+            return false;
+        }
+        for (const auto &param : root["params"]) {
+            const Json::Value &source = param["source"];
+            if (!source.isObject() || source.get("kind", Json::Value("")).asString() != "lookup") continue;
+            if (source.isMember("queryId")) {
+                err = "queryId больше не поддерживается: SQL справочника задаётся в source.sql";
+                return false;
+            }
+            const std::string sql = source.get("sql", Json::Value("")).asString();
+            if (sql.empty()) {
+                err = "у справочника " + param.get("name", Json::Value("")).asString() + " нет source.sql";
+                return false;
+            }
+            std::string sqlErr;
+            if (!sqlGuard(sql, sqlErr)) {
+                err = sqlErr;
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // Атомарная замена шаблона в памяти: сначала разбор, потом запись под мьютексом.
+    auto applyTemplateInMemory = [&templates, &templatesRaw, &templatesMutex](const std::string &id,
+                                                                            const std::string &raw,
+                                                                            const std::string &title) {
+        TemplateInfo info;
+        if (!parseTemplate(raw, id, info)) return false;
+        info.id = id;
+        info.title = title;
+        std::lock_guard<std::mutex> lock(templatesMutex);
+        templates[id] = info;
+        templatesRaw[id] = raw;
+        return true;
+    };
+
+    auto dropTemplateFromMemory = [&templates, &templatesRaw, &templatesMutex](const std::string &id) {
+        std::lock_guard<std::mutex> lock(templatesMutex);
+        templates.erase(id);
+        templatesRaw.erase(id);
+    };
+
+    app().registerHandler(
+        "/api/admin/reports",
+        [db, adminEnabled](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена: запустите сервис с REP_ADMIN=1");
+                return;
+            }
+            runQuery(
+                db, "SELECT id, title, char_length(body::text) AS size, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated FROM report_templates ORDER BY id", {},
+                [cb](const orm::Result &res) {
+                    Json::Value list(Json::arrayValue);
+                    for (const auto &row : res) {
+                        Json::Value item;
+                        item["id"] = row["id"].as<std::string>();
+                        item["title"] = row["title"].as<std::string>();
+                        item["size"] = static_cast<Json::UInt64>(row["size"].as<long long>());
+                        item["updated"] = row["updated"].as<std::string>();
+                        list.append(item);
+                    }
+                    cb(jsonResponse(list));
+                },
+                [cb](const std::exception_ptr &e) {
+                    sendError(cb, k500InternalServerError, "ADMIN_LIST_FAILED", describeError(e));
+                });
+        },
+        {Get});
+
+    app().registerHandler(
+        "/api/reports",
+        [db, adminEnabled, maxTemplateBytes, &validateTemplate, &applyTemplateInMemory](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена: запустите сервис с REP_ADMIN=1");
+                return;
+            }
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string id = body->get("id", "").asString();
+            if (id.empty() || !std::isalpha(static_cast<unsigned char>(id[0]))) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_ID", "id задаётся латиницей: ^[a-z][a-z0-9-]*$");
+                return;
+            }
+            for (char c : id) {
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-') {
+                    sendError(cb, k422UnprocessableEntity, "INVALID_ID", "id задаётся латиницей: ^[a-z][a-z0-9-]*$");
+                    return;
+                }
+            }
+            Json::Value tpl = (*body)["body"].isObject() ? (*body)["body"] : Json::Value(Json::objectValue);
+            tpl["id"] = id; // id всегда из URL: «сохранить как» меняет только адрес
+            if (!tpl.isMember("title") && body->isMember("title")) tpl["title"] = (*body)["title"];
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            const std::string raw = Json::writeString(wb, tpl);
+            std::string err;
+            if (!validateTemplate(raw, id, err)) {
+                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", err);
+                return;
+            }
+            const std::string title = tpl.get("title", id).asString();
+
+            runQuery(
+                db, "SELECT 1 FROM report_templates WHERE id = $1", {id},
+                [cb, db, id, raw, title, &applyTemplateInMemory](const orm::Result &res) {
+                    if (!res.empty()) {
+                        sendError(cb, k409Conflict, "REPORT_EXISTS", "отчёт '" + id + "' уже существует");
+                        return;
+                    }
+                    runQuery(
+                        db, "INSERT INTO report_templates (id, title, body, updated_at) VALUES ($1, $2, $3::jsonb, now())",
+                        {id, title, raw},
+                        [cb, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                            if (!applyTemplateInMemory(id, raw, title)) {
+                                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", "шаблон не разбирается");
+                                return;
+                            }
+                            Json::Value out;
+                            out["id"] = id;
+                            out["saved"] = true;
+                            cb(jsonResponse(out));
+                        },
+                        [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "SAVE_FAILED", describeError(e)); });
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "SAVE_FAILED", describeError(e)); });
+        },
+        {Post});
+
+    app().registerHandler(
+        "/api/reports/{id}",
+        [db, adminEnabled, &validateTemplate, &applyTemplateInMemory](const HttpRequestPtr &req,
+                                                                      std::function<void(const HttpResponsePtr &)> &&cb,
+                                                                      const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            Json::Value tpl = (*body)["body"].isObject() ? (*body)["body"] : *body;
+            tpl["id"] = id;
+            if (!tpl.isMember("title") && body->isMember("title")) tpl["title"] = (*body)["title"];
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            const std::string raw = Json::writeString(wb, tpl);
+            std::string err;
+            if (!validateTemplate(raw, id, err)) {
+                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", err);
+                return;
+            }
+            const std::string title = tpl.get("title", id).asString();
+
+            const std::string tag = "$h" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "$";
+            const std::string history =
+                "INSERT INTO report_templates_history (report_id, title, body) "
+                "SELECT id, title, body FROM report_templates WHERE id = " + tag + id + tag + ";";
+            (void)history;
+
+            // 1) снапшот старой версии, 2) обновление, 3) правка памяти
+            runQuery(
+                db,
+                "INSERT INTO report_templates_history (report_id, title, body) "
+                "SELECT id, title, body FROM report_templates WHERE id = $1",
+                {id},
+                [cb, db, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                    runQuery(
+                        db, "UPDATE report_templates SET title = $2, body = $3::jsonb, updated_at = now() WHERE id = $1",
+                        {id, title, raw},
+                        [cb, id, raw, title, &applyTemplateInMemory](const orm::Result &updated) {
+                            if (updated.affectedRows() == 0) {
+                                sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
+                                return;
+                            }
+                            if (!applyTemplateInMemory(id, raw, title)) {
+                                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", "шаблон не разбирается");
+                                return;
+                            }
+                            Json::Value out;
+                            out["id"] = id;
+                            out["saved"] = true;
+                            cb(jsonResponse(out));
+                        },
+                        [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "SAVE_FAILED", describeError(e)); });
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "SAVE_FAILED", describeError(e)); });
+        },
+        {Put});
+
+    app().registerHandler(
+        "/api/reports/{id}",
+        [db, adminEnabled, &dropTemplateFromMemory](const HttpRequestPtr &req,
+                                                    std::function<void(const HttpResponsePtr &)> &&cb,
+                                                    const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            runQuery(
+                db,
+                "INSERT INTO report_templates_history (report_id, title, body) "
+                "SELECT id, title, body FROM report_templates WHERE id = $1",
+                {id},
+                [cb, db, id, &dropTemplateFromMemory](const orm::Result &) {
+                    runQuery(
+                        db, "DELETE FROM report_templates WHERE id = $1", {id},
+                        [cb, id, &dropTemplateFromMemory](const orm::Result &del) {
+                            dropTemplateFromMemory(id);
+                            Json::Value out;
+                            out["id"] = id;
+                            out["deleted"] = del.affectedRows() > 0;
+                            cb(jsonResponse(out));
+                        },
+                        [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "DELETE_FAILED", describeError(e)); });
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "DELETE_FAILED", describeError(e)); });
+        },
+        {Delete});
+
+    app().registerHandler(
+        "/api/reports/{id}/validate",
+        [adminEnabled, &validateTemplate](const HttpRequestPtr &req,
+                                          std::function<void(const HttpResponsePtr &)> &&cb,
+                                          const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            const std::string raw = Json::writeString(wb, (*body)["body"] ? (*body)["body"] : *body);
+            std::string err;
+            Json::Value out;
+            out["ok"] = validateTemplate(raw, id, err);
+            if (!out["ok"].asBool()) out["error"] = err;
+            cb(jsonResponse(out));
+        },
+        {Post});
+
+    app().registerHandler(
+        "/api/admin/reports/{id}/history",
+        [db, adminEnabled](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+                           const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            runQuery(
+                db,
+                "SELECT id, title, char_length(body::text) AS size, to_char(saved_at, 'YYYY-MM-DD HH24:MI:SS') AS saved "
+                "FROM report_templates_history WHERE report_id = $1 ORDER BY id DESC LIMIT 20",
+                {id},
+                [cb](const orm::Result &res) {
+                    Json::Value list(Json::arrayValue);
+                    for (const auto &row : res) {
+                        Json::Value item;
+                        item["id"] = static_cast<Json::UInt64>(row["id"].as<long long>());
+                        item["title"] = row["title"].as<std::string>();
+                        item["size"] = static_cast<Json::UInt64>(row["size"].as<long long>());
+                        item["saved"] = row["saved"].as<std::string>();
+                        list.append(item);
+                    }
+                    cb(jsonResponse(list));
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "HISTORY_FAILED", describeError(e)); });
+        },
+        {Get});
+
+    app().registerHandler(
+        "/api/admin/reports/{id}/rollback/{snapshot}",
+        [db, adminEnabled, &applyTemplateInMemory](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+                                                   const std::string &id, const std::string &snapshot) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            runQuery(
+                db, "SELECT title, body::text AS body FROM report_templates_history WHERE id = $1 AND report_id = $2",
+                {snapshot, id},
+                [cb, db, id, &applyTemplateInMemory](const orm::Result &res) {
+                    if (res.empty()) {
+                        sendError(cb, k404NotFound, "SNAPSHOT_NOT_FOUND", "версия не найдена");
+                        return;
+                    }
+                    const std::string title = res[0]["title"].as<std::string>();
+                    const std::string raw = res[0]["body"].as<std::string>();
+                    runQuery(
+                        db,
+                        "INSERT INTO report_templates_history (report_id, title, body) "
+                        "SELECT id, title, body FROM report_templates WHERE id = $1",
+                        {id},
+                        [cb, db, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                            runQuery(
+                                db, "UPDATE report_templates SET title = $2, body = $3::jsonb, updated_at = now() WHERE id = $1",
+                                {id, title, raw},
+                                [cb, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                                    applyTemplateInMemory(id, raw, title);
+                                    Json::Value out;
+                                    out["id"] = id;
+                                    out["restored"] = true;
+                                    cb(jsonResponse(out));
+                                },
+                                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "ROLLBACK_FAILED", describeError(e)); });
+                        },
+                        [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "ROLLBACK_FAILED", describeError(e)); });
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "ROLLBACK_FAILED", describeError(e)); });
+        },
+        {Post});
 
     app().registerHandler(
         "/api/health",

@@ -41,6 +41,19 @@ CREATE TABLE finance (
 
 CREATE INDEX finance_period_idx ON finance (period);
 
+-- История версий шаблонов (ADR-26): append-only снапшоты при сохранении и удалении.
+CREATE TABLE IF NOT EXISTS report_templates_history (
+    id         bigserial   PRIMARY KEY,
+    report_id  text        NOT NULL,
+    title      text,
+    body       jsonb       NOT NULL,
+    saved_at   timestamptz NOT NULL DEFAULT now(),
+    saved_by   text        NOT NULL DEFAULT 'admin'
+);
+
+CREATE INDEX IF NOT EXISTS report_templates_history_report_idx
+    ON report_templates_history (report_id, id DESC);
+
 CREATE TABLE ops (
     id       bigint  PRIMARY KEY,
     day      date    NOT NULL,
