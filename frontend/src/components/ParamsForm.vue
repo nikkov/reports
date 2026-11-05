@@ -3,21 +3,34 @@
     <label v-for="p in params" :key="p.name" class="field">
       <span class="label">{{ p.label || p.name }}</span>
 
-      <select
-        v-if="p.type === 'select'"
-        :value="modelValue[p.name] ?? ''"
-        @change="update(p.name, $event.target.value)"
-      >
-        <option value="" disabled>—</option>
-        <option v-for="o in p.options || []" :key="o.value" :value="o.value">{{ o.label }}</option>
-      </select>
-
+      <!-- дата / время -->
       <input
-        v-else-if="p.type === 'date'"
-        type="date"
+        v-if="kind(p) === 'date' || kind(p) === 'datetime'"
+        :type="kind(p) === 'date' ? 'date' : 'datetime-local'"
         :value="modelValue[p.name] ?? ''"
         :required="p.required"
         @change="update(p.name, $event.target.value)"
+      />
+
+      <!-- справочник из БД или статический набор -->
+      <select
+        v-else-if="kind(p) === 'lookup' || kind(p) === 'static'"
+        :multiple="!!p.multiple"
+        :size="p.multiple ? Math.min(4, optionsFor(p).length || 1) : 1"
+        :value="modelValue[p.name] ?? (p.multiple ? [] : '')"
+        :disabled="isBlocked(p)"
+        :required="p.required"
+        @change="onSelect(p, $event)"
+      >
+        <option v-if="!p.multiple" value="" disabled>—</option>
+        <option v-for="o in optionsFor(p)" :key="o.value" :value="o.value">{{ o.label }}</option>
+      </select>
+
+      <input
+        v-else-if="p.type === 'bool'"
+        type="checkbox"
+        :checked="modelValue[p.name] === 'true' || modelValue[p.name] === true"
+        @change="update(p.name, $event.target.checked ? 'true' : 'false')"
       />
 
       <input
@@ -30,19 +43,14 @@
       />
 
       <input
-        v-else-if="p.type === 'bool'"
-        type="checkbox"
-        :checked="modelValue[p.name] === 'true' || modelValue[p.name] === true"
-        @change="update(p.name, $event.target.checked ? 'true' : 'false')"
-      />
-
-      <input
         v-else
         type="text"
         :value="modelValue[p.name] ?? ''"
         :required="p.required"
         @change="update(p.name, $event.target.value)"
       />
+
+      <span v-if="errors[p.name]" class="err">{{ errors[p.name] }}</span>
     </label>
 
     <button type="submit" :disabled="loading">{{ loading ? 'загрузка…' : 'Обновить' }}</button>
@@ -50,16 +58,131 @@
 </template>
 
 <script setup>
+// Параметры отчёта (ADR-22): способ получения задаётся в шаблоне.
+// lookup → GET /api/lookups/{queryId} с кешем в памяти; dependsOn → каскад от родителя.
+// multiple → значение уходит строкой через запятую (в SQL: ANY(string_to_array(:p, ','))).
+import { onMounted, reactive, ref, watch } from 'vue'
+import { api } from '../api/client.js'
+
 const props = defineProps({
   params: { type: Array, required: true },
   modelValue: { type: Object, required: true },
   loading: { type: Boolean, default: false }
 })
-const emit = defineEmits(['update:modelValue', 'submit'])
+const emit = defineEmits(['update:modelValue', 'submit', 'labels'])
+
+const fetched = reactive({}) // имя параметра → [{value,label}]
+const errors = reactive({})
+const cache = new Map() // queryId + параметры → список
+
+const kind = (p) =>
+  p.source?.kind || (p.type === 'date' ? 'date' : p.type === 'select' ? 'static' : 'text')
+
+function optionsFor(p) {
+  if (p.source?.kind === 'static') return p.source.options || p.options || []
+  return fetched[p.name] || []
+}
+
+function isBlocked(p) {
+  const dep = p.source?.dependsOn
+  return !!dep && !props.modelValue[dep]
+}
 
 function update(name, value) {
   emit('update:modelValue', { ...props.modelValue, [name]: value })
 }
+
+function onSelect(p, event) {
+  if (p.multiple) {
+    const values = Array.from(event.target.selectedOptions).map((o) => o.value)
+    update(p.name, values.join(','))
+  } else {
+    update(p.name, event.target.value)
+  }
+}
+
+async function loadOptions(p) {
+  if (p.source?.kind !== 'lookup') return
+  const dep = p.source.dependsOn
+  if (dep && !props.modelValue[dep]) {
+    fetched[p.name] = []
+    return
+  }
+
+  const query = dep ? { [dep]: props.modelValue[dep] } : {}
+  const key = p.source.queryId + '|' + JSON.stringify(query)
+
+  if (cache.has(key)) {
+    fetched[p.name] = cache.get(key)
+  } else {
+    try {
+      const list = await api.lookups(p.source.queryId, query)
+      cache.set(key, list)
+      fetched[p.name] = list
+    } catch (e) {
+      errors[p.name] = e.message
+      fetched[p.name] = []
+      return
+    }
+  }
+  delete errors[p.name]
+
+  // автовыбор: default или первое значение, чтобы отчёт строился сразу
+  const list = fetched[p.name]
+  const current = props.modelValue[p.name]
+  const valid = p.multiple
+    ? String(current || '')
+        .split(',')
+        .some((v) => list.some((o) => o.value === v))
+    : list.some((o) => o.value === current)
+
+  if (!valid && list.length) {
+    const fallback = p.default !== undefined ? String(p.default) : list[0].value
+    update(p.name, String(fallback))
+  }
+}
+
+async function initAll() {
+  for (const p of props.params) {
+    if (p.source?.kind === 'static' && !props.modelValue[p.name]) {
+      const first = (p.source.options || p.options || [])[0]
+      if (first) update(p.name, String(first.value))
+    }
+  }
+  for (const p of props.params) await loadOptions(p)
+}
+
+// Подписи выбранных значений: в тексте отчёта пользователь должен видеть NAME, а не ID.
+watch(
+  () => [props.modelValue, { ...fetched }],
+  () => {
+    const labels = {}
+    for (const p of props.params) {
+      const list = optionsFor(p)
+      const raw = String(props.modelValue[p.name] ?? '')
+      const picked = raw
+        .split(',')
+        .filter(Boolean)
+        .map((v) => list.find((o) => String(o.value) === v)?.label ?? v)
+      labels[p.name] = picked.join(', ')
+    }
+    emit('labels', labels)
+  },
+  { deep: true, immediate: true }
+)
+
+onMounted(initAll)
+
+// каскад: смена родителя перезагружает зависимые списки
+watch(
+  () => props.params.map((p) => [p.name, props.modelValue[p.name]]),
+  async () => {
+    for (const p of props.params) {
+      if (p.source?.kind === 'lookup' && p.source.dependsOn) await loadOptions(p)
+    }
+  },
+  { deep: true }
+)
 </script>
 
 <style scoped>
@@ -88,6 +211,12 @@ function update(name, value) {
   border: 1px solid #cfd6de;
   border-radius: 6px;
   min-width: 150px;
+}
+.field select[multiple] {
+  min-height: 66px;
+}
+.err {
+  color: #8c1f1f;
 }
 .params button {
   font: inherit;

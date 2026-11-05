@@ -95,11 +95,16 @@
     }
   },
   "sales_by_region_id": {
-    "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id",
+    "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = :category) AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id",
     "params": {
       "region": {
         "type": "int",
         "required": true
+      },
+      "category": {
+        "type": "text",
+        "required": false,
+        "default": ""
       },
       "from": {
         "type": "date",

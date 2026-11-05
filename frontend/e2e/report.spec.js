@@ -220,3 +220,23 @@ test('скриншот диаграммы стабилен между прого
   await chart.scrollIntoViewIfNeeded()
   await expect(chart).toHaveScreenshot('chart-line.png')
 })
+
+test('параметр-справочник: NAME в интерфейсе, ID в запросе, каскад', async ({ page }) => {
+  await page.goto('/report.html?report=sales-by-region')
+
+  // автовыбор первого региона: в тексте подпись, в URL — id
+  await expect(page.locator('.text')).toContainText('Регион Восток')
+  await expect(page.locator('.params select').nth(0)).toHaveValue('4')
+  // автовыбор применяется асинхронно (справочник + дебаунс), URL обновляется после загрузки
+  await expect.poll(() => page.url()).toContain('region=4')
+
+  // каскадный список категорий заполнен
+  const categories = await page.locator('.params select').nth(1).locator('option').allInnerTexts()
+  expect(categories.length).toBeGreaterThan(1)
+
+  // смена региона: подпись, URL и данные обновляются
+  await page.locator('.params select').nth(0).selectOption('1')
+  await expect(page.locator('.text')).toContainText('Регион Север')
+  await expect.poll(() => page.url()).toContain('region=1')
+  await expect(page.locator('.meta')).toContainText('строк')
+})

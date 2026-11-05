@@ -26,6 +26,14 @@ export const api = {
   health: () => request('/api/health'),
   reports: () => request('/api/reports'),
   template: (id) => request(`/api/reports/${encodeURIComponent(id)}`),
+  lookups: (id, params = {}, signal) => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+    }
+    const suffix = q.toString() ? `?${q}` : ''
+    return request(`/api/lookups/${encodeURIComponent(id)}${suffix}`, { signal })
+  },
   data: (reportId, params, signal) =>
     request('/api/report/data', {
       method: 'POST',

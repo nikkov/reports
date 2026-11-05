@@ -15,6 +15,7 @@
       :params="template.params || []"
       :loading="loading"
       @update:model-value="onParams"
+      @labels="paramLabels = $event"
       @submit="load"
     />
 
@@ -53,6 +54,7 @@ const reportId = params.get('report') || 'sales-summary'
 const template = ref(null)
 const rows = ref([])
 const paramValues = reactive({})
+const paramLabels = ref({})
 const loading = ref(false)
 const error = ref(null)
 const elapsedMs = ref(0)
@@ -93,6 +95,7 @@ async function load() {
   try {
     const data = await api.data(reportId, { ...paramValues }, controller.signal)
     rows.value = data.rows
+    lastLoadedKey = JSON.stringify(paramValues)
     elapsedMs.value = Math.round(performance.now() - started)
     status.value = 'ok'
     syncUrl()
@@ -115,14 +118,32 @@ onMounted(async () => {
   }
 })
 
+// Автовыбор параметра (в т.ч. из справочника) должен сразу строить отчёт: дебаунс на изменение значений.
+let reloadTimer = null
+let lastLoadedKey = ''
+watch(
+  () => ({ ...paramValues }),
+  () => {
+    if (!template.value) return
+    // пропускаем перезагрузку, если значения не изменились с последней загрузки
+    const key = JSON.stringify(paramValues)
+    if (key === lastLoadedKey) return
+    clearTimeout(reloadTimer)
+    reloadTimer = setTimeout(() => load(), 250)
+  },
+  { deep: true }
+)
+
 onBeforeUnmount(() => {
+  clearTimeout(reloadTimer)
   if (controller) controller.abort()
 })
 
 // --- блоки ---
 
 function renderText(text) {
-  return text.replace(/\{\{\s*([a-z][a-z0-9_]*)\s*\}\}/g, (_, name) => paramValues[name] ?? '')
+  // для справочников показываем подпись (NAME), иначе — само значение
+  return text.replace(/\{\{\s*([a-z][a-z0-9_]*)\s*\}\}/g, (_, name) => paramLabels.value[name] || paramValues[name] || '')
 }
 
 function tableColumns(block) {

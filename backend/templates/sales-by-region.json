@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "id": "sales-by-region",
+  "title": "Продажи по региону",
+  "params": [
+    {
+      "name": "region",
+      "type": "select",
+      "label": "Регион",
+      "required": true,
+      "source": { "kind": "lookup", "queryId": "lookup_regions" }
+    },
+    {
+      "name": "category",
+      "type": "select",
+      "label": "Категория",
+      "source": {
+        "kind": "lookup",
+        "queryId": "lookup_categories_by_region",
+        "dependsOn": "region"
+      }
+    },
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": { "kind": "date" }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": { "kind": "date" }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "queryId": "sales_by_region_id",
+      "params": {
+        "region": "$region",
+        "category": "$category",
+        "from": "$from",
+        "to": "$to"
+      }
+    }
+  },
+  "blocks": [
+    { "type": "text", "text": "Регион {{region}}, период {{from}} — {{to}}" },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "grandTotal": true,
+      "columns": [
+        { "field": "category", "title": "Категория", "group": true, "subtotal": true },
+        { "field": "product", "title": "Продукт" },
+        { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number" },
+        { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number" },
+        { "title": "Рентабельность", "expression": "sum(profit) / sum(amount)", "format": "percent" }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "bar",
+      "title": "Сумма по категориям",
+      "xField": "category",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "full"
+    }
+  ]
+}
