@@ -187,10 +187,29 @@
 | `colors` | `text`, `background`, `border` — `#rgb`, `#rrggbb`, `transparent` |
 | `layout` | `rowHeight`, `headerHeight`, `subtotalHeight`, `grandtotalHeight` (16…120), `cellPadding`, `borders` (`none`/`horizontal`/`grid`), `zebra`, `stripeColor`, `tableLayout` (`auto`/`fixed`) |
 | `header` / `body` / `subtotal` / `grandtotal` | стиль зоны: `font`, `colors`, `align`, `verticalAlign`, `padding` |
-| `columns.<field>` | `width` (px или `"20%"`), `minWidth`, `maxWidth`, `align`, `font`, `colors`, `padding` |
+| `columns.<field>` | `width` (px или `"20%"`), `minWidth`, `maxWidth`, `align`, `headerAlign`, `font`, `colors`, `padding`, `format` |
+| `layout.numericAlign` | выравнивание числовых колонок по умолчанию: `right` (по умолчанию), `left`, `center`, `inherit` |
 | `blocks[].styles` | те же ключи, но только для этого блока таблицы |
 
-Примеры: `docs/styling-examples.md`, шаблоны `finance-print` (preset print) и `ops-dark` (preset dark).
+### Форматы чисел и дат
+
+`format` задаётся у колонки (`columns[].format`) или в стиле (`styles.columns.<field>.format`);
+стиль колонки перекрывает колонку. Допустимы строка-псевдоним и объект:
+
+| Параметр | Значения | По умолчанию |
+|---|---|---|
+| `style` | `number`, `integer`, `percent`, `currency`, `date` | `number` |
+| `decimals` | 0…6 | как у Intl (до 3), для `percent` — 1, для `currency` — 2 |
+| `group` | разделитель тысяч (до 3 символов) | неразрывный пробел |
+| `decimal` | десятичный разделитель (1 символ) | `,` |
+| `prefix`, `suffix` | до 4 символов | пусто |
+| `negative` | `minus` или `parentheses` | `minus` |
+
+Примеры: `1356707500 → 1 356 707 500`, `{style:'number', decimals:0, suffix:' ₽'} → 58 300 ₽`,
+`{negative:'parentheses'} → (1 500)`, `0.2054 → 20,5 %`, `2026-03-05 → 05.03.2026`,
+`2026-03-05T14:30 → 05.03.2026 14:30`.
+
+Примеры оформления и форматов: `docs/styling-examples.md`, шаблон `sales-formatted`, шаблоны `finance-print` (preset print) и `ops-dark` (preset dark).
 
 ## Что проверяет валидатор
 

@@ -80,6 +80,38 @@
 Шрифты ограничены списком: `system-ui`, `Inter`, `Roboto`, `Arial`, `Georgia`, `Times New Roman`,
 `Courier New`, `monospace`. Причина — стабильные скриншоты и защита от инъекции CSS.
 
+## Выравнивание и форматы чисел
+
+```json
+"styles": {
+  "layout": { "numericAlign": "right" },
+  "header": { "align": "center" },
+  "columns": {
+    "order_date": { "width": 110, "align": "center", "format": "date" },
+    "amount": {
+      "width": 160, "align": "right", "headerAlign": "right",
+      "format": { "style": "number", "decimals": 0, "group": " ", "suffix": " ₽" }
+    },
+    "profit": {
+      "align": "right", "headerAlign": "right",
+      "format": { "style": "number", "decimals": 0, "negative": "parentheses", "suffix": " ₽" }
+    }
+  }
+}
+```
+
+- `layout.numericAlign` — выравнивание числовых колонок по умолчанию (`right` / `left` / `center` / `inherit`);
+- `header.align` / `columns.<field>.headerAlign` — заголовок можно выровнять иначе, чем данные;
+- `columns.<field>.align` перекрывает всё остальное для своей колонки.
+
+Форматы: `number`, `integer`, `percent`, `currency`, `date` — строкой или объектом с `decimals`,
+`group`, `decimal`, `prefix`, `suffix`, `negative` (`minus` / `parentheses`).
+Готовый пример — шаблон `sales-formatted`:
+
+```
+05.03.2026 | Восток | Аксессуары | 58 300 ₽ | 9 675 ₽ | 16,60 %
+```
+
 ## Ограничения версии 1.1
 
 - высоты фиксированные по зонам: перенос длинного текста и переменная высота строки не поддерживаются

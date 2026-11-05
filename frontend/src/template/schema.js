@@ -218,13 +218,7 @@ export default {
           "minLength": 1
         },
         "format": {
-          "enum": [
-            "number",
-            "percent",
-            "currency",
-            "date",
-            "integer"
-          ]
+          "$ref": "#/$defs/formatSpec"
         },
         "type": {
           "enum": [
@@ -535,6 +529,14 @@ export default {
             "auto",
             "fixed"
           ]
+        },
+        "numericAlign": {
+          "enum": [
+            "right",
+            "left",
+            "center",
+            "inherit"
+          ]
         }
       }
     },
@@ -621,8 +623,76 @@ export default {
         },
         "padding": {
           "$ref": "#/$defs/padding"
+        },
+        "format": {
+          "$ref": "#/$defs/formatSpec"
+        },
+        "headerAlign": {
+          "enum": [
+            "left",
+            "right",
+            "center"
+          ]
         }
       }
+    },
+    "formatObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "style": {
+          "enum": [
+            "number",
+            "integer",
+            "percent",
+            "currency",
+            "date"
+          ]
+        },
+        "decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "group": {
+          "type": "string",
+          "maxLength": 3
+        },
+        "decimal": {
+          "type": "string",
+          "maxLength": 1
+        },
+        "prefix": {
+          "type": "string",
+          "maxLength": 4
+        },
+        "suffix": {
+          "type": "string",
+          "maxLength": 4
+        },
+        "negative": {
+          "enum": [
+            "minus",
+            "parentheses"
+          ]
+        }
+      }
+    },
+    "formatSpec": {
+      "oneOf": [
+        {
+          "enum": [
+            "number",
+            "integer",
+            "percent",
+            "currency",
+            "date"
+          ]
+        },
+        {
+          "$ref": "#/$defs/formatObject"
+        }
+      ]
     }
   }
 }

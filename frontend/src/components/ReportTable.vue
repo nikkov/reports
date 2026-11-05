@@ -35,6 +35,7 @@
                 :style="cellStyle(cell.col)"
                 :class="{
                   num: columns[cell.col]?.align === 'right',
+                  ctr: columns[cell.col]?.align === 'center',
                   total: row.kind !== 'detail',
                   inherit: cell.inherit,
                   cont: cell.continued
@@ -138,7 +139,12 @@ const headerRows = computed(() => {
       runs[l].set(prefix, cell)
       rows[l].push(cell)
     }
-    rows[path.length].push({ title: col.title, colspan: 1, rowspan: depth - path.length, align: col.align })
+    rows[path.length].push({
+      title: col.title,
+      colspan: 1,
+      rowspan: depth - path.length,
+      align: col.headerAlign || col.align
+    })
   }
   return rows
 })
@@ -430,6 +436,10 @@ function cellsAt(index) {
 .rt-table th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+.rt-table td.ctr,
+.rt-table th.ctr {
+  text-align: center;
 }
 .rt.zebra .rt-table tr.detail.stripe td {
   background: var(--rt-stripe, #f7f9fc);

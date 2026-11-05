@@ -89,6 +89,18 @@ function checkStyles(styles, path, knownFields, errors, warnings) {
       message: `высота строки ${rowHeight}px мала для шрифта ${size}px (нужно ≥ ${Math.ceil(size * 1.2)}px)`
     })
   }
+  for (const [field, style] of Object.entries(styles.columns || {})) {
+    const fmt = style.format
+    if (fmt && typeof fmt === 'object') {
+      if (fmt.style === 'date' && fmt.decimals !== undefined) {
+        warnings.push({ path: `${path}.columns.${field}.format`, message: 'decimals не влияет на формат даты' })
+      }
+      if (fmt.style === 'integer' && fmt.decimals !== undefined && fmt.decimals > 0) {
+        warnings.push({ path: `${path}.columns.${field}.format`, message: 'decimals не влияет на целочисленный формат' })
+      }
+    }
+  }
+
   const columns = styles.columns || {}
   for (const [field, style] of Object.entries(columns)) {
     if (knownFields && knownFields.size && !knownFields.has(field)) {

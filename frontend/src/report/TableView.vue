@@ -49,7 +49,7 @@ const props = defineProps({
   styles: { type: Object, default: null }
 })
 
-const nf = new Intl.NumberFormat('ru-RU')
+import { columnFormat, formatCell } from './format.js'
 const collapsed = ref(new Set())
 
 watch(() => props.rows, () => { collapsed.value = new Set() })
@@ -72,14 +72,25 @@ const leaves = computed(() => {
 const leafCols = computed(() => leaves.value.map((l) => l.col))
 
 const columns = computed(() =>
-  leaves.value.map((l, i) => ({
-    field: String(i), // индекс: по нему cellText достаёт значение
-    columnKey: l.col.field, // имя поля: по нему ищутся стили колонки
-    title: l.col.title,
-    headerPath: l.headerPath,
-    width: l.col.width || 150,
-    align: l.col.align || (l.col.aggregate || l.col.expression || l.col.format === 'percent' ? 'right' : 'left')
-  }))
+  leaves.value.map((l, i) => {
+    const styleColumn = props.styles?.columns?.[l.col.field]
+    const numeric = !!(l.col.aggregate || l.col.expression || l.col.format === 'percent' ||
+      (typeof l.col.format === 'object' && l.col.format?.style === 'percent'))
+    const numericAlign = props.styles?.layout?.numericAlign || 'right'
+    const align =
+      styleColumn?.align ||
+      l.col.align ||
+      (numeric && numericAlign !== 'inherit' ? numericAlign : numeric ? 'right' : 'left')
+    return {
+      field: String(i), // индекс: по нему cellText достаёт значение
+      columnKey: l.col.field, // имя поля: по нему ищутся стили колонки
+      title: l.col.title,
+      headerPath: l.headerPath,
+      width: l.col.width || 150,
+      align,
+      headerAlign: styleColumn?.headerAlign || align
+    }
+  })
 )
 
 function flatView() {
@@ -194,28 +205,13 @@ function toggle(path) {
 function formatValue(col, value) {
   if (col.expression && brokenExpr.value.has(col.title)) return '⚠'
   if (value === null || value === undefined || value === '') return col.aggregate || col.expression ? '—' : ''
-  if (col.format === 'percent') {
-    const n = Number(value)
-    return Number.isFinite(n) ? (n * 100).toFixed(col.decimals ?? 1).replace('.', ',') + ' %' : '—'
-  }
-  if (col.type === 'date' || col.format === 'date') {
-    // даты из СУБД приходят как ISO-строки: печатаем в привычном виде 05.03.2026
-    const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/)
-    return m ? `${m[3]}.${m[2]}.${m[1]}` : String(value)
-  }
-  if (col.format === 'number' || col.format === 'integer' || col.aggregate) {
-    const n = Number(value)
-    if (!Number.isFinite(n)) return String(value)
-    // decimals из шаблона: для средних значений важно ограничить дробную часть
-    if (col.decimals !== undefined) {
-      return new Intl.NumberFormat('ru-RU', {
-        minimumFractionDigits: col.decimals,
-        maximumFractionDigits: col.decimals
-      }).format(n)
-    }
-    return nf.format(n)
-  }
-  return String(value)
+  // формат: колонка задаёт, стиль колонки (styles.columns.<field>.format) перекрывает
+  // cellText получает исходную колонку шаблона (у неё есть field), а не обогащённую колонку витрины
+  const styleColumn = props.styles?.columns?.[col.field]
+  const spec = columnFormat(col, styleColumn)
+  if (!spec) return String(value)
+  const text = formatCell(spec.format, spec.decimals, value)
+  return text === null ? '—' : text
 }
 
 function cellText(row, key) {

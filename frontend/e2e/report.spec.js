@@ -416,3 +416,29 @@ test('стили: тёмная тема и зебра применяются к 
   expect(info.plainBg).not.toBe(info.stripeBg)
   expect(info.failuresColor).toBe('rgb(255, 154, 154)')
 })
+
+test('стили: форматы чисел и выравнивание из шаблона', async ({ page }) => {
+  await page.goto('/report.html?report=sales-formatted')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const info = await page.evaluate(() => {
+    const row = document.querySelector('.rt-table tbody tr.detail')
+    const cells = Array.from(row.children).map((td) => td.innerText.trim())
+    const ths = Array.from(document.querySelectorAll('.rt-table thead th'))
+    const align = (el) => getComputedStyle(el).textAlign
+    return {
+      cells,
+      dateAlign: align(row.children[0]),
+      sumAlign: align(row.children[3]),
+      headerDate: align(ths[0]),
+      headerSum: align(ths[3])
+    }
+  })
+
+  expect(info.dateAlign).toBe('center')
+  expect(info.sumAlign).toBe('right')
+  expect(info.headerSum).toBe('right')
+  expect(info.cells[0]).toMatch(/^\d{2}\.\d{2}\.\d{4}$/)
+  expect(info.cells[3]).toMatch(/ ₽$/)
+  expect(info.cells[5]).toMatch(/,\d{2} %$/)
+})
