@@ -73,3 +73,24 @@ test('многоуровневый заголовок: группа «Финан
   // листья под группой остались на своих местах
   await expect(page.locator('.rt-table thead th', { hasText: 'Сумма' })).toHaveCount(1)
 })
+
+test('обе строки заголовка остаются видимыми при прокрутке', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+
+  await page.locator('.rt').evaluate((el) => { el.scrollTop = 20000 })
+  await page.waitForTimeout(300)
+
+  const group = page.locator('.rt-table thead th[colspan="2"]')
+  const leaf = page.locator('.rt-table thead th', { hasText: 'Сумма' })
+  await expect(group).toBeVisible()
+  await expect(leaf).toBeVisible()
+
+  const box = await page.locator('.rt').boundingBox()
+  const groupBox = await group.boundingBox()
+  const leafBox = await leaf.boundingBox()
+  // группа — верхняя строка заголовка, листья — сразу под ней, обе внутри видимой области
+  expect(groupBox.y).toBeGreaterThanOrEqual(box.y - 1)
+  expect(groupBox.y).toBeLessThan(box.y + 30)
+  expect(leafBox.y).toBeGreaterThan(groupBox.y)
+  expect(leafBox.y + leafBox.height).toBeLessThan(box.y + 70)
+})

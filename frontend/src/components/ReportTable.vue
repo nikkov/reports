@@ -100,11 +100,11 @@ const visibleCount = computed(() => Math.ceil(props.height / props.rowHeight))
 
 // Окно начинается ровно с первой видимой строки: тогда серия групп всегда начинается
 // в начале окна и подпись группы не приходится дублировать (иначе съезжает разметка).
-// +26 — высота sticky-заголовка: первая строка окна должна быть видна под ним,
-// иначе подпись группы прячется за заголовком.
-const HEADER_H = 26
+// Первая строка окна должна быть видна под sticky-заголовком, иначе подпись группы
+// прячется за ним. Высота = число строк заголовка × 26 px.
+const headerHeight = computed(() => headerRows.value.length * 26)
 const start = computed(() => {
-  const raw = Math.floor((scrollTop.value + HEADER_H) / props.rowHeight)
+  const raw = Math.floor((scrollTop.value + headerHeight.value) / props.rowHeight)
   return Math.max(0, Math.min(raw, Math.max(0, props.rows.length - 1)))
 })
 
@@ -224,14 +224,21 @@ function cellsAt(index) {
   table-layout: fixed;
   font-size: 13px;
 }
-.rt-table th {
+.rt-table thead {
+  /* sticky на весь блок: иначе вторая строка заголовка (Сумма/Прибыль)
+     перекрывает первую (группу «Финансы») при прокрутке */
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 3;
+}
+.rt-table th {
+  height: 26px;
+  box-sizing: border-box; /* высота ровно 26px: от неё считается смещение окна */
   background: #f2f4f7;
   border-bottom: 1px solid #d8dee6;
   border-right: 1px solid #e6eaef;
-  padding: 6px 8px;
+  padding: 0 8px;
+  line-height: 24px;
   text-align: left;
   font-weight: 600;
   white-space: nowrap;
