@@ -99,6 +99,8 @@ export async function buildWorkbook({ block, rows, styles, params = {}, labels =
   const wb = new ExcelJS.Workbook()
   wb.creator = 'Сервер отчётов'
   wb.created = new Date()
+  // Excel-структура: уровни группировки дают те же сворачивания, что и на экране
+  wb.properties = { ...(wb.properties || {}) }
   const ws = wb.addWorksheet(sheetName(block.title || meta.title || 'Отчёт'), {
     views: [{ state: 'frozen', ySplit: Math.max(1, Math.max(...leaves.map((l) => l.headerPath.length)) + 1) }]
   })
@@ -213,6 +215,21 @@ export async function buildWorkbook({ block, rows, styles, params = {}, labels =
       }
     }
   }
+
+  // outline: детальные строки — внутри групп, подытог группы уровня L — на уровень L.
+  // Глубину берём по фактическим подытогам: если подытоги только у верхней группы,
+  // детали идут уровнем 1 (а не «висящим» вторым уровнем без родителя).
+  ws.properties.outlineProperties = { summaryBelow: true, summaryRight: false }
+  const subtotalDepth = model.rows.reduce(
+    (max, row) => (row.kind === 'subtotal' ? Math.max(max, Number(row.level || 0) + 1) : max),
+    0
+  )
+  const detailLevel = Math.min(7, Math.max(1, subtotalDepth))
+  model.rows.forEach((row, ri) => {
+    const level = row.kind === 'detail' ? detailLevel : Math.max(0, Number(row.level || 0))
+    if (level > 0) ws.getRow(depth + ri + 1).outlineLevel = level // Excel поддерживает 7 уровней
+  })
+  ws.properties.outlineProperties = { summaryBelow: true, summaryRight: false }
 
   ws.autoFilter = { from: { row: depth, column: 1 }, to: { row: depth, column: columns.length } }
 

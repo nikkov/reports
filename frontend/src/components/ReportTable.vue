@@ -474,6 +474,9 @@ function cellsAt(index) {
   .rt {
     height: auto !important;
     overflow: visible !important;
+    /* contain:strict на экране ускоряет окно виртуализации, но при печати схлопывает
+       контейнер в 0 px — браузер тогда не пагинирует таблицу и в PDF её нет */
+    contain: none !important;
     border: 1px solid #333;
   }
   .rt-table thead {

@@ -586,12 +586,35 @@ test('экспорт в Excel: файл со шапкой, числами и л�
   expect(numbers).toBeGreaterThan(5)
   expect(percents).toBeGreaterThan(0)
   expect(ws.rowCount).toBeGreaterThan(20)
+
+  // сворачивание: детальные строки внутри групп получают уровень структуры Excel
+  let outlined = 0
+  ws.eachRow((row) => { if (row.outlineLevel) outlined++ })
+  expect(outlined).toBeGreaterThan(10)
+  expect(ws.properties?.outlineProperties?.summaryBelow).toBe(true)
 })
 
-test('печатный вид: интерфейс скрыт, шапка повторяется', async ({ page }) => {
+test('печатный вид: интерфейс скрыт, шапка повторяется, таблица целиком', async ({ page }) => {
+  // диалог печати в тесте не нужен: подменяем его и смотрим на макет
+  await page.addInitScript(() => { window.__printed = 0; window.print = () => { window.__printed++ } })
   await page.goto('/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
   await expect(page.locator('.meta')).toContainText('строк')
+
+  const total = Number((await page.locator('.meta b').first().textContent()).replace(/\s/g, ''))
+  await page.getByRole('button', { name: 'Печать / PDF' }).click()
+  await page.waitForFunction(() => window.__printed > 0, null, { timeout: 30000 })
   await page.emulateMedia({ media: 'print' })
+
+  // без окна виртуализации в макете все строки, а контейнер не схлопнут (contain: none)
+  const layout = await page.evaluate(() => {
+    const rt = document.querySelector('.rt')
+    const tb = document.querySelector('.rt-table')
+    return { rows: tb.tBodies[0].rows.length, height: Math.round(rt.getBoundingClientRect().height), contain: getComputedStyle(rt).contain }
+  })
+  // строки данных + подытоги и общий итог
+  expect(layout.rows).toBeGreaterThanOrEqual(total)
+  expect(layout.height).toBeGreaterThan(1000)
+  expect(layout.contain).toBe('none')
 
   const state = await page.evaluate(() => {
     const disp = (sel) => {

@@ -10,7 +10,9 @@
           <button type="button" class="tool" :disabled="!tableBlock || exporting" @click="exportExcel">
             {{ exporting ? 'Готовим файл…' : 'Excel' }}
           </button>
-          <button type="button" class="tool" :disabled="!tableBlock" @click="printReport">Печать / PDF</button>
+          <button type="button" class="tool" :disabled="!tableBlock || printing" @click="printReport">
+            {{ printing ? 'Готовим печать…' : 'Печать / PDF' }}
+          </button>
         </div>
       </div>
     </header>
@@ -194,7 +196,9 @@ onBeforeUnmount(() => {
 const tableBlock = computed(() => (template.value?.blocks || []).find((b) => b.type === 'table'))
 const printMode = ref(false)
 const exporting = ref(false)
-const PRINT_LIMIT = 20000
+const printing = ref(false)
+// Печать строит полный DOM: при большом объёме браузер «вешается» на секунды, поэтому лимит скромный.
+const PRINT_LIMIT = 5000
 
 async function exportExcel() {
   const block = tableBlock.value
@@ -227,17 +231,27 @@ async function exportExcel() {
 }
 
 async function printReport() {
+  if (printing.value) return
   if (rows.value.length > PRINT_LIMIT) {
     error.value = {
       code: 'PRINT_LIMIT',
-      message: `в отчёте ${rows.value.length} строк: печать ограничена ${PRINT_LIMIT}. Выгрузите в Excel`
+      message: `в отчёте ${rows.value.length} строк: печать рассчитана на ${PRINT_LIMIT}. Для больших отчётов используйте Excel`
     }
     return
   }
+  printing.value = true
   printMode.value = true
-  await nextTick()
-  window.addEventListener('afterprint', () => { printMode.value = false }, { once: true })
-  window.print()
+  try {
+    // Ключевой момент: window.print() снимает уже отрисованный макет. Без ожидания кадра
+    // в PDF попадали диаграммы (canvas готов сразу) и пустое место вместо таблицы.
+    await nextTick()
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    await new Promise((resolve) => setTimeout(resolve, 250)) // запас на снятие снапшота раскладки
+    window.addEventListener('afterprint', () => { printMode.value = false }, { once: true })
+    window.print()
+  } finally {
+    printing.value = false
+  }
 }
 
 // Стили блока считаются один раз: слияние пресета, шаблона и блока не должно идти на каждый кадр.
