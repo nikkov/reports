@@ -38,7 +38,7 @@
                 <span v-if="cell.toggle" class="chev"            @click.stop="handleToggle(cell.toggle)">{{
                   cell.expanded ? '▾' : '▸'
                 }}</span>
-                {{ cell.text }}
+                {{ pretty(cell.text) }}
               </td>
             </template>
           </tr>
@@ -51,6 +51,12 @@
 </template>
 
 <script setup>
+// Подписи групп и ячеек с датой: ISO → 05.03.2026 (модель хранит исходные значения).
+function pretty(value) {
+  // подписи бывают с префиксом («Итого 2025-10-01»), поэтому заменяем ISO-дату в любом месте строки
+  return String(value ?? '').replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (_, y, m, d) => `${d}.${m}.${y}`)
+}
+
 // Свой рендерер таблицы отчёта (ADR-20): нативная <table>, объединения из модели,
 // витрина по фиксированной высоте строки. Никаких сторонних табличных библиотек.
 import { computed, ref } from 'vue'

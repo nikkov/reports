@@ -3,6 +3,8 @@
 // всё, включая объединения, выводится из массива строк.
 import { evaluate } from './expr.js'
 
+const FUNCS = new Set(['sum', 'avg', 'min', 'max', 'count', 'countDistinct'])
+
 const SEP = '\u0001'
 
 function isNullKey(v) {
@@ -214,6 +216,25 @@ export function buildTableModel(rows, columns, opts = {}) {
  * среди детальных строк. Строки подытогов и итога исключены — иначе подпись «Итого …»
  * исчезает под объединённой ячейкой.
  */
+/**
+ * Значение выражения в контексте одной строки (плоская таблица без группировки).
+ * Агрегат по одной строке равен её значению; null-значение даёт null (как в группе).
+ */
+export function evaluateRowExpression(expression, row) {
+  const acc = {}
+  for (const m of String(expression).matchAll(/[a-zA-Z_][a-zA-Z0-9_]*/g)) {
+    const name = m[0]
+    if (FUNCS.has(name) || acc[name]) continue
+    const raw = row?.[name]
+    const v = Number(raw)
+    acc[name] =
+      raw === null || raw === undefined || raw === '' || !Number.isFinite(v)
+        ? { sum: 0, count: 0, min: null, max: null, distinct: 0 }
+        : { sum: v, count: 1, min: v, max: v, distinct: 1 }
+  }
+  return evalExpression(expression, row, acc)
+}
+
 export function computeMerges(flat, groupCount) {
   const merges = []
   // строка итога уровня L участвует в объединениях колонок выше L (её предки),

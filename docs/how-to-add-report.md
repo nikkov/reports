@@ -143,7 +143,8 @@ open "http://127.0.0.1:5173/report.html?report=<id>"        # сам отчёт
 ```bash
 curl -s localhost:8080/api/reports | python3 -m json.tool | head -20
 curl -s "localhost:8080/api/lookups/lookup_regions"
-curl -s "localhost:8080/api/report/data?id=<id>&region=1&from=2026-01-01&to=2026-03-31" | head -c 500
+curl -s -X POST localhost:8080/api/report/data -H 'Content-Type: application/json' \
+  -d '{"reportId":"<id>","params":{"region":"1","from":"2026-01-01","to":"2026-03-31"}}' | head -c 500
 ```
 
 ## 7. Тесты

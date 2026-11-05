@@ -268,9 +268,11 @@ export function validateTemplate(template) {
       if (known.size) {
         for (const field of ['xField', 'yField']) {
           if (!known.has(block[field])) {
-            errors.push({
+            // диаграмма читает сырые строки набора и не обязана совпадать с колонками таблицы,
+            // поэтому это предупреждение (опечатка), а не ошибка
+            warnings.push({
               path: `${base}.${field}`,
-              message: `поле «${block[field]}» отсутствует в таблице этого набора данных`
+              message: `поле «${block[field]}» не встречается в колонках таблицы этого набора — проверьте имя`
             })
           }
         }

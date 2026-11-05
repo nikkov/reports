@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTableModel, computeMerges } from './group.js'
+import { buildTableModel, computeMerges, evaluateRowExpression } from './group.js'
 
 //             0          1           2          3        4        5
 const columns = [
@@ -110,5 +110,19 @@ describe('computeMerges', () => {
     ]
     const merges = computeMerges(flat, 2)
     expect(merges).toEqual([{ row: 0, col: 0, rowspan: 1, colspan: 1 }].filter(() => false))
+  })
+})
+
+describe('evaluateRowExpression (плоская таблица)', () => {
+  it('считает агрегат по одной строке как значение этой строки', () => {
+    const row = { amount: 1000, profit: 250 }
+    expect(evaluateRowExpression('sum(profit) / sum(amount)', row)).toBeCloseTo(0.25)
+    expect(evaluateRowExpression('sum(amount) - sum(profit)', row)).toBe(750)
+    expect(evaluateRowExpression('count(amount)', row)).toBe(1)
+  })
+
+  it('даёт null для пустого поля и при делении на ноль', () => {
+    expect(evaluateRowExpression('sum(profit) / sum(amount)', { amount: 0, profit: 10 })).toBeNull()
+    expect(evaluateRowExpression('sum(profit) / sum(amount)', { amount: 100, profit: null })).toBeNull()
   })
 })

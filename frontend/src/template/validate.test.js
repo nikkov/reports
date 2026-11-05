@@ -76,10 +76,12 @@ describe('validateTemplate', () => {
     expect(res.errors.length).toBeGreaterThan(0)
   })
 
-  it('ловит диаграмму по отсутствующему полю', () => {
+  it('предупреждает (но не валит) диаграмму по отсутствующему в таблице полю', () => {
     const t = base()
     t.blocks[2].yField = 'total'
-    expect(paths(validateTemplate(t))).toContain('blocks.2.yField')
+    const res = validateTemplate(t)
+    expect(res.errors).toEqual([])
+    expect(res.warnings.map((w) => w.path)).toContain('blocks.2.yField')
   })
 
   it('ловит необъявленный параметр в тексте блока', () => {

@@ -20,7 +20,7 @@
 // Табличный блок отчёта: одна точка, где шаблон превращается в строки витрины.
 import { computed, ref, watch } from 'vue'
 import ReportTable from '../components/ReportTable.vue'
-import { buildTableModel } from '../engine/group.js'
+import { buildTableModel, evaluateRowExpression } from '../engine/group.js'
 import { evaluate } from '../engine/expr.js'
 
 const props = defineProps({
@@ -75,7 +75,10 @@ function flatView() {
     }
   }
 
-  const values = props.rows.map((r) => cols.map((c) => (c.field ? r[c.field] : null)))
+  // вычисляемые колонки считаются и в плоском режиме: агрегат по одной строке = её значение
+  const values = props.rows.map((r) =>
+    cols.map((c) => (c.expression ? evaluateRowExpression(c.expression, r) : c.field ? r[c.field] : null))
+  )
   const out = values.map((v) => ({ kind: 'detail', level: -1, groupPath: [], values: v }))
 
   if (props.block.grandTotal !== false) {
@@ -158,9 +161,22 @@ function formatValue(col, value) {
     const n = Number(value)
     return Number.isFinite(n) ? (n * 100).toFixed(col.decimals ?? 1).replace('.', ',') + ' %' : '—'
   }
+  if (col.type === 'date' || col.format === 'date') {
+    // даты из СУБД приходят как ISO-строки: печатаем в привычном виде 05.03.2026
+    const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/)
+    return m ? `${m[3]}.${m[2]}.${m[1]}` : String(value)
+  }
   if (col.format === 'number' || col.format === 'integer' || col.aggregate) {
     const n = Number(value)
-    return Number.isFinite(n) ? nf.format(n) : String(value)
+    if (!Number.isFinite(n)) return String(value)
+    // decimals из шаблона: для средних значений важно ограничить дробную часть
+    if (col.decimals !== undefined) {
+      return new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: col.decimals,
+        maximumFractionDigits: col.decimals
+      }).format(n)
+    }
+    return nf.format(n)
   }
   return String(value)
 }

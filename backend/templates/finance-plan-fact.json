@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "id": "finance-plan-fact",
+  "title": "Финансы: план и факт по центрам затрат",
+  "description": "Помесячное исполнение бюджета: план, факт, отклонение и процент исполнения по счетам.",
+  "params": [
+    {
+      "name": "cost_center",
+      "type": "select",
+      "label": "Центр затрат",
+      "source": { "kind": "lookup", "queryId": "lookup_cost_centers" }
+    },
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2025-10-01",
+      "source": { "kind": "date" }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-02-28",
+      "source": { "kind": "date" }
+    }
+  ],
+  "datasets": {
+    "finance": {
+      "queryId": "finance_by_cost_center",
+      "params": { "cost_center": "$cost_center", "from": "$from", "to": "$to" }
+    }
+  },
+  "blocks": [
+    { "type": "text", "text": "{{cost_center}}. Период: {{from}} — {{to}}" },
+    {
+      "type": "table",
+      "dataKey": "finance",
+      "collapsible": true,
+      "grandTotal": true,
+      "columns": [
+        { "field": "period", "title": "Месяц", "group": true, "subtotal": true, "type": "date" },
+        { "field": "account", "title": "Счёт" },
+        { "field": "plan_amount", "title": "План", "type": "int", "aggregate": "sum", "format": "number" },
+        { "field": "fact_amount", "title": "Факт", "type": "int", "aggregate": "sum", "format": "number" },
+        {
+          "title": "Отклонение",
+          "expression": "sum(fact_amount) - sum(plan_amount)",
+          "format": "number",
+          "width": 130
+        },
+        {
+          "title": "Исполнение",
+          "expression": "sum(fact_amount) / sum(plan_amount)",
+          "format": "percent",
+          "decimals": 1,
+          "width": 120
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "finance",
+      "chartType": "bar",
+      "title": "Факт по счетам",
+      "xField": "account",
+      "yField": "fact_amount",
+      "aggregate": "sum",
+      "width": "full"
+    }
+  ]
+}

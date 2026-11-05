@@ -44,7 +44,7 @@ SELECT i,
        (ARRAY['api','web','etl','auth','billing','search'])[1 + (i * 5) % 6],
        CASE WHEN i % 53 = 0 THEN NULL ELSE 'Team-' || (1 + (i * 3) % 4) END,
        100 + (i * 37) % 900,
-       (i * 7) % 12,
+       (i * 7 + (i % 97)) % 12,
        50 + (i * 13) % 400
 FROM generate_series(1, 540) AS g(i);
 

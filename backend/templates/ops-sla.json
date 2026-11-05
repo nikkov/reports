@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "id": "ops-sla",
+  "title": "Операции: нагрузка и отказы по сервисам",
+  "description": "Двухуровневая группировка сервис → команда, доля отказов, среднее время ответа, динамика по дням.",
+  "params": [
+    {
+      "name": "service",
+      "type": "select",
+      "label": "Сервис",
+      "source": { "kind": "lookup", "queryId": "lookup_services" }
+    },
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": { "kind": "date" }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": { "kind": "date" }
+    }
+  ],
+  "datasets": {
+    "ops": {
+      "queryId": "ops_by_service",
+      "params": { "service": "$service", "from": "$from", "to": "$to" }
+    }
+  },
+  "blocks": [
+    { "type": "text", "text": "{{service}}. Период: {{from}} — {{to}}" },
+    {
+      "type": "table",
+      "dataKey": "ops",
+      "collapsible": true,
+      "grandTotal": true,
+      "nullText": "нет данных",
+      "columns": [
+        { "field": "service", "title": "Сервис", "group": true, "subtotal": true },
+        { "field": "team", "title": "Команда", "group": true, "subtotal": true },
+        { "field": "requests", "title": "Запросы", "type": "int", "aggregate": "sum", "format": "number" },
+        { "field": "failures", "title": "Отказы", "type": "int", "aggregate": "sum", "format": "number" },
+        {
+          "title": "Доля отказов",
+          "expression": "sum(failures) / sum(requests)",
+          "format": "percent",
+          "decimals": 2,
+          "width": 130
+        },
+        { "field": "avg_ms", "title": "Среднее, мс", "type": "int", "aggregate": "avg", "decimals": 0, "width": 120 }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "ops",
+      "chartType": "line",
+      "title": "Запросы по дням",
+      "xField": "day",
+      "yField": "requests",
+      "aggregate": "sum",
+      "width": "full"
+    },
+    {
+      "type": "chart",
+      "dataKey": "ops",
+      "chartType": "bar",
+      "title": "Отказы по сервисам в разрезе команд",
+      "xField": "service",
+      "yField": "failures",
+      "seriesField": "team",
+      "aggregate": "sum",
+      "width": "full"
+    }
+  ]
+}

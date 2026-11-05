@@ -158,5 +158,72 @@
       "profit": "int",
       "order_date": "date"
     }
+  },
+  "finance_by_cost_center": {
+    "sql": "SELECT f.period, f.cost_center, f.account, f.plan_amount, f.fact_amount FROM finance f WHERE f.period >= :from::date AND f.period <= :to::date AND (:cost_center = '' OR f.cost_center = :cost_center) ORDER BY f.period, f.account, f.id",
+    "params": {
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      },
+      "cost_center": {
+        "type": "text",
+        "required": false,
+        "default": ""
+      }
+    },
+    "columns": {
+      "period": "date",
+      "cost_center": "text",
+      "account": "text",
+      "plan_amount": "int",
+      "fact_amount": "int"
+    }
+  },
+  "ops_by_service": {
+    "sql": "SELECT o.day, o.service, o.team, o.requests, o.failures, o.avg_ms FROM ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) ORDER BY o.day, o.service, o.id",
+    "params": {
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      },
+      "service": {
+        "type": "text",
+        "required": false,
+        "default": ""
+      }
+    },
+    "columns": {
+      "day": "date",
+      "service": "text",
+      "team": "text",
+      "requests": "int",
+      "failures": "int",
+      "avg_ms": "int"
+    }
+  },
+  "lookup_cost_centers": {
+    "sql": "SELECT '' AS value, 'Все центры' AS label UNION ALL SELECT DISTINCT f.cost_center, f.cost_center FROM finance f WHERE f.cost_center IS NOT NULL ORDER BY 2",
+    "params": {},
+    "columns": {
+      "value": "text",
+      "label": "text"
+    }
+  },
+  "lookup_services": {
+    "sql": "SELECT '' AS value, 'Все сервисы' AS label UNION ALL SELECT DISTINCT o.service, o.service FROM ops o ORDER BY 2",
+    "params": {},
+    "columns": {
+      "value": "text",
+      "label": "text"
+    }
   }
 }

@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "id": "sales-detail",
+  "title": "Продажи: детальный реестр за период",
+  "description": "Плоская таблица без группировки (быстрый путь рендера) с общим итогом и долей категорий на круговой диаграмме.",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": { "kind": "date" }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": { "kind": "date" }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "queryId": "sales_by_region",
+      "params": { "from": "$from", "to": "$to" }
+    }
+  },
+  "blocks": [
+    { "type": "text", "text": "Реестр строк продаж за {{from}} — {{to}}" },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "grandTotal": true,
+      "nullText": "—",
+      "columns": [
+        { "field": "order_date", "title": "Дата", "type": "date", "width": 110 },
+        { "field": "region", "title": "Регион", "width": 110 },
+        { "field": "category", "title": "Категория", "width": 150 },
+        { "field": "product", "title": "Продукт" },
+        { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number", "width": 130 },
+        { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number", "width": 130 },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "decimals": 2,
+          "width": 100
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "pie",
+      "title": "Доли категорий в сумме",
+      "xField": "category",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "half"
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "line",
+      "title": "Сумма по дням",
+      "xField": "order_date",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "half"
+    }
+  ]
+}

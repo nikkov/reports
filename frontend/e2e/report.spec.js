@@ -277,11 +277,14 @@ test('демо параметров: мультивыбор-дропдаун с 
   await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThanOrEqual(rowsFiltered)
 })
 
-test('список отчётов: карточки, поиск, переход в отчёт', async ({ page }) => {
+test('список отчётов: карточки, поиск, переход в отчёт', async ({ page, request }) => {
+  const list = await (await request.get('/api/reports')).json()
+  const total = list.length
+
   await page.goto('/')
   await expect(page.locator('h1')).toHaveText('Сервер отчётов')
-  await expect(page.locator('.card')).toHaveCount(3)
-  await expect(page.locator('.count')).toHaveText('3 из 3')
+  await expect(page.locator('.card')).toHaveCount(total)
+  await expect(page.locator('.count')).toHaveText(`${total} из ${total}`)
 
   // состав параметров виден на карточке
   const badges = await page.locator('[data-report=params-demo] .badge').allInnerTexts()
@@ -289,14 +292,14 @@ test('список отчётов: карточки, поиск, переход 
   expect(badges.join(' ')).toContain('справочник')
 
   // поиск по названию и по id
-  await page.locator('.tools input').fill('регион')
+  await page.locator('.tools input').fill('по региону')
   await expect(page.locator('.card')).toHaveCount(1)
   await page.locator('.tools input').fill('sales-summary')
   await expect(page.locator('.card')).toHaveCount(1)
   await page.locator('.tools input').fill('неттакого')
   await expect(page.locator('.muted')).toContainText('не найдено')
   await page.locator('.tools input').fill('')
-  await expect(page.locator('.card')).toHaveCount(3)
+  await expect(page.locator('.card')).toHaveCount(total)
 
   // переход в отчёт
   await page.locator('[data-report=sales-summary] .open').click()
@@ -311,3 +314,18 @@ async function waitRows(page) {
   await expect(page.locator('.rt-table tbody tr:not(.spacer)').first()).toBeVisible()
   await page.waitForTimeout(150)
 }
+
+test('все шаблоны из списка открываются и отдают строки', async ({ page, request }) => {
+  const list = await (await request.get('/api/reports')).json()
+  expect(list.length).toBeGreaterThanOrEqual(7)
+
+  for (const r of list) {
+    await page.goto(`/report.html?report=${r.id}`)
+    await expect(page.locator('h1')).toHaveText(r.title)
+    await expect(page.locator('.error')).toHaveCount(0)
+    await expect(page.locator('.meta')).toContainText('строк')
+    // ни одна колонка не остаётся без данных на всех видимых строках подряд
+    const cells = await page.locator('.rt-table tbody tr:not(.spacer) td').count()
+    expect(cells).toBeGreaterThan(0)
+  }
+})

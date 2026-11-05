@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "id": "sales-matrix",
+  "title": "Продажи: регион × категория",
+  "description": "Двухуровневая шапка (объединённый заголовок «Финансы»), две группировки, рентабельность по группе и диаграмма по регионам.",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": { "kind": "date" }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": { "kind": "date" }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "queryId": "sales_by_region",
+      "params": { "from": "$from", "to": "$to" }
+    }
+  },
+  "blocks": [
+    { "type": "text", "text": "Период: {{from}} — {{to}}. Группировка: регион → категория." },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "collapsible": true,
+      "grandTotal": true,
+      "columns": [
+        { "field": "region", "title": "Регион", "group": true, "subtotal": true },
+        { "field": "category", "title": "Категория", "group": true, "subtotal": true },
+        {
+          "title": "Финансы",
+          "children": [
+            { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number", "width": 150 },
+            { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number", "width": 150 }
+          ]
+        },
+        {
+          "title": "Рентабельность",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "decimals": 2,
+          "width": 140
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "bar",
+      "title": "Сумма по категориям в разрезе регионов",
+      "xField": "category",
+      "yField": "amount",
+      "seriesField": "region",
+      "aggregate": "sum",
+      "width": "full"
+    }
+  ]
+}
