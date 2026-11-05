@@ -70,9 +70,75 @@ function localPath(err, prefix) {
  * Проверяет шаблон.
  * @returns {{errors: Array<{path: string, message: string}>, warnings: Array<{path: string, message: string}>}}
  */
+// Условное форматирование (ADR-25): правила адресуются колонками таблицы, операторы закрытые.
+function checkRules(rules, base, knownFields, errors, warnings) {
+  if (!Array.isArray(rules)) return
+
+  if (rules.length > 20) {
+    warnings.push({ path: base, message: `правил ${rules.length}: шаблон сложно поддерживать` })
+  }
+
+  const walkWhen = (when, path) => {
+    if (!when || typeof when !== 'object') return
+    for (const group of ['all', 'any']) {
+      if (Array.isArray(when[group])) {
+        when[group].forEach((leaf, i) => walkWhen(leaf, `${path}.${group}.${i}`))
+      }
+    }
+    if (!when.column) return
+    if (knownFields.size && !knownFields.has(when.column)) {
+      errors.push({ path: `${path}.column`, message: `правило ссылается на «${when.column}», которого нет в колонках таблицы` })
+    }
+    if (when.op === 'between' && !(Array.isArray(when.value) && when.value.length === 2)) {
+      errors.push({ path: `${path}.value`, message: 'для between нужен массив из двух значений' })
+    }
+    if (when.op !== 'empty' && when.op !== 'notEmpty' && when.value === undefined) {
+      errors.push({ path: `${path}.value`, message: `для оператора ${when.op} нужно значение` })
+    }
+  }
+
+  rules.forEach((rule, i) => {
+    const path = `${base}.${i}`
+    walkWhen(rule.when, `${path}.when`)
+    if (rule.target && knownFields.size && !knownFields.has(rule.target)) {
+      errors.push({ path: `${path}.target`, message: `target «${rule.target}» отсутствует в колонках таблицы` })
+    }
+    const zones = rule.zones || ['detail', 'subtotal']
+    if (!zones.length) errors.push({ path: `${path}.zones`, message: 'zones не может быть пустым' })
+    if (rule.apply?.colors?.text && rule.apply.colors.background &&
+        String(rule.apply.colors.text).toLowerCase() === String(rule.apply.colors.background).toLowerCase()) {
+      warnings.push({ path: `${path}.apply.colors`, message: 'цвет текста правила совпадает с фоном' })
+    }
+  })
+}
+
 // Семантика стилей (ADR-23): схема проверяет форматы, здесь — то, что формой не выразить.
-function checkStyles(styles, path, knownFields, errors, warnings) {
+function checkStyles(styles, path, knownFields, errors, warnings, palette = {}) {
   if (!styles) return
+
+  // цвет — hex/transparent или имя из styles.palette; слова вне палитры ловим здесь
+  const checkColor = (value, p) => {
+    if (typeof value !== 'string') return
+    const isHex = /^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/.test(value) || value === 'transparent'
+    if (isHex) return
+    if (!Object.prototype.hasOwnProperty.call(palette, value)) {
+      errors.push({ path: p, message: `цвет «${value}» не hex и не объявлен в styles.palette` })
+    }
+  }
+  for (const zone of ['header', 'body', 'subtotal', 'grandtotal']) {
+    for (const key of ['text', 'background', 'border']) {
+      const value = styles[zone]?.colors?.[key]
+      if (value) checkColor(value, `${path}.${zone}.colors.${key}`)
+    }
+  }
+  for (const key of ['text', 'background', 'border']) {
+    if (styles.colors?.[key]) checkColor(styles.colors[key], `${path}.colors.${key}`)
+  }
+  for (const [field, style] of Object.entries(styles.columns || {})) {
+    for (const key of ['text', 'background']) {
+      if (style?.colors?.[key]) checkColor(style.colors[key], `${path}.columns.${field}.colors.${key}`)
+    }
+  }
   const zones = ['header', 'body', 'subtotal', 'grandtotal']
   for (const zone of zones) {
     const z = styles[zone]
@@ -266,7 +332,19 @@ export function validateTemplate(template) {
         columnsByDataKey[block.dataKey].push({ col, path: cpath })
       }
 
-      checkStyles(block.styles, `${base}.styles`, new Set(block.columns.filter((c) => c.field).map((c) => c.field)), errors, warnings)
+      const tableNames = new Set()
+      for (const c of block.columns) {
+        if (c.field) tableNames.add(c.field)
+        if (c.expression && c.title) tableNames.add(c.title)
+        if (Array.isArray(c.children)) {
+          for (const child of c.children) {
+            if (child.field) tableNames.add(child.field)
+            if (child.expression && child.title) tableNames.add(child.title)
+          }
+        }
+      }
+      checkRules(block.rules, `${base}.rules`, tableNames, errors, warnings)
+      checkStyles(block.styles, `${base}.styles`, new Set(block.columns.filter((c) => c.field).map((c) => c.field)), errors, warnings, template?.styles?.palette || {})
 
       const firstNew = columnsByDataKey[block.dataKey].length
       block.columns.forEach((col, ci) => walkColumn(col, `${base}.columns.${ci}`))
@@ -359,7 +437,7 @@ export function validateTemplate(template) {
   for (const list of Object.values(columnsByDataKey)) {
     for (const { col } of list) if (col.field) allFields.add(col.field)
   }
-  checkStyles(template?.styles, 'styles', allFields, errors, warnings)
+  checkStyles(template?.styles, 'styles', allFields, errors, warnings, template?.styles?.palette || {})
 
   return { errors, warnings }
 }

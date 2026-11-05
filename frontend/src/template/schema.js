@@ -325,6 +325,12 @@ export default {
         },
         "styles": {
           "$ref": "#/$defs/styles"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rule"
+          }
         }
       }
     },
@@ -459,13 +465,13 @@ export default {
           "additionalProperties": false,
           "properties": {
             "text": {
-              "$ref": "#/$defs/color"
+              "$ref": "#/$defs/colorToken"
             },
             "background": {
-              "$ref": "#/$defs/color"
+              "$ref": "#/$defs/colorToken"
             },
             "border": {
-              "$ref": "#/$defs/color"
+              "$ref": "#/$defs/colorToken"
             }
           }
         },
@@ -526,7 +532,7 @@ export default {
           "type": "boolean"
         },
         "stripeColor": {
-          "$ref": "#/$defs/color"
+          "$ref": "#/$defs/colorToken"
         },
         "tableLayout": {
           "enum": [
@@ -582,6 +588,9 @@ export default {
           "additionalProperties": {
             "$ref": "#/$defs/columnStyle"
           }
+        },
+        "palette": {
+          "$ref": "#/$defs/palette"
         }
       }
     },
@@ -695,6 +704,149 @@ export default {
         },
         {
           "$ref": "#/$defs/formatObject"
+        }
+      ]
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "=",
+            "!=",
+            ">",
+            ">=",
+            "<",
+            "<=",
+            "between",
+            "empty",
+            "notEmpty",
+            "contains"
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "string",
+            "boolean",
+            "array"
+          ]
+        },
+        "all": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/conditionLeaf"
+          }
+        },
+        "any": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/conditionLeaf"
+          }
+        }
+      }
+    },
+    "conditionLeaf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "column",
+        "op"
+      ],
+      "properties": {
+        "column": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "=",
+            "!=",
+            ">",
+            ">=",
+            "<",
+            "<=",
+            "between",
+            "empty",
+            "notEmpty",
+            "contains"
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "string",
+            "boolean",
+            "array"
+          ]
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "when",
+        "apply"
+      ],
+      "properties": {
+        "when": {
+          "$ref": "#/$defs/condition"
+        },
+        "apply": {
+          "$ref": "#/$defs/styleObject"
+        },
+        "scope": {
+          "enum": [
+            "cell",
+            "row"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "zones": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "detail",
+              "subtotal",
+              "grandtotal"
+            ]
+          }
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": -100,
+          "maximum": 100
+        }
+      }
+    },
+    "palette": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/color"
+      }
+    },
+    "colorToken": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/color"
+        },
+        {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$"
         }
       ]
     }

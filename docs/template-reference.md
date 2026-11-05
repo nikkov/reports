@@ -220,6 +220,37 @@
 
 Примеры оформления и форматов: `docs/styling-examples.md`, шаблон `sales-formatted`, шаблоны `finance-print` (preset print) и `ops-dark` (preset dark).
 
+## rules — условное форматирование
+
+Правила задаются в блоке таблицы (`blocks[].rules`) и меняют только оформление, не данные.
+
+```json
+"rules": [
+  { "when": { "column": "profit", "op": "<", "value": 0 },
+    "apply": { "colors": { "text": "danger" }, "font": { "weight": 600 } } },
+  { "when": { "column": "Маржа", "op": "between", "value": [0, 0.2] },
+    "apply": { "colors": { "background": "warningBg" } }, "priority": 1 },
+  { "when": { "column": "amount", "op": ">=", "value": 50000 },
+    "apply": { "colors": { "background": "rowHighlight" } }, "scope": "row" },
+  { "when": { "column": "amount", "op": ">", "value": 0 },
+    "apply": { "colors": { "background": "totalBg" } }, "scope": "row", "zones": ["grandtotal"] }
+]
+```
+
+| Поле | Значения | Смысл |
+|---|---|---|
+| `when` | `{column, op, value}` или `{all: [...]}` / `{any: [...]}` (без вложенности) | условие по сырому значению |
+| `op` | `=`, `!=`, `>`, `>=`, `<`, `<=`, `between`, `empty`, `notEmpty`, `contains` | оператор сравнения |
+| `apply` | стиль-объект: `font`, `colors`, `align`, `padding` | что меняем |
+| `scope` | `cell` (по умолчанию) — колонка-цель, `row` — вся строка | область действия |
+| `target` | имя колонки для `scope: cell` (по умолчанию `when.column`) | что красить |
+| `zones` | `detail`, `subtotal`, `grandtotal` (по умолчанию `detail` + `subtotal`) | на каких строках |
+| `priority` | число | порядок слияния, большее побеждает |
+
+Колонка адресуется полем (`amount`) или заголовком вычисляемой колонки (`Маржа`).
+Семантические цвета берутся из `styles.palette`: `"danger": "#b42318"` → `"text": "danger"`.
+Порядок применения: зона → `styles.columns` → правила по `priority`.
+
 ## Что проверяет валидатор
 
 Схема (типы, обязательность, `additionalProperties: false`) плюс семантические правила:

@@ -119,6 +119,7 @@ export function resolveStyles(template, block) {
   let font = DEFAULTS.font
   let colors = DEFAULTS.colors
   let layout = DEFAULTS.layout
+  let palette = {}
   // зоны стартуют с умолчаний версии 1.0, затем их правят пресет/шаблон/блок
   const zones = {}
   for (const zone of ZONES) zones[zone] = { ...DEFAULTS[zone] }
@@ -128,6 +129,7 @@ export function resolveStyles(template, block) {
     font = merge(font, layer.font)
     colors = merge(colors, layer.colors)
     layout = merge(layout, layer.layout)
+    if (layer.palette) palette = { ...palette, ...layer.palette }
     for (const zone of ZONES) {
       if (layer[zone]) zones[zone] = merge(zones[zone], layer[zone])
     }
@@ -139,7 +141,8 @@ export function resolveStyles(template, block) {
   }
 
   // font/colors на верхнем уровне нужны диаграммам (оси, легенда) и текстовым блокам
-  const out = { preset: presetName, font, colors, layout }
+  // palette нужна правилам условного форматирования: 'danger' → #b42318
+  const out = { preset: presetName, font, colors, layout, palette }
   for (const zone of ZONES) {
     // зона наследует общие шрифт/цвета документа, если не задала свои
     out[zone] = zoneStyle(zone, {

@@ -32,7 +32,7 @@
                 v-if="cell.render"
                 :rowspan="cell.rowspan"
                 :colspan="cell.colspan"
-                :style="cellStyle(cell.col)"
+                :style="cellStyle(cell.col, start + i, row.kind)"
                 :class="{
                   num: columns[cell.col]?.align === 'right',
                   ctr: columns[cell.col]?.align === 'center',
@@ -78,6 +78,8 @@ const props = defineProps({
   overscan: { type: Number, default: 8 },
   expanded: { type: Set, default: () => new Set() },
   cellText: { type: Function, required: true }, // (row, colField) => string
+  // (rowIndex, columnKey|null, zone) => CSS-объект правила или null (ADR-25)
+  ruleStyle: { type: Function, default: null },
   onToggle: { type: Function, default: null }, // (groupPath) => void — надёжнее emit из вложенного шаблона
   // разрешённые стили: { layout, header, body, subtotal, grandtotal, columns, font, colors }
   styles: {
@@ -218,11 +220,13 @@ function colWidth(index) {
 }
 
 // Переопределения конкретной колонки (цвет/шрифт/выравнивание) — единственные inline-стили.
-function cellStyle(index) {
+function cellStyle(index, rowIndex, zone) {
   const col = props.columns[index]
   const o = props.styles.columns?.[col?.columnKey]
-  if (!o) return undefined
-  const style = {}
+  const rule = props.ruleStyle ? props.ruleStyle(rowIndex, col?.columnKey, zone) : null
+  if (!o && !rule) return undefined
+  const style = { ...(rule || {}) }
+  if (!o) return style
   if (o.align) style.textAlign = o.align
   if (o.colors?.text) style.color = o.colors.text
   if (o.colors?.background) style.background = o.colors.background

@@ -18,6 +18,7 @@
     :height="height"
     :expanded="expandedIds"
     :cell-text="cellText"
+    :rule-style="ruleStyleAt"
     :on-toggle="toggle"
   />
   <ReportTable
@@ -29,6 +30,7 @@
     :height="height"
     :expanded="expandedIds"
     :cell-text="cellText"
+    :rule-style="ruleStyleAt"
     :on-toggle="toggle"
   />
 </template>
@@ -50,6 +52,7 @@ const props = defineProps({
 })
 
 import { columnFormat, formatCell } from './format.js'
+import { ruleStyleFor } from './rules.js'
 const collapsed = ref(new Set())
 
 watch(() => props.rows, () => { collapsed.value = new Set() })
@@ -83,7 +86,8 @@ const columns = computed(() =>
       (numeric && numericAlign !== 'inherit' ? numericAlign : numeric ? 'right' : 'left')
     return {
       field: String(i), // индекс: по нему cellText достаёт значение
-      columnKey: l.col.field, // имя поля: по нему ищутся стили колонки
+      // ключ колонки: имя поля, а у вычисляемой колонки — заголовок (по нему её адресуют правила)
+      columnKey: l.col.field || l.col.title,
       title: l.col.title,
       headerPath: l.headerPath,
       width: l.col.width || 150,
@@ -170,6 +174,31 @@ const expandedIds = computed(() => {
   for (const id of collapsed.value) open.delete(id)
   return open
 })
+
+// индекс колонки по имени поля: правила адресуются именами, а витрина — индексами
+const colIndexByKey = computed(() => {
+  const map = {}
+  leafCols.value.forEach((c, i) => {
+    if (c.field) map[c.field] = i
+    // вычисляемые колонки адресуются по заголовку: поля у них нет
+    if (c.title && map[c.title] === undefined) map[c.title] = i
+  })
+  return map
+})
+
+// Стиль правила для ячейки (columnKey = null → правило scope: "row")
+function ruleStyleAt(rowIndex, columnKey, zone) {
+  const rules = props.block?.rules
+  if (!rules?.length) return null
+  // индекс приходит из витрины (view.rows), а не из исходных данных: у строк витрины есть values
+  const row = view.value.rows[rowIndex]
+  if (!row) return null
+  const getValue = (key) => {
+    const index = colIndexByKey.value[key]
+    return index === undefined ? undefined : row.values?.[index]
+  }
+  return ruleStyleFor(rules, zone, columnKey, getValue, props.styles?.palette)
+}
 
 const isGrouped = computed(() => leafCols.value.some((c) => c.group))
 

@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "id": "sales-rules",
+  "title": "Продажи: условное форматирование",
+  "description": "Правила в шаблоне: отрицательная прибыль — красным, маржа ниже 20 % — янтарным фоном, суммы от 50 000 — подсветка строки, итог оформляется отдельным правилом.",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "queryId": "sales_by_region",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      }
+    }
+  },
+  "styles": {
+    "preset": "default",
+    "palette": {
+      "danger": "#b42318",
+      "warningBg": "#fff4d6",
+      "rowHighlight": "#fff7e6",
+      "totalBg": "#dfe8f5"
+    },
+    "layout": {
+      "rowHeight": 26,
+      "headerHeight": 30,
+      "numericAlign": "right"
+    },
+    "columns": {
+      "region": {
+        "width": 130
+      },
+      "amount": {
+        "width": 150,
+        "format": {
+          "style": "number",
+          "decimals": 0,
+          "group": " "
+        }
+      },
+      "profit": {
+        "width": 150,
+        "format": {
+          "style": "number",
+          "decimals": 0,
+          "group": " "
+        }
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Красный — отрицательная прибыль, янтарный фон — маржа ниже 20 %, светлая строка — сумма от 50 000, итог оформлен отдельным правилом."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "grandTotal": true,
+      "rules": [
+        {
+          "when": {
+            "column": "profit",
+            "op": "<",
+            "value": 0
+          },
+          "apply": {
+            "colors": {
+              "text": "danger"
+            },
+            "font": {
+              "weight": 600
+            }
+          },
+          "zones": [
+            "detail"
+          ]
+        },
+        {
+          "when": {
+            "column": "Маржа",
+            "op": "between",
+            "value": [
+              0,
+              0.2
+            ]
+          },
+          "apply": {
+            "colors": {
+              "background": "warningBg"
+            }
+          },
+          "zones": [
+            "detail"
+          ],
+          "priority": 1
+        },
+        {
+          "when": {
+            "column": "amount",
+            "op": ">=",
+            "value": 50000
+          },
+          "apply": {
+            "colors": {
+              "background": "rowHighlight"
+            }
+          },
+          "scope": "row",
+          "zones": [
+            "detail"
+          ]
+        },
+        {
+          "when": {
+            "column": "amount",
+            "op": ">",
+            "value": 0
+          },
+          "apply": {
+            "colors": {
+              "background": "totalBg"
+            },
+            "font": {
+              "weight": 700
+            }
+          },
+          "scope": "row",
+          "zones": [
+            "grandtotal"
+          ]
+        }
+      ],
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "width": 130
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "width": 160
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "width": 150
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "width": 150
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": {
+            "style": "percent",
+            "decimals": 2
+          },
+          "width": 120
+        }
+      ]
+    }
+  ]
+}

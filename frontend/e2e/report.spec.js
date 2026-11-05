@@ -507,3 +507,26 @@ test('типографика: размеры шрифта по зонам и в�
   expect(zones.subtotal).toBe('13px')
   expect(zones.grandtotal).toBe('14px')
 })
+
+test('условное форматирование: ячейка по правилу и подсветка строки', async ({ page }) => {
+  await page.goto('/report.html?report=sales-rules')
+  await expect(page.locator('.meta')).toContainText('строк')
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
+
+  const info = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('.rt-table tbody tr.detail')).slice(0, 6)
+    return rows.map((tr) => ({
+      marginBg: getComputedStyle(tr.children[5]).backgroundColor,
+      rowBg: getComputedStyle(tr.children[0]).backgroundColor,
+      marginText: tr.children[5].innerText.trim()
+    }))
+  })
+
+  // янтарный фон правила по марже и светлая подсветка строки по сумме
+  const AMBER = 'rgb(255, 244, 214)'
+  const ROW = 'rgb(255, 247, 230)'
+  expect(info.some((r) => r.marginBg === AMBER)).toBe(true)
+  expect(info.some((r) => r.rowBg === ROW)).toBe(true)
+  // строка ниже порога по сумме остаётся белой, но её маржа может быть подсвечена
+  expect(info.some((r) => r.rowBg === 'rgb(255, 255, 255)')).toBe(true)
+})

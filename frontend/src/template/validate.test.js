@@ -265,3 +265,59 @@ describe('стили таблицы (ADR-23)', () => {
     expect(res.errors).toEqual([])
   })
 })
+
+describe('условное форматирование (ADR-25)', () => {
+  const withRules = (rules, styles) => {
+    const t = base()
+    t.blocks[1].rules = rules
+    if (styles) t.styles = styles
+    return t
+  }
+
+  it('принимает правило с палитрой', () => {
+    const res = validateTemplate(
+      withRules([{ when: { column: 'amount', op: '>', value: 0 }, apply: { colors: { text: 'danger' } } }], {
+        palette: { danger: '#b42318' }
+      })
+    )
+    expect(res.errors).toEqual([])
+  })
+
+  it('ловит цвет вне палитры', () => {
+    const res = validateTemplate(withRules([]) && withRules([], { palette: {} }))
+    expect(res.errors).toEqual([])
+    const bad = validateTemplate(withRules([], { colors: { text: 'danger' }, palette: {} }))
+    expect(bad.errors.map((e) => e.path)).toContain('styles.colors.text')
+  })
+
+  it('ловит правило по несуществующей колонке', () => {
+    const res = validateTemplate(withRules([{ when: { column: 'nope', op: '>', value: 0 }, apply: {} }]))
+    expect(res.errors.map((e) => e.path)).toContain('blocks.1.rules.0.when.column')
+  })
+
+  it('ловит not between без пары значений', () => {
+    const res = validateTemplate(withRules([{ when: { column: 'amount', op: 'between', value: 5 }, apply: {} }]))
+    expect(res.errors.map((e) => e.path)).toContain('blocks.1.rules.0.when.value')
+  })
+
+  it('ловит оператор без значения', () => {
+    const res = validateTemplate(withRules([{ when: { column: 'amount', op: '>' }, apply: {} }]))
+    expect(res.errors.map((e) => e.path)).toContain('blocks.1.rules.0.when.value')
+  })
+
+  it('ловит target на несуществующую колонку', () => {
+    const res = validateTemplate(
+      withRules([{ when: { column: 'amount', op: '>', value: 0 }, target: 'nope', apply: {} }])
+    )
+    expect(res.errors.map((e) => e.path)).toContain('blocks.1.rules.0.target')
+  })
+
+  it('принимает all/any без вложенности', () => {
+    const res = validateTemplate(
+      withRules([
+        { when: { all: [{ column: 'amount', op: '>', value: 0 }, { column: 'region', op: '=', value: 'Восток' }] }, apply: {} }
+      ])
+    )
+    expect(res.errors).toEqual([])
+  })
+})
