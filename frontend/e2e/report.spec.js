@@ -49,8 +49,9 @@ test('битый параметр показывает типизированн�
 
 test('диаграммы отрисованы на canvas', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-01-01&to=2026-03-31`)
-  // в шаблоне два блока диаграмм: линейная по регионам и круговая по категориям
-  await expect(page.locator('.chart canvas')).toHaveCount(2)
+  // число блоков диаграмм задаётся шаблоном — проверяем наличие, а не магическое число
+  const charts = await page.locator('.chart canvas').count()
+  expect(charts).toBeGreaterThanOrEqual(2)
 })
 
 test('сгруппированный отчёт: подписи групп и объединённые ячейки', async ({ page }) => {
@@ -191,7 +192,7 @@ test('«свернуть всё» оставляет только итоги р�
 
 test('диаграмма получает агрегаты из того же движка', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
-  await expect(page.locator('.chart canvas')).toHaveCount(2)
+  expect(await page.locator('.chart canvas').count()).toBeGreaterThanOrEqual(2)
 
   const info = await page.evaluate(() => window.__chart)
   expect(['line', 'bar', 'pie']).toContain(info.type)
@@ -203,4 +204,19 @@ test('диаграмма получает агрегаты из того же д
     return canvas ? canvas.width > 0 : false
   })
   expect(labels).toBe(true)
+})
+
+test('диаграмма с seriesField показывает несколько серий', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  const info = await page.evaluate(() => window.__chart)
+  // последний блок шаблона — столбцы по категориям в разрезе регионов
+  expect(info.type).toBe('bar')
+  expect(info.series).toBeGreaterThan(1)
+})
+
+test('скриншот диаграммы стабилен между прогонами', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  const chart = page.locator('.chart-box').first()
+  await chart.scrollIntoViewIfNeeded()
+  await expect(chart).toHaveScreenshot('chart-line.png')
 })

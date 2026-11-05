@@ -62,7 +62,7 @@ function buildOption() {
       name: s.name,
       type: props.block.chartType,
       data: s.data,
-      smooth: props.block.chartType === 'line',
+      smooth: props.block.smooth === true,
       barMaxWidth: 42,
       emphasis: { focus: 'series' }
     }))

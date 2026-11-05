@@ -96,6 +96,17 @@
       "yField": "amount",
       "aggregate": "sum",
       "width": "half"
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "bar",
+      "title": "Сумма по категориям в разрезе регионов",
+      "xField": "category",
+      "seriesField": "region",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "full"
     }
   ]
 }
