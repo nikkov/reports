@@ -12,11 +12,18 @@
         @change="update(p.name, $event.target.value)"
       />
 
-      <!-- справочник из БД или статический набор -->
+      <!-- множественный выбор: выпадающий список с чекбоксами -->
+      <MultiSelect
+        v-else-if="(kind(p) === 'lookup' || kind(p) === 'static') && p.multiple"
+        :options="optionsFor(p)"
+        :model-value="String(modelValue[p.name] ?? '')"
+        :disabled="isBlocked(p)"
+        @update:model-value="update(p.name, $event)"
+      />
+
+      <!-- одиночный справочник из БД или статический набор -->
       <select
         v-else-if="kind(p) === 'lookup' || kind(p) === 'static'"
-        :multiple="!!p.multiple"
-        :size="p.multiple ? Math.min(4, optionsFor(p).length || 1) : 1"
         :disabled="isBlocked(p)"
         :required="p.required"
         @change="onSelect(p, $event)"
@@ -26,7 +33,7 @@
           v-for="o in optionsFor(p)"
           :key="o.value"
           :value="o.value"
-          :selected="isSelected(p, o.value)"
+          :selected="!p.multiple && isSelected(p, o.value)"
         >
           {{ o.label }}
         </option>
@@ -69,6 +76,7 @@
 // multiple → значение уходит строкой через запятую (в SQL: ANY(string_to_array(:p, ','))).
 import { onMounted, reactive, ref, watch } from 'vue'
 import { api } from '../api/client.js'
+import MultiSelect from './MultiSelect.vue'
 
 const props = defineProps({
   params: { type: Array, required: true },
@@ -107,12 +115,7 @@ function update(name, value) {
 }
 
 function onSelect(p, event) {
-  if (p.multiple) {
-    const values = Array.from(event.target.selectedOptions).map((o) => o.value)
-    update(p.name, values.join(','))
-  } else {
-    update(p.name, event.target.value)
-  }
+  update(p.name, event.target.value)
 }
 
 async function loadOptions(p) {
@@ -144,21 +147,24 @@ async function loadOptions(p) {
   // автовыбор: default или первое значение, чтобы отчёт строился сразу
   const list = fetched[p.name]
   const current = props.modelValue[p.name]
-  const valid = p.multiple
-    ? String(current || '')
-        .split(',')
-        .some((v) => list.some((o) => o.value === v))
-    : list.some((o) => o.value === current)
+
+  if (p.multiple) {
+    // после каскадной перезагрузки оставляем только существующие значения; если ничего не осталось — все
+    const kept = String(current || '')
+      .split(',')
+      .filter((v) => v && list.some((o) => String(o.value) === v))
+    if (!kept.length && list.length) {
+      update(p.name, list.map((o) => String(o.value)).join(','))
+    } else if (kept.join(',') !== String(current || '')) {
+      update(p.name, kept.join(','))
+    }
+    return
+  }
+
+  const valid = list.some((o) => o.value === current)
 
   if (!valid && list.length) {
-    if (p.default !== undefined) {
-      update(p.name, String(p.default))
-    } else if (p.multiple) {
-      // для множественного выбора разумный дефолт — все доступные значения
-      update(p.name, list.map((o) => String(o.value)).join(','))
-    } else {
-      update(p.name, String(list[0].value))
-    }
+    update(p.name, p.default !== undefined ? String(p.default) : String(list[0].value))
   }
 }
 

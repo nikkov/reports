@@ -241,23 +241,36 @@ test('параметр-справочник: NAME в интерфейсе, ID в
   await expect(page.locator('.meta')).toContainText('строк')
 })
 
-test('демо параметров: мультивыбор и статический набор фильтруют данные', async ({ page }) => {
+test('демо параметров: мультивыбор-дропдаун с галочками и статический набор', async ({ page }) => {
   await page.goto('/report.html?report=params-demo')
 
-  // по умолчанию выбраны все категории региона
-  await expect.poll(async () => page.locator('.params select').nth(1).evaluate((s) => s.selectedOptions.length)).toBe(4)
-  await expect(page.locator('.meta')).toContainText('строк')
+  const trigger = page.locator('[data-testid=ms-trigger]')
+  const panel = page.locator('[data-testid=ms-panel]')
+
+  // по умолчанию выбраны все категории: в сводке «Все (4)»
+  await expect(trigger).toHaveText(/Все \(4\)/)
+  await expect(panel).toHaveCount(0)
   const rowsAll = Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])
 
-  // оставляем одну категорию — строк меньше
-  await page.locator('.params select').nth(1).selectOption(['Мебель'])
+  // открываем дропдаун, снимаем одну галочку — данных меньше
+  await trigger.click()
+  await expect(panel).toBeVisible()
+  await expect(panel.locator('input[type=checkbox]:checked')).toHaveCount(4)
+  await panel.locator('.ms-item', { hasText: 'Электроника' }).locator('input').uncheck()
+
+  await expect(trigger).toHaveText(/\+1/)
   await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThan(rowsAll)
-  const rowsOne = Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])
+  await expect.poll(() => page.url()).toContain('category=')
+  expect(decodeURIComponent(page.url())).not.toContain('Электроника')
 
-  // статический набор «только прибыльные» — ещё меньше
-  await page.locator('.params select').nth(2).selectOption('profit_only')
-  await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThanOrEqual(rowsOne)
+  // клик вне панели закрывает список
+  await page.locator('h1').click()
+  await expect(panel).toHaveCount(0)
 
+  // статический набор сужает выборку и попадает в URL
+  const rowsFiltered = Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])
+  await page.locator('.params select').nth(1).selectOption('profit_only')
   await expect(page.locator('.text')).toContainText('Только прибыльные')
   await expect.poll(() => page.url()).toContain('scope=profit_only')
+  await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThanOrEqual(rowsFiltered)
 })
