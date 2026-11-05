@@ -51,8 +51,11 @@ cmake --build backend/build -j"$(nproc)"
 ./backend/build/rep &                      # :8080
 cd frontend && npm run dev &               # :5173 (проксирует /api на :8080)
 
-open http://127.0.0.1:5173/report.html?report=sales-summary&from=2026-01-01&to=2026-03-31
-cd frontend && npm run e2e                 # 4 теста Playwright
+open http://127.0.0.1:5173/                                            # список отчётов
+open "http://127.0.0.1:5173/report.html?report=sales-summary&from=2026-01-01&to=2026-03-31"
+open http://127.0.0.1:5173/report.html?report=params-demo              # все виды параметров
+open http://127.0.0.1:5173/spike.html                                  # песочница рендерера
+cd frontend && npm run e2e                 # 18 тестов Playwright
 REP_E2E=1 ./scripts/check.sh               # всё вместе
 ```
 | `db/init.sh` | создание БД и загрузка синтетики (идемпотентно) |
