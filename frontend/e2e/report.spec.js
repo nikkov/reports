@@ -274,3 +274,30 @@ test('демо параметров: мультивыбор-дропдаун с 
   await expect.poll(() => page.url()).toContain('scope=profit_only')
   await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThanOrEqual(rowsFiltered)
 })
+
+test('список отчётов: карточки, поиск, переход в отчёт', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('h1')).toHaveText('Сервер отчётов')
+  await expect(page.locator('.card')).toHaveCount(3)
+  await expect(page.locator('.count')).toHaveText('3 из 3')
+
+  // состав параметров виден на карточке
+  const badges = await page.locator('[data-report=params-demo] .badge').allInnerTexts()
+  expect(badges.join(' ')).toContain('мультивыбор')
+  expect(badges.join(' ')).toContain('справочник')
+
+  // поиск по названию и по id
+  await page.locator('.tools input').fill('регион')
+  await expect(page.locator('.card')).toHaveCount(1)
+  await page.locator('.tools input').fill('sales-summary')
+  await expect(page.locator('.card')).toHaveCount(1)
+  await page.locator('.tools input').fill('неттакого')
+  await expect(page.locator('.muted')).toContainText('не найдено')
+  await page.locator('.tools input').fill('')
+  await expect(page.locator('.card')).toHaveCount(3)
+
+  // переход в отчёт
+  await page.locator('[data-report=sales-summary] .open').click()
+  await expect(page).toHaveURL(/report\.html\?report=sales-summary/)
+  await expect(page.locator('.meta')).toContainText('строк')
+})

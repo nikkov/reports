@@ -219,12 +219,39 @@ int main() {
 
     app().registerHandler(
         "/api/reports",
-        [templates](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [templatesRaw](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+            // список для экрана отчётов: заголовок, описание и состав параметров
             Json::Value list(Json::arrayValue);
-            for (const auto &kv : templates) {
+            for (const auto &kv : templatesRaw) {
                 Json::Value item;
-                item["id"] = kv.second.id;
-                item["title"] = kv.second.title;
+                item["id"] = kv.first;
+
+                Json::CharReaderBuilder builder;
+                Json::Value body;
+                std::string errs;
+                std::istringstream in(kv.second);
+                if (Json::parseFromStream(builder, in, &body, &errs)) {
+                    item["title"] = body.get("title", Json::Value("")).asString();
+                    item["description"] = body.get("description", Json::Value("")).asString();
+
+                    Json::Value params(Json::arrayValue);
+                    const Json::Value &declared = body["params"];
+                    for (const auto &p : declared) {
+                        const Json::Value &src = p["source"];
+                        Json::Value one;
+                        one["name"] = p.get("name", Json::Value("")).asString();
+                        one["label"] = p.get("label", Json::Value("")).asString();
+                        one["kind"] = src.isObject() ? src.get("kind", Json::Value("")).asString() : "text";
+                        one["multiple"] = p.get("multiple", Json::Value(false)).asBool();
+                        one["required"] = p.get("required", Json::Value(false)).asBool();
+                        params.append(one);
+                    }
+                    item["params"] = params;
+                } else {
+                    item["title"] = "";
+                    item["description"] = "";
+                    item["params"] = Json::Value(Json::arrayValue);
+                }
                 list.append(item);
             }
             cb(jsonResponse(list));

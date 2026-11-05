@@ -23,7 +23,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: resolve(__dirname, 'index.html'),
+        list: resolve(__dirname, 'index.html'),
+        spike: resolve(__dirname, 'spike.html'),
         report: resolve(__dirname, 'report.html')
       }
     }

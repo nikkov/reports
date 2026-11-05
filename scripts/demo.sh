@@ -52,7 +52,7 @@ done
 
 URL="http://127.0.0.1:$WEB_PORT/report.html?report=$REPORT&$PARAMS"
 echo
-echo "Отчёт:   $URL"
+echo "Список:  $URL"
 echo "Спайк:   http://127.0.0.1:$WEB_PORT/ (песочница рендерера)"
 echo "API:     http://127.0.0.1:$PORT/api/health"
 echo "Логи:    /tmp/rep-backend.log, /tmp/rep-web.log"
