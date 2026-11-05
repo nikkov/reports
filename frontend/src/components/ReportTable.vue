@@ -140,6 +140,10 @@ function rowKey(row, i) {
 // Серии одинакового groupPath внутри окна. Подпись рисуется на начале серии и,
 // если серия началась выше окна, ещё раз на первой видимой строке — иначе при прокрутке
 // внутри блока в тысячи строк название группы исчезает.
+// строка итога уровня L входит в объединения колонок-предков (col < L)
+const member = (row, col) =>
+  row.kind === 'detail' || (row.kind === 'subtotal' && col < (row.groupPath?.length ?? 0) - 1)
+
 const runs = computed(() => {
   const rows = windowRows.value
   const count = props.groupCount || 0
@@ -147,7 +151,7 @@ const runs = computed(() => {
   for (let col = 0; col < count; col++) {
     let i = 0
     while (i < rows.length) {
-      if (rows[i].kind !== 'detail') {
+      if (!member(rows[i], col)) {
         i++
         continue
       }
@@ -155,7 +159,7 @@ const runs = computed(() => {
       let j = i + 1
       while (
         j < rows.length &&
-        rows[j].kind === 'detail' &&
+        member(rows[j], col) &&
         (rows[j].groupPath || []).slice(0, col + 1).join('\u0001') === prefix
       ) {
         j++
@@ -176,7 +180,7 @@ function cellsAt(index) {
   const cells = []
 
   for (let col = 0; col < props.columns.length; col++) {
-    const isGroupCol = col < (props.groupCount || 0) && row.kind === 'detail'
+    const isGroupCol = col < (props.groupCount || 0) && member(row, col)
     if (!isGroupCol) {
       cells.push({
         key: col,

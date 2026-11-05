@@ -159,6 +159,8 @@ export function buildTableModel(rows, columns, opts = {}) {
     const level = node.level
     const labelIndex = columns.findIndex((c) => c.group && c.field === groupFields[level])
     const row = makeRow('subtotal', level, node, acc, null, -1)
+    // регион и другие предки остаются в своих колонках, иначе строка «висит» без группы
+    for (let i = 0; i < level; i++) row.values[i] = node.path[i]
     row.values[labelIndex >= 0 ? labelIndex : 0] = `Итого ${node.key}`
     flat.push(row)
   }
@@ -214,10 +216,15 @@ export function buildTableModel(rows, columns, opts = {}) {
  */
 export function computeMerges(flat, groupCount) {
   const merges = []
+  // строка итога уровня L участвует в объединениях колонок выше L (её предки),
+  // но не в своей колонке — иначе подпись «Итого …» спрячется под объединением
+  const member = (row, col) =>
+    row.kind === 'detail' || (row.kind === 'subtotal' && col < row.groupPath.length - 1)
+
   for (let col = 0; col < groupCount; col++) {
     let start = 0
     while (start < flat.length) {
-      if (flat[start].kind !== 'detail') {
+      if (!member(flat[start], col)) {
         start++
         continue
       }
@@ -225,7 +232,7 @@ export function computeMerges(flat, groupCount) {
       let end = start + 1
       while (end < flat.length) {
         const next = flat[end]
-        if (next.kind !== 'detail') break
+        if (!member(next, col)) break
         if (next.groupPath.slice(0, col + 1).join(SEP) !== prefix) break
         end++
       }

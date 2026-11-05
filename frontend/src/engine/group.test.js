@@ -86,7 +86,8 @@ describe('buildTableModel', () => {
 })
 
 describe('computeMerges', () => {
-  it('объединяет детальные строки группы и не накрывает подытог', () => {
+  it('строка итога входит в объединение предков, но не своей колонки', () => {
+    // детали категории A/x, её строка итога (уровень 1), затем другая группа
     const flat = [
       { kind: 'detail', groupPath: ['A', 'x'] },
       { kind: 'detail', groupPath: ['A', 'x'] },
@@ -94,9 +95,20 @@ describe('computeMerges', () => {
       { kind: 'detail', groupPath: ['B', 'y'] }
     ]
     const merges = computeMerges(flat, 2)
-    expect(merges).toContainEqual({ row: 0, col: 0, rowspan: 2, colspan: 1 })
+
+    // колонка региона включает строку итога категории — регион не «отрывается»
+    expect(merges).toContainEqual({ row: 0, col: 0, rowspan: 3, colspan: 1 })
+    // колонка категории — только детали, иначе подпись «Итого …» спрячется
     expect(merges).toContainEqual({ row: 0, col: 1, rowspan: 2, colspan: 1 })
-    // подытог не покрыт ни одним объединением
-    expect(merges.some((m) => m.row + m.rowspan > 2)).toBe(false)
+  })
+
+  it('объединение региона не накрывает строку итога самого региона', () => {
+    const flat = [
+      { kind: 'detail', groupPath: ['A', 'x'] },
+      { kind: 'subtotal', groupPath: ['A'] },
+      { kind: 'detail', groupPath: ['B', 'y'] }
+    ]
+    const merges = computeMerges(flat, 2)
+    expect(merges).toEqual([{ row: 0, col: 0, rowspan: 1, colspan: 1 }].filter(() => false))
   })
 })
