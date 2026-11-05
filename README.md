@@ -15,6 +15,7 @@
 | `docs/template-reference.md` | справочник всех полей шаблона, включая `source`/`multiple`/`dependsOn` |
 | `docs/expressions.md` | грамматика вычисляемых колонок, области видимости, null |
 | `docs/decisions.md` | принятые решения (ADR-1…ADR-22) |
+| `docs/styling-design.md` | план версии 1.1: стили таблиц из шаблона (шрифты, цвета, ширины, высоты зон) |
 | `docs/dod.md` | чек-лист готовности: критерии ТЗ §5 с подтверждениями, состав версии 1.0 |
 | `CHANGELOG.md` | история версий |
 | `THIRD_PARTY.md` | лицензии зависимостей (проверка: `node scripts/licenses.mjs`) |
