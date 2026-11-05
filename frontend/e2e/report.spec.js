@@ -587,10 +587,15 @@ test('экспорт в Excel: файл со шапкой, числами и л�
   expect(percents).toBeGreaterThan(0)
   expect(ws.rowCount).toBeGreaterThan(20)
 
-  // сворачивание: детальные строки внутри групп получают уровень структуры Excel
-  let outlined = 0
-  ws.eachRow((row) => { if (row.outlineLevel) outlined++ })
-  expect(outlined).toBeGreaterThan(10)
+  // сворачивание: два уровня структуры Excel — регион (0→1) и категория (1→2).
+  // Опорная строка категории остаётся видимой, её детали уходят на уровень глубже.
+  const levels = {}
+  ws.eachRow((row) => {
+    const lvl = row.outlineLevel || 0
+    levels[lvl] = (levels[lvl] || 0) + 1
+  })
+  expect(levels[1]).toBeGreaterThan(1) // опоры категорий
+  expect(levels[2]).toBeGreaterThan(10) // их детали
   expect(ws.properties?.outlineProperties?.summaryBelow).toBe(true)
 })
 
