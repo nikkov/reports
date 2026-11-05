@@ -45,7 +45,14 @@
                 <span v-if="cell.toggle" class="chev"            @click.stop="handleToggle(cell.toggle)">{{
                   cell.expanded ? '▾' : '▸'
                 }}</span>
-                {{ pretty(cell.text) }}
+                <a
+                  v-if="cell.drillable"
+                  class="drill"
+                  href="#"
+                  :title="drill.label || 'Открыть детали'"
+                  @click.stop.prevent="emit('drill', { row, spec: drill })"
+                >{{ pretty(cell.text) }}</a>
+                <template v-else>{{ pretty(cell.text) }}</template>
               </td>
             </template>
           </tr>
@@ -128,6 +135,8 @@ const props = defineProps({
   overscan: { type: Number, default: 8 },
   // печать: включаем печатный слой (ADR-28), экран остаётся виртуализированным
   printMode: { type: Boolean, default: false },
+  // drill-through (ADR-29): описание перехода из подытога в другой отчёт
+  drill: { type: Object, default: null },
   // печать: рендерим весь отчёт, без окна виртуализации (ADR-28)
   virtual: { type: Boolean, default: true },
   expanded: { type: Set, default: () => new Set() },
@@ -149,7 +158,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['toggle'])
+const emit = defineEmits(['toggle', 'drill'])
 
 const scroller = ref(null)
 const scrollTop = ref(0)
@@ -464,6 +473,10 @@ function cellsAt(index) {
         inherit: row.kind === 'subtotal' && col < row.level,
         // строка итога: клик по её подписи разворачивает группу обратно
         toggle: row.kind === 'subtotal' && col === row.level ? row.groupPath : null,
+        // переход доступен и с подытога, и с ячейки группы в детальной строке
+        drillable:
+          Boolean(props.drill) &&
+          (row.kind === 'detail' ? col < (props.groupCount || 0) : row.kind === 'subtotal' && col === row.level),
         expanded: props.expanded.has((row.groupPath || []).slice(0, col + 1).join('\u0001'))
       })
       continue
@@ -486,6 +499,7 @@ function cellsAt(index) {
       text: props.cellText(row, props.columns[col].field),
       // у детальной строки сворачиваем группу этого уровня, у строки итога — саму группу
       toggle: row.kind === 'detail' || row.kind === 'subtotal' ? row.groupPath.slice(0, col + 1) : null,
+      drillable: Boolean(props.drill) && row.kind === 'detail',
         // направление шеврона — всегда по префиксу своей колонки: свёрнутость категории
         // не должна переключать галочку региона
         expanded: props.expanded.has((row.groupPath || []).slice(0, col + 1).join('\u0001'))
@@ -644,6 +658,15 @@ function cellsAt(index) {
   .rt-print .rt-table tr {
     break-inside: avoid;
   }
+}
+.drill {
+  color: #1f5fbf;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+.drill::after {
+  content: ' →';
+  text-decoration: none;
 }
 .chev {
   cursor: pointer;

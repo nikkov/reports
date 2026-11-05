@@ -8,31 +8,75 @@
         </p>
       </div>
       <div class="tools">
-        <input v-model="query" type="search" placeholder="Поиск по названию или id" />
+        <input v-model="query" type="search" placeholder="Поиск по названию, описанию, тегу" />
         <span class="count">{{ filtered.length }} из {{ reports.length }}</span>
       </div>
     </header>
 
-    <p v-if="error" class="error">Не удалось получить список отчётов: {{ error }}</p>
-    <p v-else-if="loading" class="muted">загрузка…</p>
-    <p v-else-if="!filtered.length" class="muted">Отчётов не найдено.</p>
+    <div class="catalog">
+      <!-- Каталог: папки, избранное и теги (ADR-30) -->
+      <aside class="side">
+        <nav class="folders">
+          <button
+            v-for="f in folderList"
+            :key="f.key"
+            type="button"
+            class="folder"
+            :class="{ active: activeFolder === f.key }"
+            @click="activeFolder = f.key"
+          >
+            <span class="fname">{{ f.label }}</span>
+            <span class="fcnt">{{ f.count }}</span>
+          </button>
+        </nav>
 
-    <ul class="cards">
-      <li v-for="r in filtered" :key="r.id" class="card" :data-report="r.id">
-        <div class="card-head">
-          <a :href="`report.html?report=${encodeURIComponent(r.id)}`" class="title">{{ r.title || r.id }}</a>
-          <code class="id">{{ r.id }}</code>
+        <div class="tags" v-if="tagList.length">
+          <p class="side-title">Теги</p>
+          <button
+            v-for="t in tagList"
+            :key="t.key"
+            type="button"
+            class="tag"
+            :class="{ active: activeTag === t.key }"
+            @click="activeTag = activeTag === t.key ? '' : t.key"
+          >{{ t.key }} <span class="fcnt">{{ t.count }}</span></button>
         </div>
-        <p v-if="r.description" class="desc">{{ r.description }}</p>
-        <ul v-if="r.params && r.params.length" class="params">
-          <li v-for="p in r.params" :key="p.name" :class="['badge', p.kind]">
-            {{ p.label || p.name }}
-            <span class="kind">{{ kindLabel(p) }}</span>
+      </aside>
+
+      <main>
+        <p v-if="error" class="error">Не удалось получить список отчётов: {{ error }}</p>
+        <p v-else-if="loading" class="muted">загрузка…</p>
+        <p v-else-if="!filtered.length" class="muted">Отчётов не найдено.</p>
+
+        <ul class="cards">
+          <li v-for="r in filtered" :key="r.id" class="card" :data-report="r.id" :data-folder="r.folder || ''">
+            <div class="card-head">
+              <button
+                type="button"
+                class="star"
+                :class="{ on: favorites.has(r.id) }"
+                :title="favorites.has(r.id) ? 'Убрать из избранного' : 'В избранное'"
+                @click="toggleFavorite(r.id)"
+              >{{ favorites.has(r.id) ? '★' : '☆' }}</button>
+              <a :href="`report.html?report=${encodeURIComponent(r.id)}`" class="title">{{ r.title || r.id }}</a>
+              <code class="id">{{ r.id }}</code>
+              <span v-if="r.folder" class="folder-badge">{{ r.folder }}</span>
+            </div>
+            <p v-if="r.description" class="desc">{{ r.description }}</p>
+            <ul v-if="r.tags && r.tags.length" class="tags-row">
+              <li v-for="t in r.tags" :key="t" class="tag-chip" @click="activeTag = t">{{ t }}</li>
+            </ul>
+            <ul v-if="r.params && r.params.length" class="params">
+              <li v-for="p in r.params" :key="p.name" :class="['badge', p.kind]">
+                {{ p.label || p.name }}
+                <span class="kind">{{ kindLabel(p) }}</span>
+              </li>
+            </ul>
+            <a class="open" :href="`report.html?report=${encodeURIComponent(r.id)}`">Открыть →</a>
           </li>
         </ul>
-        <a class="open" :href="`report.html?report=${encodeURIComponent(r.id)}`">Открыть →</a>
-      </li>
-    </ul>
+      </main>
+    </div>
 
     <footer class="foot">
       <a href="spike.html">Песочница рендерера</a> ·
@@ -43,7 +87,8 @@
 </template>
 
 <script setup>
-// Экран списка отчётов: GET /api/reports → заголовок, описание, состав параметров.
+// Каталог отчётов (ADR-30): папки, теги и избранное из шаблона + localStorage.
+// Данные — GET /api/reports (title, description, folder, tags, params).
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api/client.js'
 
@@ -51,6 +96,11 @@ const reports = ref([])
 const loading = ref(true)
 const error = ref('')
 const query = ref('')
+const activeFolder = ref('*')
+const activeTag = ref('')
+
+const FAVORITES_KEY = 'rep-favorites'
+const favorites = ref(new Set())
 
 const KIND = {
   lookup: 'справочник',
@@ -65,15 +115,62 @@ function kindLabel(p) {
   return KIND[p.kind] || p.kind || ''
 }
 
+function loadFavorites() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]')
+    favorites.value = new Set(Array.isArray(raw) ? raw : [])
+  } catch {
+    favorites.value = new Set()
+  }
+}
+
+function toggleFavorite(id) {
+  const next = new Set(favorites.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  favorites.value = next
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next]))
+}
+
+const folderList = computed(() => {
+  const counts = new Map()
+  for (const r of reports.value) {
+    const key = r.folder || ''
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  const items = [{ key: '*', label: 'Все отчёты', count: reports.value.length }]
+  items.push({ key: '★', label: 'Избранное', count: reports.value.filter((r) => favorites.value.has(r.id)).length })
+  for (const [key, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ru'))) {
+    items.push({ key: key || '__none', label: key || 'Без папки', count })
+  }
+  return items.filter((f) => f.key !== '★' || f.count > 0)
+})
+
+const tagList = computed(() => {
+  const counts = new Map()
+  for (const r of reports.value) for (const t of r.tags || []) counts.set(t, (counts.get(t) || 0) + 1)
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ru'))
+    .map(([key, count]) => ({ key, count }))
+})
+
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
-  if (!q) return reports.value
-  return reports.value.filter(
-    (r) => (r.title || '').toLowerCase().includes(q) || r.id.toLowerCase().includes(q)
-  )
+  return reports.value.filter((r) => {
+    if (activeFolder.value === '★' && !favorites.value.has(r.id)) return false
+    if (activeFolder.value === '__none' && r.folder) return false
+    if (activeFolder.value !== '*' && activeFolder.value !== '★' && activeFolder.value !== '__none') {
+      if (r.folder !== activeFolder.value) return false
+    }
+    if (activeTag.value && !(r.tags || []).includes(activeTag.value)) return false
+    if (!q) return true
+    const haystack = [r.title, r.description, r.id, ...(r.tags || [])].join(' ').toLowerCase()
+    return haystack.includes(q)
+  })
 })
 
 onMounted(async () => {
+  loadFavorites()
   try {
     reports.value = await api.reports()
   } catch (e) {
@@ -95,7 +192,7 @@ body {
 
 <style scoped>
 .page {
-  max-width: 980px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 24px 20px 48px;
 }
@@ -136,6 +233,76 @@ h1 {
   color: #7b8492;
   white-space: nowrap;
 }
+.catalog {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.side {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 14px;
+}
+.folders {
+  display: grid;
+  gap: 2px;
+}
+.folder {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: #33404f;
+  cursor: pointer;
+}
+.folder:hover {
+  background: #eef2f8;
+}
+.folder.active {
+  background: #e7effb;
+  border-color: #cddff6;
+  color: #17427f;
+  font-weight: 600;
+}
+.fcnt {
+  color: #8b97a6;
+  font-size: 11px;
+}
+.side-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b97a6;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tag {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #d7e0ec;
+  background: #fff;
+  color: #3a4a5f;
+  cursor: pointer;
+}
+.tag.active {
+  background: #17427f;
+  border-color: #17427f;
+  color: #fff;
+}
 .cards {
   list-style: none;
   margin: 0;
@@ -157,6 +324,19 @@ h1 {
   gap: 10px;
   flex-wrap: wrap;
 }
+.star {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  border: 0;
+  background: none;
+  color: #b6c0cc;
+  cursor: pointer;
+  padding: 0;
+}
+.star.on {
+  color: #e0a32b;
+}
 .title {
   font-size: 16px;
   font-weight: 600;
@@ -173,10 +353,34 @@ h1 {
   border-radius: 4px;
   padding: 1px 6px;
 }
+.folder-badge {
+  font-size: 11px;
+  color: #4a5361;
+  background: #eef3fb;
+  border: 1px solid #dbe6f7;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
 .desc {
   margin: 0;
   font-size: 13px;
   color: #4a5361;
+}
+.tags-row {
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+}
+.tag-chip {
+  font-size: 11px;
+  color: #5b6b86;
+  background: #f4f6fa;
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: pointer;
 }
 .params {
   list-style: none;
@@ -233,5 +437,13 @@ h1 {
 .muted {
   color: #7b8492;
   font-size: 13px;
+}
+@media (max-width: 720px) {
+  .catalog {
+    grid-template-columns: 1fr;
+  }
+  .side {
+    position: static;
+  }
 }
 </style>

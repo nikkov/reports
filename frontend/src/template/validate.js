@@ -262,6 +262,31 @@ export function validateTemplate(template) {
     }
   })
 
+  // каталог: папка и теги
+  if (template.folder !== undefined && typeof template.folder !== 'string') {
+    errors.push({ path: 'folder', message: 'folder должен быть строкой' })
+  }
+  if (template.tags !== undefined && (!Array.isArray(template.tags) || template.tags.some((t) => typeof t !== 'string'))) {
+    errors.push({ path: 'tags', message: 'tags должен быть массивом строк' })
+  }
+
+  // drill-through: переход в другой отчёт из подытога группы
+  ;(template.blocks || []).forEach((block, i) => {
+    if (!block.drill) return
+    if (block.type !== 'table') {
+      errors.push({ path: `blocks.${i}.drill`, message: 'drill допустим только в табличном блоке' })
+      return
+    }
+    if (!block.drill.report) {
+      errors.push({ path: `blocks.${i}.drill.report`, message: 'drill.report обязателен' })
+    }
+    for (const [name, ref] of Object.entries(block.drill.params || {})) {
+      if (typeof ref !== 'string' || !/^(group\.|param\.|[^$])/.test(ref)) {
+        errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'значение должно быть group.<field>, param.<name> или строкой' })
+      }
+    }
+  })
+
   for (const [key, ds] of Object.entries(template.datasets || {})) {
     if (ds?.queryId) {
       errors.push({ path: `datasets.${key}`, message: 'queryId больше не поддерживается: SQL задаётся в datasets.<key>.sql' })

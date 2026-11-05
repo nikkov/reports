@@ -120,5 +120,10 @@
       "aggregate": "sum",
       "width": "full"
     }
+  ],
+  "folder": "Операции",
+  "tags": [
+    "SLA",
+    "дашборд"
   ]
 }

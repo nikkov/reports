@@ -697,6 +697,8 @@ int main() {
                 if (Json::parseFromStream(builder, in, &body, &errs)) {
                     item["title"] = body.get("title", Json::Value("")).asString();
                     item["description"] = body.get("description", Json::Value("")).asString();
+                    item["folder"] = body.get("folder", Json::Value("")).asString();
+                    item["tags"] = body.get("tags", Json::Value(Json::arrayValue));
 
                     Json::Value params(Json::arrayValue);
                     const Json::Value &declared = body["params"];

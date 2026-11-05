@@ -13,6 +13,8 @@
     :styles="styles"
     :virtual="virtual"
     :print-mode="printMode"
+    :drill="block.drill || null"
+    @drill="emit('drill', $event)"
     :rows="view.rows"
     :columns="columns"
     :merges="view.merges"
@@ -27,6 +29,8 @@
     v-else
     :virtual="virtual"
     :print-mode="printMode"
+    :drill="block.drill || null"
+    @drill="emit('drill', $event)"
     :rows="view.rows"
     :columns="columns"
     :merges="view.merges"
@@ -46,6 +50,8 @@ import ReportTable from '../components/ReportTable.vue'
 import { buildTableModel, evaluateRowExpression } from '../engine/group.js'
 import { analyzeExpression } from '../engine/expr.js'
 import { evaluate } from '../engine/expr.js'
+
+const emit = defineEmits(['drill'])
 
 const props = defineProps({
   block: { type: Object, required: true },

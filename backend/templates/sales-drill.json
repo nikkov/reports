@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "id": "sales-drill",
+  "title": "Продажи: детали по региону и категории",
+  "description": "Детальный реестр, открывается по ссылке из сводного отчёта: регион и категория приходят параметрами.",
+  "folder": "Продажи",
+  "tags": [
+    "детально",
+    "drill-through"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "source": {
+        "kind": "date"
+      },
+      "default": "2026-03-01"
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "source": {
+        "kind": "date"
+      },
+      "default": "2026-03-10"
+    },
+    {
+      "name": "region",
+      "type": "text",
+      "label": "Регион",
+      "required": false
+    },
+    {
+      "name": "category",
+      "type": "text",
+      "label": "Категория",
+      "required": false
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "sql": "SELECT s.order_date, r.name AS region, s.category, s.product, s.amount, s.profit FROM sales s JOIN regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date AND (:region = '' OR r.name = :region) AND (:category = '' OR s.category = :category) ORDER BY s.order_date, s.id",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region",
+        "category": "$category"
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Детализация по выбранной группе сводного отчёта. Параметры региона и категории подставлены автоматически."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "title": "Детали",
+      "width": "full",
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "order_date",
+          "title": "Дата",
+          "type": "date",
+          "width": 110,
+          "align": "center"
+        },
+        {
+          "field": "region",
+          "title": "Регион",
+          "width": 120
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "width": 140
+        },
+        {
+          "field": "product",
+          "title": "Продукт",
+          "width": 160
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "aggregate": "sum",
+          "format": "integer",
+          "align": "right",
+          "width": 120
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "aggregate": "sum",
+          "format": "integer",
+          "align": "right",
+          "width": 120
+        }
+      ]
+    }
+  ],
+  "layout": {
+    "numericAlign": "right"
+  }
+}

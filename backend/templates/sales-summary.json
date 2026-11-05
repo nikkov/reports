@@ -83,7 +83,17 @@
           "expression": "sum(profit) / sum(amount)",
           "format": "percent"
         }
-      ]
+      ],
+      "drill": {
+        "report": "sales-drill",
+        "label": "Детали по группе",
+        "params": {
+          "region": "group.region",
+          "category": "group.category",
+          "from": "param.from",
+          "to": "param.to"
+        }
+      }
     },
     {
       "type": "chart",
@@ -114,5 +124,10 @@
       "aggregate": "sum",
       "width": "full"
     }
+  ],
+  "folder": "Продажи",
+  "tags": [
+    "сводка",
+    "группировка"
   ]
 }

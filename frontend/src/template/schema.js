@@ -49,6 +49,17 @@ export default {
     },
     "styles": {
       "$ref": "#/$defs/styles"
+    },
+    "folder": {
+      "type": "string",
+      "description": "папка в каталоге отчётов"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "теги каталога"
     }
   },
   "$defs": {
@@ -331,6 +342,9 @@ export default {
           "items": {
             "$ref": "#/$defs/rule"
           }
+        },
+        "drill": {
+          "$ref": "#/$defs/drill"
         }
       }
     },
@@ -849,6 +863,28 @@ export default {
           "pattern": "^[a-z][a-zA-Z0-9_]*$"
         }
       ]
+    },
+    "drill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report"
+      ],
+      "properties": {
+        "report": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

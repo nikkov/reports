@@ -321,7 +321,7 @@ test('список отчётов: карточки, поиск, переход 
   expect(badges.join(' ')).toContain('справочник')
 
   // поиск по названию и по id
-  await page.locator('.tools input').fill('по региону')
+  await page.locator('.tools input').fill('центрам затрат')
   await expect(page.locator('.card')).toHaveCount(1)
   await page.locator('.tools input').fill('sales-summary')
   await expect(page.locator('.card')).toHaveCount(1)
@@ -642,4 +642,59 @@ test('печатный вид: таблица сразу под заголовк
 
   const pdf = await page.pdf({ format: 'A4', landscape: true })
   expect(pdf.length).toBeGreaterThan(10000)
+})
+
+test('drill-through: подытог группы открывает детальный отчёт с подставленными параметрами', async ({ page }) => {
+  await page.goto('/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  // переход доступен прямо с ячейки группы в первой строке
+  const link = page.locator('a.drill').first()
+  await expect(link).toBeVisible()
+  const label = (await link.textContent()).replace(/\s*→\s*$/, '').trim()
+
+  await Promise.all([page.waitForURL(/report=sales-drill/), link.click()])
+  const url = new URL(page.url())
+  expect(url.searchParams.get('report')).toBe('sales-drill')
+  expect(url.searchParams.get('from')).toBe('2026-03-01')
+  expect(url.searchParams.get('to')).toBe('2026-03-10')
+  // группа подставлена в параметр: регион и категория не пустые
+  expect(url.searchParams.get('region')).toBeTruthy()
+  expect(url.searchParams.get('category')).toBeTruthy()
+  // ссылка — ячейка группы: её текст совпадает с подставленным регионом
+  expect(label).toBe(url.searchParams.get('region'))
+
+  await expect(page.locator('.rt-table')).toBeVisible()
+  await expect(page.locator('.meta')).toContainText('строк')
+})
+
+test('каталог: папки, теги и избранное', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.card')).toHaveCount(13)
+  await expect(page.locator('.folder', { hasText: 'Финансы' })).toBeVisible()
+
+  // папка
+  await page.locator('.folder', { hasText: 'Финансы' }).click()
+  await expect(page.locator('.card')).toHaveCount(2)
+  for (const folder of await page.locator('.card').evaluateAll((els) => els.map((e) => e.dataset.folder))) {
+    expect(folder).toBe('Финансы')
+  }
+
+  // тег внутри папки
+  await page.locator('.tag', { hasText: 'печать' }).click()
+  await expect(page.locator('.card')).toHaveCount(1)
+  await page.locator('.tag', { hasText: 'печать' }).click()
+
+  // возврат ко всем и поиск по описанию/тегу
+  await page.locator('.folder', { hasText: 'Все отчёты' }).click()
+  await page.locator('input[type=search]').fill('SLA')
+  await expect(page.locator('.card')).toHaveCount(1)
+
+  // избранное сохраняется между перезагрузками
+  await page.locator('input[type=search]').fill('')
+  await page.locator('.card').first().locator('.star').click()
+  await expect(page.locator('.folder', { hasText: 'Избранное' })).toContainText('1')
+  await page.reload()
+  await page.locator('.folder', { hasText: 'Избранное' }).click()
+  await expect(page.locator('.card')).toHaveCount(1)
 })

@@ -47,6 +47,7 @@
           :height="460"
           :styles="stylesFor(block)"
           :print-mode="printMode"
+          @drill="onDrill"
         />
 
         <ChartBlock v-else-if="block.type === 'chart'" :block="block" :rows="rows" :styles="stylesFor(block)" />
@@ -252,6 +253,27 @@ async function printReport() {
   } finally {
     printing.value = false
   }
+}
+
+// Переход из подытога группы в детальный отчёт (ADR-29):
+// group.<field> — значение группы из строки, param.<name> — текущий параметр отчёта.
+function onDrill({ row, spec }) {
+  if (!spec?.report) return
+  const groupFields = (tableBlock.value?.columns || []).filter((c) => c.group).map((c) => c.field)
+  const query = new URLSearchParams()
+  query.set('report', spec.report)
+  for (const [name, ref] of Object.entries(spec.params || {})) {
+    if (typeof ref !== 'string') continue
+    if (ref.startsWith('group.')) {
+      const index = groupFields.indexOf(ref.slice(6))
+      if (index >= 0) query.set(name, row.groupPath?.[index] ?? '')
+    } else if (ref.startsWith('param.')) {
+      query.set(name, paramValues[ref.slice(6)] ?? '')
+    } else {
+      query.set(name, ref)
+    }
+  }
+  window.location.href = 'report.html?' + query.toString()
 }
 
 // Стили блока считаются один раз: слияние пресета, шаблона и блока не должно идти на каждый кадр.
