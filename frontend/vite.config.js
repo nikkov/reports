@@ -10,6 +10,12 @@ export default defineConfig({
     host: '127.0.0.1',
     proxy: { '/api': 'http://127.0.0.1:8080' }
   },
+  // Демонстрация работает на prebuilt dist: preview тоже должен проксировать /api.
+  preview: {
+    port: 5173,
+    host: '127.0.0.1',
+    proxy: { '/api': process.env.REP_API || 'http://127.0.0.1:8080' }
+  },
   test: {
     include: ['src/**/*.test.js'],
     exclude: ['e2e/**', 'node_modules/**']

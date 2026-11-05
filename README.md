@@ -37,6 +37,13 @@ cmake --build backend/build -j"$(nproc)"
 | `scripts/conan` | обёртка Conan v1 с жёсткой проверкой версии |
 | `scripts/check.sh` | полная проверка: версия Conan, запрещённые компоненты, сборка+тесты, валидация шаблонов, фронтенд-тесты |
 
+## Запуск демонстрации
+
+```bash
+./scripts/build.sh     # conan install + cmake + ctest + npm ci + build (идемпотентно)
+./scripts/demo.sh      # backend :8080 + preview dist :5173, печатает ссылку, Ctrl+C — стоп
+```
+
 ## Страница отчёта и e2e
 
 ```bash
