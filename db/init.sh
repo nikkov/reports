@@ -22,6 +22,12 @@ fi
 ${PSQL[@]} -d "$DB" -q -f "$ROOT/db/schema.sql"
 ${PSQL[@]} -d "$DB" -q -f "$ROOT/db/seed.sql"
 
+# шаблоны из файлов в БД (ADR-21)
+if command -v node >/dev/null 2>&1; then
+  node "$ROOT/scripts/templates-push.mjs" "$ROOT"/backend/templates/*.json >/dev/null
+  echo "templates: $(${PSQL[@]} -d "$DB" -tAc "SELECT count(*) FROM report_templates")"
+fi
+
 counts="$(${PSQL[@]} -d "$DB" -tAc "SELECT (SELECT count(*) FROM sales) || '/' || (SELECT count(*) FROM finance) || '/' || (SELECT count(*) FROM ops)")"
 echo "rows sales/finance/ops: $counts"
 

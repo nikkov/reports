@@ -1,4 +1,5 @@
 -- Схема данных для отчётов. Синтетика (ADR-16). Идемпотентно: DROP + CREATE.
+DROP TABLE IF EXISTS report_templates;
 DROP TABLE IF EXISTS sales;
 DROP TABLE IF EXISTS finance;
 DROP TABLE IF EXISTS ops;
@@ -42,3 +43,11 @@ CREATE TABLE ops (
 );
 
 CREATE INDEX ops_day_idx ON ops (day);
+
+-- Шаблоны отчётов хранятся в БД (ADR-21): id, заголовок и тело шаблона как jsonb.
+CREATE TABLE report_templates (
+    id         text        PRIMARY KEY,
+    title      text        NOT NULL,
+    body       jsonb       NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);

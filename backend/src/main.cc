@@ -79,15 +79,15 @@ struct TemplateInfo {
     std::map<std::string, std::string> datasetParams;  // имя параметра запроса → "$param" шаблона
 };
 
-bool loadTemplate(const fs::path &file, TemplateInfo &out) {
-    std::ifstream in(file);
-    if (!in) return false;
+bool parseTemplate(const std::string &text, const std::string &fallbackId, TemplateInfo &out) {
     Json::Value root;
     Json::CharReaderBuilder b;
     std::string errs;
+    std::istringstream in(text);
     if (!Json::parseFromStream(b, in, &root, &errs)) return false;
 
-    out.id = root.get("id", file.stem().string()).asString();
+    out = TemplateInfo{};
+    out.id = root.get("id", fallbackId).asString();
     out.title = root.get("title", out.id).asString();
     const Json::Value &datasets = root["datasets"];
     if (!datasets.isObject() || datasets.empty()) return true;  // шаблон без данных
@@ -98,6 +98,14 @@ bool loadTemplate(const fs::path &file, TemplateInfo &out) {
         for (auto it = p.begin(); it != p.end(); ++it) out.datasetParams[it.name()] = it->asString();
     }
     return true;
+}
+
+bool loadTemplateFile(const fs::path &file, TemplateInfo &out) {
+    std::ifstream in(file);
+    if (!in) return false;
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return parseTemplate(ss.str(), file.stem().string(), out);
 }
 
 void runQuery(const orm::DbClientPtr &db, const std::string &sql,
@@ -135,22 +143,52 @@ int main() {
     }
     LOG_INFO << "loaded " << registry.size() << " queries from " << queriesPath;
 
-    // Шаблоны читаются один раз на старте (dev: перезапуск сервиса).
+    // Клиент БД нужен и для данных, и для загрузки шаблонов (ADR-21).
+    auto db = orm::DbClient::newPgClient(rep::connInfoFromEnv(), poolSize);
+
+    const std::string templatesSource = rep::envOr("REP_TEMPLATES_SOURCE", "db");
     std::map<std::string, TemplateInfo> templates;
-    if (fs::is_directory(templatesDir)) {
-        for (const auto &entry : fs::directory_iterator(templatesDir)) {
-            if (!entry.is_regular_file() || entry.path().extension() != ".json") continue;
-            TemplateInfo info;
-            if (!loadTemplate(entry.path(), info)) {
-                LOG_ERROR << "шаблон не разобран: " << entry.path();
-                continue;
+    std::map<std::string, std::string> templatesRaw;  // id → исходный JSON, отдаётся клиенту как есть
+
+    if (templatesSource == "files") {
+        if (fs::is_directory(templatesDir)) {
+            for (const auto &entry : fs::directory_iterator(templatesDir)) {
+                if (!entry.is_regular_file() || entry.path().extension() != ".json") continue;
+                TemplateInfo info;
+                if (!loadTemplateFile(entry.path(), info)) {
+                    LOG_ERROR << "шаблон не разобран: " << entry.path();
+                    continue;
+                }
+                templates[info.id] = info;
+                std::ifstream in(entry.path());
+                std::stringstream ss;
+                ss << in.rdbuf();
+                templatesRaw[info.id] = ss.str();
             }
-            templates[info.id] = info;
+        }
+        LOG_INFO << "loaded " << templates.size() << " templates from " << templatesDir;
+    } else {
+        try {
+            auto rows = db->execSqlSync("SELECT id, title, body::text FROM report_templates ORDER BY id");
+            for (const auto &row : rows) {
+                const std::string id = row["id"].as<std::string>();
+                const std::string body = row["body"].as<std::string>();
+                TemplateInfo info;
+                if (!parseTemplate(body, id, info)) {
+                    LOG_ERROR << "шаблон в БД не разобран: " << id;
+                    continue;
+                }
+                info.id = id;
+                info.title = row["title"].as<std::string>();
+                templates[id] = info;
+                templatesRaw[id] = body;
+            }
+            LOG_INFO << "loaded " << templates.size() << " templates from database";
+        } catch (const std::exception &e) {
+            LOG_FATAL << "не удалось загрузить шаблоны из БД: " << e.what();
+            return 1;
         }
     }
-    LOG_INFO << "loaded " << templates.size() << " templates from " << templatesDir;
-
-    auto db = orm::DbClient::newPgClient(rep::connInfoFromEnv(), poolSize);
 
     app().registerHandler(
         "/api/health",
@@ -193,20 +231,18 @@ int main() {
 
     app().registerHandler(
         "/api/reports/{id}",
-        [templates, templatesDir](const HttpRequestPtr &req,
-                                  std::function<void(const HttpResponsePtr &)> &&cb,
-                                  const std::string &id) {
+        [templatesRaw](const HttpRequestPtr &req,
+                       std::function<void(const HttpResponsePtr &)> &&cb,
+                       const std::string &id) {
             (void)req;
-            std::ifstream in(fs::path(templatesDir) / (id + ".json"));
-            if (!in) {
+            const auto it = templatesRaw.find(id);
+            if (it == templatesRaw.end()) {
                 sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
                 return;
             }
-            std::stringstream ss;
-            ss << in.rdbuf();
             auto resp = HttpResponse::newHttpResponse();
             resp->setContentTypeCode(CT_APPLICATION_JSON);
-            resp->setBody(ss.str());
+            resp->setBody(it->second);
             resp->addHeader("Cache-Control", "no-store");
             cb(resp);
         },
