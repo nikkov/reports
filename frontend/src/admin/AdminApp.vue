@@ -87,6 +87,28 @@
         <span v-if="status" class="status" :class="statusKind">{{ status }}</span>
       </div>
 
+      <section v-if="paramQueries.length" class="params">
+        <h3>Параметры и их запросы <span class="dim">({{ paramQueries.length }})</span></h3>
+        <div v-for="p in paramQueries" :key="p.name" class="param">
+          <div class="param-head">
+            <code class="pname">{{ p.name }}</code>
+            <span class="ptitle">{{ p.label || '—' }}</span>
+            <span class="tag">{{ p.type }}</span>
+            <span class="tag kind">{{ p.kind }}</span>
+            <span v-if="p.multiple" class="tag">мультивыбор</span>
+            <span v-if="p.dependsOn" class="tag">зависит от {{ p.dependsOn }}</span>
+            <span
+              v-if="p.guardOk !== null"
+              class="tag"
+              :class="p.guardOk ? 'ok' : 'bad'"
+              :title="p.guardOk ? 'SQL проходит серверную проверку' : 'SQL не пройдёт серверную проверку: только SELECT/WITH'"
+            >{{ p.guardOk ? 'SELECT ok' : 'guard: не SELECT' }}</span>
+          </div>
+          <pre v-if="p.sql" class="psql">{{ p.sql }}</pre>
+          <p v-else class="dim small">SQL не задан — параметр берёт значение из контрола ({{ p.kind }}).</p>
+        </div>
+      </section>
+
       <section v-if="errors.length || warnings.length" class="problems">
         <div v-if="errors.length" class="problem-group">
           <h3>Ошибки · {{ errors.length }}</h3>
@@ -403,6 +425,36 @@ async function select(id) {
   if (id === currentId.value) return
   await loadTemplate(id)
 }
+
+// Параметры шаблона и их запросы: администратору нужно видеть SQL справочников,
+// не разыскивая его в JSON. guard — та же проверка «только SELECT», что на сервере.
+const paramQueries = computed(() => {
+  try {
+    const tpl = JSON.parse(text.value)
+    return (tpl.params || []).map((p) => {
+      const sql = p?.source?.sql || ''
+      const kind = p?.source?.kind || p?.type || ''
+      const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
+      const guardOk = !sql
+        ? null
+        : (normalized.startsWith('select') || normalized.startsWith('with')) &&
+          !/[;]|--|\/\*/.test(sql) &&
+          !/\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|merge|call)\b/.test(normalized)
+      return {
+        name: p.name || '',
+        label: p.label || '',
+        type: p.type || '',
+        kind,
+        multiple: !!p.multiple,
+        dependsOn: p?.source?.dependsOn || '',
+        sql,
+        guardOk
+      }
+    })
+  } catch {
+    return []
+  }
+})
 
 function parseDraft() {
   try {
@@ -824,6 +876,81 @@ body {
 </style>
 
 <style scoped>
+/* Параметры и SQL справочников: видимая часть админки, а не 「найди в JSON」 */
+.params {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  max-height: none;
+  display: grid;
+  gap: 8px;
+}
+.params h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1c1f23;
+}
+.param {
+  padding: 6px 8px;
+  border: 1px solid #eef1f5;
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+.param-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.pname {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #f2f5f9;
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: #1a4fa0;
+}
+.ptitle {
+  color: #4a5361;
+}
+.tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: #5b6472;
+}
+.tag.kind {
+  background: #eaf5ee;
+  color: #1f5a38;
+}
+.tag.ok {
+  background: #e6f4ea;
+  color: #1f6b34;
+}
+.tag.bad {
+  background: #fdeaea;
+  color: #8c1f1f;
+}
+.psql {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: #f7f9fc;
+  border: 1px solid #e6eaef;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #26313d;
+}
+.small {
+  font-size: 11.5px;
+}
 .shell {
   display: flex;
   height: 100%;

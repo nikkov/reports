@@ -205,6 +205,7 @@ test('свёрнутая категория не перекрашивает яч
 
 test('«свернуть всё» оставляет только итоги регионов, «развернуть всё» возвращает детали', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  await waitRows(page) // без ожидания данных клик по кнопке попадает в пустую таблицу
   const heightBefore = await page.locator('.rt').evaluate((el) => el.scrollHeight)
 
   await page.getByRole('button', { name: 'Свернуть всё' }).click()
@@ -529,4 +530,29 @@ test('условное форматирование: ячейка по прав�
   expect(info.some((r) => r.rowBg === ROW)).toBe(true)
   // строка ниже порога по сумме остаётся белой, но её маржа может быть подсвечена
   expect(info.some((r) => r.rowBg === 'rgb(255, 255, 255)')).toBe(true)
+})
+
+test('админка показывает параметры и SQL их запросов', async ({ page }) => {
+  await page.goto('/admin.html')
+  await expect(page.locator('.rep-row, li').first()).toBeVisible()
+
+  // открываем отчёт со справочником
+  const edit = page.getByRole('button', { name: 'Изменить' }).first()
+  await edit.click()
+
+  const panel = page.locator('.params')
+  await expect(panel).toBeVisible()
+  await expect(panel.locator('h3')).toContainText('Параметры и их запросы')
+
+  // у справочника виден SQL и метка серверной проверки
+  const lookup = panel.locator('.param', { hasText: 'cost_center' })
+  await expect(lookup.locator('.psql')).toContainText('SELECT')
+  await expect(lookup.locator('.psql')).toContainText('cost_center')
+  await expect(lookup.locator('.tag.ok')).toHaveText('SELECT ok')
+
+  // параметры без SQL честно это показывают
+  const dateParam = panel
+    .locator('.param')
+    .filter({ has: page.locator('.pname', { hasText: /^from$/ }) })
+  await expect(dateParam).toContainText('SQL не задан')
 })
