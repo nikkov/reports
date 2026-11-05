@@ -64,6 +64,7 @@ export default {
         "type": {
           "enum": [
             "date",
+            "datetime",
             "int",
             "float",
             "text",
@@ -105,6 +106,57 @@ export default {
               }
             }
           }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "date",
+                "datetime",
+                "static",
+                "lookup"
+              ]
+            },
+            "queryId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "options": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value",
+                  "label"
+                ],
+                "properties": {
+                  "value": {
+                    "type": [
+                      "string",
+                      "number"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "dependsOn": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "multiple": {
+          "type": "boolean"
         }
       }
     },

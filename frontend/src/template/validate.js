@@ -83,6 +83,68 @@ export function validateTemplate(template) {
 
   const params = template.params || []
 
+  // Способы получения значений параметров (ADR-22): дата/время, статический набор, справочник из БД.
+  const paramsByName = new Map(params.map((p) => [p.name, p]))
+
+  params.forEach((p, index) => {
+    const path = `params.${index}`
+    const src = p.source
+    const kind = src?.kind
+
+    if (!src) {
+      // старый стиль: select обязан иметь options, иначе пользователю нечего выбрать
+      if (p.type === 'select' && !(p.options && p.options.length)) {
+        errors.push({ path, message: 'для select нужен source.options или source.kind=lookup' })
+      }
+      return
+    }
+
+    if (kind === 'lookup') {
+      if (!src.queryId) errors.push({ path: `${path}.source`, message: 'для source.kind=lookup обязателен queryId' })
+      if (src.options) errors.push({ path: `${path}.source`, message: 'lookup и options взаимоисключающие' })
+      if (p.type !== 'select') {
+        errors.push({ path: `${path}.type`, message: 'параметр со справочником должен иметь type=select' })
+      }
+    }
+
+    if (kind === 'static') {
+      if (!src.options || !src.options.length) {
+        errors.push({ path: `${path}.source`, message: 'для source.kind=static нужен непустой options' })
+      }
+      if (src.queryId) errors.push({ path: `${path}.source`, message: 'static и queryId взаимоисключающие' })
+      if (p.type !== 'select') {
+        errors.push({ path: `${path}.type`, message: 'параметр со статическим набором должен иметь type=select' })
+      }
+    }
+
+    if (kind === 'date' || kind === 'datetime') {
+      if (src.queryId || src.options) {
+        errors.push({ path: `${path}.source`, message: 'для даты/времени queryId и options недопустимы' })
+      }
+      if (p.type !== 'date' && p.type !== 'datetime') {
+        errors.push({ path: `${path}.type`, message: `для source.kind=${kind} ожидался type=${kind}` })
+      }
+    }
+
+    if (p.multiple && kind !== 'lookup' && kind !== 'static') {
+      errors.push({ path: `${path}.multiple`, message: 'множественный выбор допустим только для справочника или набора' })
+    }
+
+    if (src.dependsOn) {
+      const parent = paramsByName.get(src.dependsOn)
+      if (!parent) {
+        errors.push({ path: `${path}.source.dependsOn`, message: `неизвестный параметр-родитель «${src.dependsOn}»` })
+      } else {
+        if (params.indexOf(parent) > index) {
+          errors.push({ path: `${path}.source.dependsOn`, message: 'параметр-родитель должен быть объявлен выше' })
+        }
+        if (parent.multiple) {
+          errors.push({ path: `${path}.source.dependsOn`, message: 'зависимость от множественного выбора не поддерживается' })
+        }
+      }
+    }
+  })
+
   for (const [key, ds] of Object.entries(template.datasets || {})) {
     for (const [paramName, source] of Object.entries(ds.params || {})) {
       if (typeof source === 'string' && source.startsWith('$')) {

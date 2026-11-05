@@ -8,14 +8,20 @@
       "type": "date",
       "label": "Период с",
       "required": true,
-      "default": "2026-01-01"
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
     },
     {
       "name": "to",
       "type": "date",
       "label": "по",
       "required": true,
-      "default": "2026-03-31"
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
     }
   ],
   "datasets": {

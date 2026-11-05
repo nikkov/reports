@@ -115,6 +115,59 @@ describe('validateTemplate', () => {
     expect(paths(validateTemplate(t))).toContain('blocks.1.columns.0')
   })
 
+  it('принимает справочник из БД и каскад от него', () => {
+    const t = base()
+    t.params = [
+      { name: 'region', type: 'select', source: { kind: 'lookup', queryId: 'lookup_regions' }, required: true },
+      { name: 'category', type: 'select', source: { kind: 'lookup', queryId: 'lookup_categories_by_region', dependsOn: 'region' } }
+    ]
+    t.datasets.sales.params = { from: '$region', to: '$region' }
+    t.blocks[0].text = 'Регион {{region}}'
+    expect(validateTemplate(t).errors).toEqual([])
+  })
+
+  it('ловит справочник без queryId', () => {
+    const t = base()
+    t.params = [{ name: 'region', type: 'select', source: { kind: 'lookup' } }]
+    expect(paths(validateTemplate(t))).toContain('params.0.source')
+  })
+
+  it('ловит статический набор без options', () => {
+    const t = base()
+    t.params = [{ name: 'cat', type: 'select', source: { kind: 'static' } }]
+    expect(paths(validateTemplate(t))).toContain('params.0.source')
+  })
+
+  it('ловит множественный выбор у даты', () => {
+    const t = base()
+    t.params = [{ name: 'from', type: 'date', multiple: true, source: { kind: 'date' } }]
+    expect(paths(validateTemplate(t))).toContain('params.0.multiple')
+  })
+
+  it('ловит зависимость от неизвестного или объявленного ниже параметра', () => {
+    const t = base()
+    t.params = [
+      { name: 'category', type: 'select', source: { kind: 'lookup', queryId: 'c', dependsOn: 'region' } },
+      { name: 'region', type: 'select', source: { kind: 'lookup', queryId: 'r' } }
+    ]
+    const errs = paths(validateTemplate(t))
+    expect(errs).toContain('params.0.source.dependsOn')
+
+    t.params = [
+      { name: 'category', type: 'select', source: { kind: 'lookup', queryId: 'c', dependsOn: 'nope' } }
+    ]
+    expect(paths(validateTemplate(t))).toContain('params.0.source.dependsOn')
+  })
+
+  it('ловит зависимость от множественного выбора', () => {
+    const t = base()
+    t.params = [
+      { name: 'region', type: 'select', multiple: true, source: { kind: 'lookup', queryId: 'r' } },
+      { name: 'category', type: 'select', source: { kind: 'lookup', queryId: 'c', dependsOn: 'region' } }
+    ]
+    expect(paths(validateTemplate(t))).toContain('params.1.source.dependsOn')
+  })
+
   it('ловит лишнее поле в шаблоне', () => {
     const t = base()
     t.blocks[0].unknown = 1
