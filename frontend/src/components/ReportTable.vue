@@ -65,8 +65,13 @@ const topPad = computed(() => start.value * props.rowHeight)
 const bottomPad = computed(() => Math.max(0, (props.rows.length - end.value) * props.rowHeight))
 const visibleCount = computed(() => Math.ceil(props.height / props.rowHeight))
 
+// Окно начинается ровно с первой видимой строки: тогда серия групп всегда начинается
+// в начале окна и подпись группы не приходится дублировать (иначе съезжает разметка).
+// +26 — высота sticky-заголовка: первая строка окна должна быть видна под ним,
+// иначе подпись группы прячется за заголовком.
+const HEADER_H = 26
 const start = computed(() => {
-  const raw = Math.floor(scrollTop.value / props.rowHeight) - props.overscan
+  const raw = Math.floor((scrollTop.value + HEADER_H) / props.rowHeight)
   return Math.max(0, Math.min(raw, Math.max(0, props.rows.length - 1)))
 })
 
@@ -88,62 +93,76 @@ function rowKey(row, i) {
   return (row.groupId || 'r') + ':' + (start.value + i)
 }
 
-// Объединения обрезаются по окну: ячейка начинается в первом видимом ряду объединения,
-// rowspan не выходит за окно, подпись переносится на первый видимый ряд (cont = продолжение).
+// Серии одинакового groupPath внутри окна. Подпись рисуется на начале серии и,
+// если серия началась выше окна, ещё раз на первой видимой строке — иначе при прокрутке
+// внутри блока в тысячи строк название группы исчезает.
+const runs = computed(() => {
+  const rows = windowRows.value
+  const count = props.groupCount || 0
+  const byCol = Array.from({ length: count }, () => [])
+  for (let col = 0; col < count; col++) {
+    let i = 0
+    while (i < rows.length) {
+      if (rows[i].kind !== 'detail') {
+        i++
+        continue
+      }
+      const prefix = (rows[i].groupPath || []).slice(0, col + 1).join('\u0001')
+      let j = i + 1
+      while (
+        j < rows.length &&
+        rows[j].kind === 'detail' &&
+        (rows[j].groupPath || []).slice(0, col + 1).join('\u0001') === prefix
+      ) {
+        j++
+      }
+      byCol[col].push({ start: i, end: j })
+      i = j
+    }
+  }
+  return byCol
+})
+
+const firstVisibleRel = computed(() => Math.max(0, firstVisible.value - start.value))
+
 function cellsAt(index) {
   const row = props.rows[index]
   if (!row) return []
+  const rel = index - start.value
   const cells = []
-  for (let col = 0; col < props.columns.length; col++) {
-    const merge = props.merges.find((m) => m.row === index && m.col === col)
-    const covering = merge ? null : props.merges.find(
-      (m) => m.col === col && m.row < index && m.row + m.rowspan > index
-    )
 
-    if (merge) {
-      const clampedEnd = Math.min(merge.row + merge.rowspan, end.value)
+  for (let col = 0; col < props.columns.length; col++) {
+    const isGroupCol = col < (props.groupCount || 0) && row.kind === 'detail'
+    if (!isGroupCol) {
       cells.push({
         key: col,
         col,
         render: true,
-        rowspan: Math.max(1, clampedEnd - merge.row),
-        colspan: merge.colspan || 1,
+        rowspan: 1,
+        colspan: 1,
         continued: false,
-        text: props.cellText(props.rows[merge.row], props.columns[col].field),
-        toggle: row.level === 0 && (row.kind === 'detail' || row.kind === 'subtotal') ? row.groupPath : null,
-        expanded: row.groupPath ? props.expanded.has(row.groupPath.join('\u0001')) : false
+        text: props.cellText(row, props.columns[col].field),
+        toggle: null,
+        expanded: false
       })
       continue
     }
 
-    if (covering) {
-      // Первый видимый ряд продолжения: показываем подпись группы сверху окна.
-      if (covering.row < firstVisible.value && index === firstVisible.value) {
-        cells.push({
-          key: col,
-          col,
-          render: true,
-          rowspan: Math.min(end.value, covering.row + covering.rowspan) - firstVisible.value,
-          colspan: covering.colspan || 1,
-          continued: true,
-          text: props.cellText(props.rows[covering.row], props.columns[col].field),
-          toggle: null,
-          expanded: false
-        })
-      }
-      continue
-    }
+    const run = runs.value[col].find((r) => rel >= r.start && rel < r.end)
+    if (!run) continue
+
+    if (rel !== run.start) continue
 
     cells.push({
       key: col,
       col,
       render: true,
-      rowspan: 1,
+      rowspan: run.end - run.start,
       colspan: 1,
       continued: false,
       text: props.cellText(row, props.columns[col].field),
-      toggle: null,
-      expanded: false
+      toggle: row.level === 0 ? row.groupPath : null,
+      expanded: row.groupPath ? props.expanded.has(row.groupPath.join('\u0001')) : false
     })
   }
   return cells
