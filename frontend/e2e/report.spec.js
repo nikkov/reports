@@ -208,9 +208,9 @@ test('диаграмма получает агрегаты из того же д
 
 test('диаграмма с seriesField показывает несколько серий', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  // последний блок шаблона — столбцы по категориям в разрезе регионов; ждём, пока он отрисуется
+  await expect.poll(async () => (await page.evaluate(() => window.__chart))?.type).toBe('bar')
   const info = await page.evaluate(() => window.__chart)
-  // последний блок шаблона — столбцы по категориям в разрезе регионов
-  expect(info.type).toBe('bar')
   expect(info.series).toBeGreaterThan(1)
 })
 
