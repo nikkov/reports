@@ -94,3 +94,24 @@ test('обе строки заголовка остаются видимыми �
   expect(leafBox.y).toBeGreaterThan(groupBox.y)
   expect(leafBox.y + leafBox.height).toBeLessThan(box.y + 70)
 })
+
+test('сворачивание и разворачивание группы', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+
+  const first = page.locator('.rt-table tbody tr:not(.spacer)').first()
+  const heightBefore = await page.locator('.rt').evaluate((el) => el.scrollHeight)
+
+  await first.locator('.chev').first().click()
+
+  const total = page.locator('.rt-table tbody tr:not(.spacer)').first()
+  await expect(total).toContainText('Итого')
+  await expect(total.locator('td').nth(3)).not.toHaveText('')
+  const heightCollapsed = await page.locator('.rt').evaluate((el) => el.scrollHeight)
+  expect(heightCollapsed).toBeLessThan(heightBefore)
+
+  // клик по строке итога возвращает детали
+  await total.locator('.chev').first().click()
+  await expect(page.locator('.rt-table tbody tr:not(.spacer)').first()).not.toContainText('Итого')
+  const heightExpanded = await page.locator('.rt').evaluate((el) => el.scrollHeight)
+  expect(heightExpanded).toBe(heightBefore)
+})

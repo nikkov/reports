@@ -103,8 +103,13 @@ const visibleCount = computed(() => Math.ceil(props.height / props.rowHeight))
 // Первая строка окна должна быть видна под sticky-заголовком, иначе подпись группы
 // прячется за ним. Высота = число строк заголовка × 26 px.
 const headerHeight = computed(() => headerRows.value.length * 26)
+// Заголовок перекрывает строки только когда прокрутка началась: при scrollTop = 0
+// первые строки (например, «Итого» свёрнутой группы) видны полностью.
+const hiddenRows = computed(() =>
+  scrollTop.value > 0 ? Math.ceil(headerHeight.value / props.rowHeight) : 0
+)
 const start = computed(() => {
-  const raw = Math.floor((scrollTop.value + headerHeight.value) / props.rowHeight)
+  const raw = Math.floor(scrollTop.value / props.rowHeight) + hiddenRows.value
   return Math.max(0, Math.min(raw, Math.max(0, props.rows.length - 1)))
 })
 
@@ -181,8 +186,9 @@ function cellsAt(index) {
         colspan: 1,
         continued: false,
         text: props.cellText(row, props.columns[col].field),
-        toggle: null,
-        expanded: false
+        // строка итога: клик по её подписи разворачивает группу обратно
+        toggle: row.kind === 'subtotal' && col === row.level ? row.groupPath : null,
+        expanded: row.groupPath ? props.expanded.has(row.groupPath.join('\u0001')) : false
       })
       continue
     }
@@ -200,7 +206,13 @@ function cellsAt(index) {
       colspan: 1,
       continued: false,
       text: props.cellText(row, props.columns[col].field),
-      toggle: row.kind === 'detail' ? row.groupPath.slice(0, col + 1) : null,
+      // у детальной строки сворачиваем группу этого уровня, у строки итога — саму группу
+      toggle:
+        row.kind === 'detail'
+          ? row.groupPath.slice(0, col + 1)
+          : row.kind === 'subtotal'
+            ? row.groupPath
+            : null,
       expanded: row.groupPath ? props.expanded.has(row.groupPath.join('\u0001')) : false
     })
   }
