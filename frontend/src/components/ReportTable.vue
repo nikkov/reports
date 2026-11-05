@@ -76,6 +76,8 @@ const props = defineProps({
   groupCount: { type: Number, default: 0 }, // колонки-группы (объединяются)
   height: { type: Number, default: 520 },
   overscan: { type: Number, default: 8 },
+  // печать: рендерим весь отчёт, без окна виртуализации (ADR-28)
+  virtual: { type: Boolean, default: true },
   expanded: { type: Set, default: () => new Set() },
   cellText: { type: Function, required: true }, // (row, colField) => string
   // (rowIndex, columnKey|null, zone) => CSS-объект правила или null (ADR-25)
@@ -182,6 +184,7 @@ function lowerBound(arr, value) {
 const anchor = computed(() => scrollTop.value + (scrollTop.value > 0 ? headerHeight.value : 0))
 
 const start = computed(() => {
+  if (!props.virtual) return 0
   const n = props.rows.length
   if (!n) return 0
   const index = lowerBound(offsets.value, anchor.value)
@@ -189,6 +192,7 @@ const start = computed(() => {
 })
 
 const end = computed(() => {
+  if (!props.virtual) return props.rows.length
   const n = props.rows.length
   const off = offsets.value
   const limit = off[start.value] + props.height + props.overscan * layout.value.rowHeight
@@ -197,8 +201,10 @@ const end = computed(() => {
   return Math.min(n, i + 1)
 })
 
-const topPad = computed(() => offsets.value[start.value] || 0)
-const bottomPad = computed(() => Math.max(0, totalHeight.value - (offsets.value[end.value] || 0)))
+const topPad = computed(() => (props.virtual ? offsets.value[start.value] || 0 : 0))
+const bottomPad = computed(() =>
+  props.virtual ? Math.max(0, totalHeight.value - (offsets.value[end.value] || 0)) : 0
+)
 
 // Первая реально видимая строка (без overscan): на ней показываем подпись группы,
 // чей объединённый блок начался выше окна.
@@ -463,6 +469,20 @@ function cellsAt(index) {
 .rt-table td.cont {
   color: color-mix(in srgb, var(--rt-b-color, #8a94a3) 55%, transparent);
   font-style: italic;
+}
+@media print {
+  .rt {
+    height: auto !important;
+    overflow: visible !important;
+    border: 1px solid #333;
+  }
+  .rt-table thead {
+    position: static;
+    display: table-header-group;
+  }
+  .rt-table tr {
+    break-inside: avoid;
+  }
 }
 .chev {
   cursor: pointer;

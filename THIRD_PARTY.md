@@ -82,3 +82,5 @@ node scripts/licenses.mjs --json   # то же в JSON
 2. Лицензия вне allowlist → либо заменить пакет, либо зафиксировать отклонение в таблице выше
    и в `DEVIATIONS` внутри `scripts/licenses.mjs`.
 3. `REP_E2E=1 ./scripts/check.sh` — полная проверка.
+
+| `exceljs` | 4.4.0 | MIT | сборка .xlsx на клиенте |

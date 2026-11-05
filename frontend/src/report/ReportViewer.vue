@@ -2,9 +2,17 @@
   <div class="page">
     <header class="head">
       <h1>{{ template?.title || reportId }}</h1>
-      <span class="meta" v-if="status">
-        строк: <b>{{ rowCount }}</b> · запрос: <b>{{ elapsedMs }} мс</b> · шаблон v{{ template?.version }}
-      </span>
+      <div class="head-right">
+        <span class="meta" v-if="status">
+          строк: <b>{{ rowCount }}</b> · запрос: <b>{{ elapsedMs }} мс</b> · шаблон v{{ template?.version }}
+        </span>
+        <div class="tools no-print">
+          <button type="button" class="tool" :disabled="!tableBlock || exporting" @click="exportExcel">
+            {{ exporting ? 'Готовим файл…' : 'Excel' }}
+          </button>
+          <button type="button" class="tool" :disabled="!tableBlock" @click="printReport">Печать / PDF</button>
+        </div>
+      </div>
     </header>
 
     <p v-if="error" class="error"><b>{{ error.code }}</b> {{ error.message }}</p>
@@ -36,6 +44,7 @@
           :rows="rows"
           :height="460"
           :styles="stylesFor(block)"
+          :virtual="!printMode"
         />
 
         <ChartBlock v-else-if="block.type === 'chart'" :block="block" :rows="rows" :styles="stylesFor(block)" />
@@ -181,6 +190,56 @@ onBeforeUnmount(() => {
 
 // --- блоки ---
 
+// Первый табличный блок — источник экспорта и печати (в шаблонах он один).
+const tableBlock = computed(() => (template.value?.blocks || []).find((b) => b.type === 'table'))
+const printMode = ref(false)
+const exporting = ref(false)
+const PRINT_LIMIT = 20000
+
+async function exportExcel() {
+  const block = tableBlock.value
+  if (!block || !template.value) return
+  exporting.value = true
+  try {
+    // ExcelJS грузится лениво: в бандл отчёта он не попадает
+    const { buildWorkbook, exportFileName } = await import('./export/xlsx.js')
+    const blob = await buildWorkbook({
+      block,
+      rows: rows.value,
+      styles: stylesFor(block),
+      params: { ...paramValues },
+      labels: paramLabels.value,
+      meta: { id: reportId, title: template.value.title }
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = exportFileName(reportId)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    error.value = { code: 'EXPORT_FAILED', message: e.message }
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function printReport() {
+  if (rows.value.length > PRINT_LIMIT) {
+    error.value = {
+      code: 'PRINT_LIMIT',
+      message: `в отчёте ${rows.value.length} строк: печать ограничена ${PRINT_LIMIT}. Выгрузите в Excel`
+    }
+    return
+  }
+  printMode.value = true
+  await nextTick()
+  window.addEventListener('afterprint', () => { printMode.value = false }, { once: true })
+  window.print()
+}
+
 // Стили блока считаются один раз: слияние пресета, шаблона и блока не должно идти на каждый кадр.
 let stylesCache = new WeakMap()
 function stylesFor(block) {
@@ -208,6 +267,65 @@ function tableColumns(block) {
 </script>
 
 <style>
+.head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tools {
+  display: flex;
+  gap: 6px;
+}
+.tool {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+  border: 1px solid #cfd6de;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.tool:hover:not(:disabled) {
+  background: #f2f6fd;
+}
+.tool:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media print {
+  .no-print,
+  .params,
+  .tv-bar,
+  .tv-broken {
+    display: none !important;
+  }
+  .page {
+    padding: 0;
+    max-width: none;
+  }
+  .block.full,
+  .block.half {
+    width: 100% !important;
+    break-inside: auto;
+  }
+  .rt {
+    height: auto !important;
+    overflow: visible !important;
+    border: 1px solid #333;
+  }
+  .rt-table thead {
+    position: static;
+    display: table-header-group;
+  }
+  .rt-table tr {
+    break-inside: avoid;
+  }
+  .chart-box {
+    break-inside: avoid;
+  }
+}
 body {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;

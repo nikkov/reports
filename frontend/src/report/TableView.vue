@@ -11,6 +11,7 @@
   <ReportTable
     v-if="styles"
     :styles="styles"
+    :virtual="virtual"
     :rows="view.rows"
     :columns="columns"
     :merges="view.merges"
@@ -23,6 +24,7 @@
   />
   <ReportTable
     v-else
+    :virtual="virtual"
     :rows="view.rows"
     :columns="columns"
     :merges="view.merges"
@@ -48,7 +50,9 @@ const props = defineProps({
   rows: { type: Array, required: true },
   height: { type: Number, default: 460 },
   // разрешённые стили шаблона (ADR-23): undefined = вид версии 1.0
-  styles: { type: Object, default: null }
+  styles: { type: Object, default: null },
+  // печать: весь отчёт без виртуализации (ADR-28)
+  virtual: { type: Boolean, default: true }
 })
 
 import { columnFormat, formatCell } from './format.js'

@@ -556,3 +556,55 @@ test('админка показывает параметры и SQL их зап�
     .filter({ has: page.locator('.pname', { hasText: /^from$/ }) })
   await expect(dateParam).toContainText('SQL не задан')
 })
+
+test('экспорт в Excel: файл со шапкой, числами и листом параметров', async ({ page }) => {
+  await page.goto('/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Excel' }).click()
+  ])
+  expect(download.suggestedFilename()).toMatch(/^sales-summary-\d{4}-\d{2}-\d{2}\.xlsx$/)
+
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(await download.path())
+  expect(wb.worksheets.length).toBe(2)
+  expect(wb.getWorksheet('Параметры')).toBeTruthy()
+
+  const ws = wb.worksheets[0]
+  let numbers = 0
+  let percents = 0
+  ws.eachRow((row) => {
+    row.eachCell((cell) => {
+      if (typeof cell.value === 'number') numbers++
+      if (typeof cell.value === 'number' && String(cell.numFmt || '').includes('%')) percents++
+    })
+  })
+  // числа остаются числами, проценты — с процентным форматом
+  expect(numbers).toBeGreaterThan(5)
+  expect(percents).toBeGreaterThan(0)
+  expect(ws.rowCount).toBeGreaterThan(20)
+})
+
+test('печатный вид: интерфейс скрыт, шапка повторяется', async ({ page }) => {
+  await page.goto('/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк')
+  await page.emulateMedia({ media: 'print' })
+
+  const state = await page.evaluate(() => {
+    const disp = (sel) => {
+      const el = document.querySelector(sel)
+      return el ? getComputedStyle(el).display : 'нет'
+    }
+    const thead = getComputedStyle(document.querySelector('.rt-table thead'))
+    const rt = getComputedStyle(document.querySelector('.rt'))
+    return { params: disp('.params'), tools: disp('.tools'), theadPosition: thead.position, theadDisplay: thead.display, overflow: rt.overflow }
+  })
+  expect(state.params).toBe('none')
+  expect(state.tools).toBe('none')
+  expect(state.theadPosition).toBe('static')
+  expect(state.theadDisplay).toBe('table-header-group')
+  expect(state.overflow).toBe('visible')
+})
