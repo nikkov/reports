@@ -17,8 +17,17 @@ echarts.registerLocale('RU', RU)
 const props = defineProps({
   block: { type: Object, required: true },
   rows: { type: Array, required: true },
-  height: { type: Number, default: 320 }
+  height: { type: Number, default: 320 },
+  // стили шаблона (ADR-23): из них берём цвет и шрифт подписей, осей и легенды
+  styles: { type: Object, default: null }
 })
+
+const textStyle = () => {
+  const font = props.styles?.font
+  const colors = props.styles?.colors
+  if (!font || !colors) return undefined
+  return { color: colors.text, fontFamily: font.family, fontSize: font.size }
+}
 
 const el = ref(null)
 let chart = null
@@ -39,7 +48,8 @@ function buildOption() {
     return {
       animation: false,
       tooltip: { trigger: 'item', valueFormatter: fmt },
-      legend: { type: 'scroll', bottom: 0 },
+      legend: { type: 'scroll', bottom: 0, textStyle: textStyle() },
+      textStyle: textStyle(),
       series: [
         {
           type: 'pie',
@@ -55,9 +65,15 @@ function buildOption() {
     animation: false,
     grid: { left: 90, right: 24, top: 24, bottom: 48, containLabel: false },
     tooltip: { trigger: 'axis', valueFormatter: fmt },
-    legend: series.length > 1 ? { type: 'scroll', bottom: 0 } : undefined,
-    xAxis: { type: 'category', data: categories, axisLabel: { rotate: categories.length > 8 ? 30 : 0 } },
-    yAxis: { type: 'value', axisLabel: { formatter: fmt } },
+    legend: series.length > 1 ? { type: 'scroll', bottom: 0, textStyle: textStyle() } : undefined,
+    xAxis: {
+      type: 'category',
+      data: categories,
+      axisLabel: { rotate: categories.length > 8 ? 30 : 0, color: textStyle()?.color },
+      nameTextStyle: textStyle()
+    },
+    yAxis: { type: 'value', axisLabel: { formatter: fmt, color: textStyle()?.color } },
+    textStyle: textStyle(),
     series: series.map((s) => ({
       name: s.name,
       type: props.block.chartType,

@@ -34,9 +34,10 @@
           :block="block"
           :rows="rows"
           :height="460"
+          :styles="stylesFor(block)"
         />
 
-        <ChartBlock v-else-if="block.type === 'chart'" :block="block" :rows="rows" />
+        <ChartBlock v-else-if="block.type === 'chart'" :block="block" :rows="rows" :styles="stylesFor(block)" />
       </section>
     </template>
   </div>
@@ -48,6 +49,7 @@ import { api } from '../api/client.js'
 import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
 import ChartBlock from './ChartBlock.vue'
+import { resolveStyles } from '../template/styles.js'
 
 const params = new URLSearchParams(location.search)
 const reportId = params.get('report') || 'sales-summary'
@@ -95,7 +97,11 @@ async function load() {
   const started = performance.now()
   try {
     const data = await api.data(reportId, { ...paramValues }, controller.signal)
+    const renderStart = performance.now()
     rows.value = data.rows
+    await nextTick()
+    // бюджет рендера: только построение модели и отрисовка окна, без времени запроса
+    window.__renderMs = Math.round(performance.now() - renderStart)
     lastLoadedKey = JSON.stringify(paramValues)
     elapsedMs.value = Math.round(performance.now() - started)
     status.value = 'ok'
@@ -117,6 +123,7 @@ const needsLookups = (tpl) =>
 onMounted(async () => {
   try {
     template.value = await api.template(reportId)
+    stylesCache = new WeakMap()
     Object.assign(paramValues, defaultParams(template.value))
     if (!needsLookups(template.value)) await load()
   } catch (e) {
@@ -150,6 +157,16 @@ onBeforeUnmount(() => {
 })
 
 // --- блоки ---
+
+// Стили блока считаются один раз: слияние пресета, шаблона и блока не должно идти на каждый кадр.
+let stylesCache = new WeakMap()
+function stylesFor(block) {
+  if (!template.value || !block) return null
+  if (!stylesCache.has(block)) {
+    stylesCache.set(block, resolveStyles(template.value, block))
+  }
+  return stylesCache.get(block)
+}
 
 function renderText(text) {
   // для справочников показываем подпись (NAME), иначе — само значение

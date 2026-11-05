@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "id": "finance-print",
+  "title": "Финансы: план и факт (печатная форма)",
+  "description": "Тот же отчёт в стиле для печати: сетка границ, шрифт с засечками, фиксированные ширины колонок, крупная шапка.",
+  "params": [
+    { "name": "cost_center", "type": "select", "label": "Центр затрат", "source": { "kind": "lookup", "queryId": "lookup_cost_centers" } },
+    { "name": "from", "type": "date", "label": "Период с", "required": true, "default": "2025-10-01", "source": { "kind": "date" } },
+    { "name": "to", "type": "date", "label": "по", "required": true, "default": "2026-02-28", "source": { "kind": "date" } }
+  ],
+  "datasets": {
+    "finance": { "queryId": "finance_by_cost_center", "params": { "cost_center": "$cost_center", "from": "$from", "to": "$to" } }
+  },
+  "styles": {
+    "preset": "print",
+    "layout": {
+      "rowHeight": 24,
+      "headerHeight": 34,
+      "subtotalHeight": 26,
+      "grandtotalHeight": 30,
+      "cellPadding": "3px 8px",
+      "borders": "grid",
+      "tableLayout": "fixed"
+    },
+    "columns": {
+      "period": { "width": 110, "align": "left" },
+      "account": { "width": "30%" },
+      "plan_amount": { "width": 150, "align": "right" },
+      "fact_amount": { "width": 150, "align": "right" }
+    }
+  },
+  "blocks": [
+    { "type": "text", "text": "{{cost_center}}. Период: {{from}} — {{to}}" },
+    {
+      "type": "table",
+      "dataKey": "finance",
+      "collapsible": true,
+      "grandTotal": true,
+      "columns": [
+        { "field": "period", "title": "Месяц", "group": true, "subtotal": true, "type": "date" },
+        { "field": "account", "title": "Счёт" },
+        { "field": "plan_amount", "title": "План", "type": "int", "aggregate": "sum", "format": "number" },
+        { "field": "fact_amount", "title": "Факт", "type": "int", "aggregate": "sum", "format": "number" },
+        { "title": "Отклонение", "expression": "sum(fact_amount) - sum(plan_amount)", "format": "number", "width": 140 },
+        { "title": "Исполнение", "expression": "sum(fact_amount) / sum(plan_amount)", "format": "percent", "decimals": 1, "width": 120 }
+      ]
+    }
+  ]
+}

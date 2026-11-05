@@ -357,3 +357,62 @@ test('все шаблоны из списка открываются и отда
     expect(cells).toBeGreaterThan(0)
   }
 })
+
+test('стили: шаблон без styles выглядит как версия 1.0', async ({ page }) => {
+  await page.goto('/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк')
+  const css = await page.evaluate(() => {
+    const th = getComputedStyle(document.querySelector('.rt-table th'))
+    const td = getComputedStyle(document.querySelector('.rt-table tbody tr.detail td'))
+    return { thBg: th.backgroundColor, thWeight: th.fontWeight, tdAlign: td.verticalAlign, tdBorderRight: td.borderRightWidth }
+  })
+  expect(css.thBg).toBe('rgb(242, 244, 247)')
+  expect(css.thWeight).toBe('600')
+  expect(css.tdAlign).toBe('top')
+  expect(css.tdBorderRight).toBe('1px')
+})
+
+test('стили: пресет print — шрифт, сетка, ширины и высота шапки', async ({ page }) => {
+  await page.goto('/report.html?report=finance-print')
+  await expect(page.locator('.meta')).toContainText('строк')
+  const info = await page.evaluate(() => {
+    const th = getComputedStyle(document.querySelector('.rt-table th'))
+    const td = getComputedStyle(document.querySelectorAll('.rt-table tbody tr.detail td')[3])
+    return {
+      family: th.fontFamily,
+      weight: th.fontWeight,
+      bg: th.backgroundColor,
+      height: th.height,
+      tdBorderRight: td.borderRightWidth,
+      widths: Array.from(document.querySelectorAll('.rt-table col')).map((c) => c.style.width)
+    }
+  })
+  expect(info.family).toContain('Times New Roman')
+  expect(info.weight).toBe('700')
+  expect(info.bg).toBe('rgb(255, 255, 255)')
+  expect(info.height).toBe('34px')
+  expect(info.tdBorderRight).toBe('1px')
+  expect(info.widths.slice(0, 2)).toEqual(['110px', '30%'])
+})
+
+test('стили: тёмная тема и зебра применяются к строкам, а не к шапке', async ({ page }) => {
+  await page.goto('/report.html?report=ops-dark')
+  await expect(page.locator('.meta')).toContainText('строк')
+  const info = await page.evaluate(() => {
+    const th = getComputedStyle(document.querySelector('.rt-table th'))
+    const rows = Array.from(document.querySelectorAll('.rt-table tbody tr.detail'))
+    const plain = rows.find((r) => !r.classList.contains('stripe'))
+    const stripe = rows.find((r) => r.classList.contains('stripe'))
+    return {
+      thBg: th.backgroundColor,
+      thColor: th.color,
+      plainBg: plain ? getComputedStyle(plain.querySelector('td')).backgroundColor : null,
+      stripeBg: stripe ? getComputedStyle(stripe.querySelector('td')).backgroundColor : null,
+      failuresColor: getComputedStyle(rows[0].querySelectorAll('td')[3]).color
+    }
+  })
+  expect(info.thBg).toBe('rgb(35, 44, 56)')
+  expect(info.thColor).toBe('rgb(159, 196, 255)')
+  expect(info.plainBg).not.toBe(info.stripeBg)
+  expect(info.failuresColor).toBe('rgb(255, 154, 154)')
+})

@@ -44,6 +44,9 @@
       "items": {
         "$ref": "#/$defs/block"
       }
+    },
+    "styles": {
+      "$ref": "#/$defs/styles"
     }
   },
   "$defs": {
@@ -237,7 +240,8 @@
         },
         "width": {
           "type": "integer",
-          "minimum": 40
+          "minimum": 40,
+          "maximum": 2000
         },
         "align": {
           "enum": [
@@ -252,6 +256,9 @@
           "items": {
             "$ref": "#/$defs/column"
           }
+        },
+        "style": {
+          "$ref": "#/$defs/columnStyle"
         }
       }
     },
@@ -315,6 +322,9 @@
           "items": {
             "$ref": "#/$defs/column"
           }
+        },
+        "styles": {
+          "$ref": "#/$defs/styles"
         }
       }
     },
@@ -387,6 +397,230 @@
           "$ref": "#/$defs/chartBlock"
         }
       ]
+    },
+    "color": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$|^transparent$"
+    },
+    "padding": {
+      "type": "string",
+      "pattern": "^\\d{1,2}px( \\d{1,2}px){0,3}$"
+    },
+    "styleObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "font": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "family": {
+              "enum": [
+                "system-ui",
+                "Inter",
+                "Roboto",
+                "Arial",
+                "Georgia",
+                "Times New Roman",
+                "Courier New",
+                "monospace"
+              ]
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 32
+            },
+            "weight": {
+              "enum": [
+                300,
+                400,
+                500,
+                600,
+                700,
+                800
+              ]
+            },
+            "style": {
+              "enum": [
+                "normal",
+                "italic"
+              ]
+            },
+            "lineHeight": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 2
+            }
+          }
+        },
+        "colors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "$ref": "#/$defs/color"
+            },
+            "background": {
+              "$ref": "#/$defs/color"
+            },
+            "border": {
+              "$ref": "#/$defs/color"
+            }
+          }
+        },
+        "align": {
+          "enum": [
+            "left",
+            "right",
+            "center"
+          ]
+        },
+        "verticalAlign": {
+          "enum": [
+            "top",
+            "middle",
+            "bottom"
+          ]
+        },
+        "padding": {
+          "$ref": "#/$defs/padding"
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rowHeight": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 120
+        },
+        "headerHeight": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 120
+        },
+        "subtotalHeight": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 120
+        },
+        "grandtotalHeight": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 120
+        },
+        "cellPadding": {
+          "$ref": "#/$defs/padding"
+        },
+        "borders": {
+          "enum": [
+            "none",
+            "horizontal",
+            "grid"
+          ]
+        },
+        "zebra": {
+          "type": "boolean"
+        },
+        "stripeColor": {
+          "$ref": "#/$defs/color"
+        },
+        "tableLayout": {
+          "enum": [
+            "auto",
+            "fixed"
+          ]
+        }
+      }
+    },
+    "styles": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "enum": [
+            "default",
+            "compact",
+            "print",
+            "dark"
+          ]
+        },
+        "font": {
+          "$ref": "#/$defs/styleObject/properties/font"
+        },
+        "colors": {
+          "$ref": "#/$defs/styleObject/properties/colors"
+        },
+        "layout": {
+          "$ref": "#/$defs/layout"
+        },
+        "header": {
+          "$ref": "#/$defs/styleObject"
+        },
+        "body": {
+          "$ref": "#/$defs/styleObject"
+        },
+        "subtotal": {
+          "$ref": "#/$defs/styleObject"
+        },
+        "grandtotal": {
+          "$ref": "#/$defs/styleObject"
+        },
+        "columns": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/columnStyle"
+          }
+        }
+      }
+    },
+    "columnStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 40,
+              "maximum": 2000
+            },
+            {
+              "type": "string",
+              "pattern": "^([1-9]|[1-9][0-9]|100)%$"
+            }
+          ]
+        },
+        "minWidth": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 2000
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 4000
+        },
+        "align": {
+          "enum": [
+            "left",
+            "right",
+            "center"
+          ]
+        },
+        "font": {
+          "$ref": "#/$defs/styleObject/properties/font"
+        },
+        "colors": {
+          "$ref": "#/$defs/styleObject/properties/colors"
+        },
+        "padding": {
+          "$ref": "#/$defs/padding"
+        }
+      }
     }
   }
 }

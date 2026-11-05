@@ -70,6 +70,39 @@ function localPath(err, prefix) {
  * Проверяет шаблон.
  * @returns {{errors: Array<{path: string, message: string}>, warnings: Array<{path: string, message: string}>}}
  */
+// Семантика стилей (ADR-23): схема проверяет форматы, здесь — то, что формой не выразить.
+function checkStyles(styles, path, knownFields, errors, warnings) {
+  if (!styles) return
+  const zones = ['header', 'body', 'subtotal', 'grandtotal']
+  for (const zone of zones) {
+    const z = styles[zone]
+    if (!z?.colors?.text || !z?.colors?.background) continue
+    if (z.colors.text.toLowerCase() === z.colors.background.toLowerCase()) {
+      warnings.push({ path: `${path}.${zone}.colors`, message: 'цвет текста совпадает с фоном — текст не виден' })
+    }
+  }
+  const size = styles.font?.size
+  const rowHeight = styles.layout?.rowHeight
+  if (size && rowHeight && rowHeight < size * 1.2) {
+    warnings.push({
+      path: `${path}.layout.rowHeight`,
+      message: `высота строки ${rowHeight}px мала для шрифта ${size}px (нужно ≥ ${Math.ceil(size * 1.2)}px)`
+    })
+  }
+  const columns = styles.columns || {}
+  for (const [field, style] of Object.entries(columns)) {
+    if (knownFields && knownFields.size && !knownFields.has(field)) {
+      errors.push({ path: `${path}.columns.${field}`, message: `стиль задан для поля «${field}», которого нет в колонках таблицы` })
+    }
+    if (style.minWidth && style.maxWidth && style.minWidth > style.maxWidth) {
+      errors.push({ path: `${path}.columns.${field}`, message: 'minWidth больше maxWidth' })
+    }
+  }
+  if (Object.keys(columns).length > 15) {
+    warnings.push({ path: `${path}.columns`, message: `переопределений колонок ${Object.keys(columns).length}: шаблон сложно поддерживать, подумайте о пресете` })
+  }
+}
+
 export function validateTemplate(template) {
   const errors = []
   const warnings = []
@@ -216,6 +249,8 @@ export function validateTemplate(template) {
         columnsByDataKey[block.dataKey].push({ col, path: cpath })
       }
 
+      checkStyles(block.styles, `${base}.styles`, new Set(block.columns.filter((c) => c.field).map((c) => c.field)), errors, warnings)
+
       const firstNew = columnsByDataKey[block.dataKey].length
       block.columns.forEach((col, ci) => walkColumn(col, `${base}.columns.${ci}`))
 
@@ -302,6 +337,12 @@ export function validateTemplate(template) {
       }
     }
   })
+
+  const allFields = new Set()
+  for (const list of Object.values(columnsByDataKey)) {
+    for (const { col } of list) if (col.field) allFields.add(col.field)
+  }
+  checkStyles(template?.styles, 'styles', allFields, errors, warnings)
 
   return { errors, warnings }
 }

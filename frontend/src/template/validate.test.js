@@ -202,3 +202,59 @@ describe('validateTemplate', () => {
     expect(res.errors.some((e) => e.path === 'blocks.0.unknown')).toBe(true)
   })
 })
+
+describe('стили таблицы (ADR-23)', () => {
+  const withStyles = (styles) => {
+    const t = base()
+    t.styles = styles
+    return t
+  }
+
+  it('принимает пресет и высоты зон', () => {
+    const res = validateTemplate(withStyles({ preset: 'compact', layout: { rowHeight: 22, headerHeight: 24 } }))
+    expect(res.errors).toEqual([])
+  })
+
+  it('ловит неизвестный ключ стиля', () => {
+    const res = validateTemplate(withStyles({ header: { backgroundColor: '#fff' } }))
+    expect(res.errors.map((e) => e.path)).toContain('styles.header.backgroundColor')
+  })
+
+  it('ловит цвет вне формата', () => {
+    const res = validateTemplate(withStyles({ colors: { text: 'red' } }))
+    expect(res.errors.length).toBeGreaterThan(0)
+  })
+
+  it('ловит шрифт вне allowlist', () => {
+    const res = validateTemplate(withStyles({ font: { family: 'Comic Sans MS' } }))
+    expect(res.errors.length).toBeGreaterThan(0)
+  })
+
+  it('ловит стиль колонки для несуществующего поля', () => {
+    const res = validateTemplate(withStyles({ columns: { nope: { width: 100 } } }))
+    expect(res.errors.map((e) => e.path)).toContain('styles.columns.nope')
+  })
+
+  it('ловит minWidth больше maxWidth', () => {
+    const res = validateTemplate(withStyles({ columns: { amount: { minWidth: 200, maxWidth: 100 } } }))
+    expect(res.errors.map((e) => e.path)).toContain('styles.columns.amount')
+  })
+
+  it('предупреждает о невидимом тексте и малой высоте строки', () => {
+    const res = validateTemplate(
+      withStyles({
+        font: { size: 20 },
+        layout: { rowHeight: 16 },
+        header: { colors: { text: '#ffffff', background: '#ffffff' } }
+      })
+    )
+    const paths = res.warnings.map((w) => w.path)
+    expect(paths).toContain('styles.header.colors')
+    expect(paths).toContain('styles.layout.rowHeight')
+  })
+
+  it('принимает ширину в процентах и px', () => {
+    const res = validateTemplate(withStyles({ columns: { region: { width: '20%' }, amount: { width: 140 } } }))
+    expect(res.errors).toEqual([])
+  })
+})

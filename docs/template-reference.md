@@ -175,6 +175,23 @@
 | `title` | заголовок блока |
 | `width` | `full` / `half` |
 
+## styles — оформление таблицы
+
+Необязательная секция (ADR-23). Порядок применения: умолчания версии 1.0 → `styles.preset` →
+`styles` → `styles.<зона>` → `blocks[].styles` → `styles.columns.<поле>`.
+
+| Поле | Смысл |
+|---|---|
+| `preset` | `default`, `compact`, `print`, `dark` — встроенные наборы |
+| `font` | `family` (allowlist), `size` 8…32, `weight` 300…800, `style`, `lineHeight` 1…2 |
+| `colors` | `text`, `background`, `border` — `#rgb`, `#rrggbb`, `transparent` |
+| `layout` | `rowHeight`, `headerHeight`, `subtotalHeight`, `grandtotalHeight` (16…120), `cellPadding`, `borders` (`none`/`horizontal`/`grid`), `zebra`, `stripeColor`, `tableLayout` (`auto`/`fixed`) |
+| `header` / `body` / `subtotal` / `grandtotal` | стиль зоны: `font`, `colors`, `align`, `verticalAlign`, `padding` |
+| `columns.<field>` | `width` (px или `"20%"`), `minWidth`, `maxWidth`, `align`, `font`, `colors`, `padding` |
+| `blocks[].styles` | те же ключи, но только для этого блока таблицы |
+
+Примеры: `docs/styling-examples.md`, шаблоны `finance-print` (preset print) и `ops-dark` (preset dark).
+
 ## Что проверяет валидатор
 
 Схема (типы, обязательность, `additionalProperties: false`) плюс семантические правила:
@@ -187,6 +204,9 @@
 - правила `source`: `lookup` → `queryId`; `static` → непустой `options`; `date`/`datetime` → без `queryId`
   и `options`; `multiple` только для `lookup`/`static`; `dependsOn` — на объявленный выше параметр,
   не множественный;
+- стили: форматы цветов, диапазоны высот и размеров шрифта, allowlist шрифтов, `minWidth ≤ maxWidth`,
+  стиль колонки только для существующего поля; предупреждения — невидимый текст (цвет = фон),
+  слишком малая высота строки, больше 15 переопределений колонок;
 - выражения разбираются статически: синтаксис (`+ - * /`, скобки, функции `sum/avg/min/max/count/countDistinct`)
   проверяется как **ошибка** (`round()`, `>`, `%` — недопустимы), а имя поля, которого нет в колонках
   таблицы, даёт **предупреждение** (`!`) — оно не блокирует загрузку, но видно в выводе.

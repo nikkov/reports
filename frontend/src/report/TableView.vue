@@ -9,6 +9,19 @@
     <span v-for="[title, msg] in [...brokenExpr]" :key="title">«{{ title }}» — {{ msg }};</span>
   </p>
   <ReportTable
+    v-if="styles"
+    :styles="styles"
+    :rows="view.rows"
+    :columns="columns"
+    :merges="view.merges"
+    :group-count="view.groupCount"
+    :height="height"
+    :expanded="expandedIds"
+    :cell-text="cellText"
+    :on-toggle="toggle"
+  />
+  <ReportTable
+    v-else
     :rows="view.rows"
     :columns="columns"
     :merges="view.merges"
@@ -31,7 +44,9 @@ import { evaluate } from '../engine/expr.js'
 const props = defineProps({
   block: { type: Object, required: true },
   rows: { type: Array, required: true },
-  height: { type: Number, default: 460 }
+  height: { type: Number, default: 460 },
+  // разрешённые стили шаблона (ADR-23): undefined = вид версии 1.0
+  styles: { type: Object, default: null }
 })
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -58,7 +73,8 @@ const leafCols = computed(() => leaves.value.map((l) => l.col))
 
 const columns = computed(() =>
   leaves.value.map((l, i) => ({
-    field: String(i),
+    field: String(i), // индекс: по нему cellText достаёт значение
+    columnKey: l.col.field, // имя поля: по нему ищутся стили колонки
     title: l.col.title,
     headerPath: l.headerPath,
     width: l.col.width || 150,

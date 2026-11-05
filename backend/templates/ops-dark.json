@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "id": "ops-dark",
+  "title": "Операции: нагрузка и отказы (тёмная тема)",
+  "description": "Тёмное оформление с зеброй и собственными цветами зон: шапка, строки, подытоги и итог стилизуются независимо.",
+  "params": [
+    { "name": "service", "type": "select", "label": "Сервис", "source": { "kind": "lookup", "queryId": "lookup_services" } },
+    { "name": "from", "type": "date", "label": "Период с", "required": true, "default": "2026-01-01", "source": { "kind": "date" } },
+    { "name": "to", "type": "date", "label": "по", "required": true, "default": "2026-03-31", "source": { "kind": "date" } }
+  ],
+  "datasets": {
+    "ops": { "queryId": "ops_by_service", "params": { "service": "$service", "from": "$from", "to": "$to" } }
+  },
+  "styles": {
+    "preset": "dark",
+    "font": { "size": 12, "family": "Inter" },
+    "layout": {
+      "rowHeight": 24,
+      "headerHeight": 30,
+      "subtotalHeight": 26,
+      "grandtotalHeight": 30,
+      "cellPadding": "2px 8px",
+      "zebra": true,
+      "stripeColor": "#1b222c",
+      "borders": "horizontal"
+    },
+    "header": {
+      "font": { "weight": 700 },
+      "colors": { "text": "#9fc4ff", "background": "#232c38" }
+    },
+    "subtotal": {
+      "colors": { "text": "#cfe0f5", "background": "#1f2732" }
+    },
+    "grandtotal": {
+      "font": { "weight": 800 },
+      "colors": { "text": "#ffffff", "background": "#2b3644" }
+    },
+    "columns": {
+      "failures": { "colors": { "text": "#ff9a9a" }, "align": "right" },
+      "requests": { "width": 120, "align": "right" }
+    }
+  },
+  "blocks": [
+    { "type": "text", "text": "{{service}}. Период: {{from}} — {{to}}" },
+    {
+      "type": "table",
+      "dataKey": "ops",
+      "collapsible": true,
+      "grandTotal": true,
+      "columns": [
+        { "field": "service", "title": "Сервис", "group": true, "subtotal": true },
+        { "field": "team", "title": "Команда", "group": true, "subtotal": true },
+        { "field": "requests", "title": "Запросы", "type": "int", "aggregate": "sum", "format": "number" },
+        { "field": "failures", "title": "Отказы", "type": "int", "aggregate": "sum", "format": "number" },
+        { "title": "Доля отказов", "expression": "sum(failures) / sum(requests)", "format": "percent", "decimals": 2, "width": 130 },
+        { "field": "avg_ms", "title": "Среднее, мс", "type": "int", "aggregate": "avg", "decimals": 0, "width": 120 }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "ops",
+      "chartType": "line",
+      "title": "Запросы по дням",
+      "xField": "day",
+      "yField": "requests",
+      "aggregate": "sum",
+      "width": "full"
+    }
+  ]
+}
