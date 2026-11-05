@@ -64,3 +64,12 @@ test('сгруппированный отчёт: подписи групп и о
   const merges = await page.locator('.rt-table td[rowspan]').count()
   expect(merges).toBeGreaterThan(0)
 })
+
+test('многоуровневый заголовок: группа «Финансы» на две колонки', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  const group = page.locator('.rt-table thead th[colspan="2"]')
+  await expect(group).toHaveCount(1)
+  await expect(group).toHaveText('Финансы')
+  // листья под группой остались на своих местах
+  await expect(page.locator('.rt-table thead th', { hasText: 'Сумма' })).toHaveCount(1)
+})

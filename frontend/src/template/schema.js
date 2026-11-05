@@ -195,6 +195,13 @@ export default {
             "right",
             "center"
           ]
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/column"
+          }
         }
       }
     },

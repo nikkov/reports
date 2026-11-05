@@ -88,6 +88,33 @@ describe('validateTemplate', () => {
     expect(paths(validateTemplate(t))).toContain('blocks.0.text')
   })
 
+  it('принимает заголовок-группу children и видит его листья', () => {
+    const t = base()
+    t.blocks[1].columns = [
+      { field: 'region', title: 'Регион', group: true },
+      {
+        title: 'Финансы',
+        children: [
+          { field: 'amount', title: 'Сумма', aggregate: 'sum' },
+          { field: 'profit', title: 'Прибыль', aggregate: 'sum' }
+        ]
+      }
+    ]
+    expect(validateTemplate(t).errors).toEqual([])
+  })
+
+  it('ловит данные у колонки-группы', () => {
+    const t = base()
+    t.blocks[1].columns.push({ title: 'Группа', field: 'amount', children: [{ field: 'profit', title: 'П' }] })
+    expect(paths(validateTemplate(t))).toContain('blocks.1.columns.4')
+  })
+
+  it('ловит группировку по колонке-заголовку', () => {
+    const t = base()
+    t.blocks[1].columns = [{ title: 'Группа', group: true, children: [{ field: 'amount', title: 'С' }] }]
+    expect(paths(validateTemplate(t))).toContain('blocks.1.columns.0')
+  })
+
   it('ловит лишнее поле в шаблоне', () => {
     const t = base()
     t.blocks[0].unknown = 1

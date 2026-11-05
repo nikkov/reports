@@ -136,7 +136,24 @@ export function validateTemplate(template) {
     }
 
     if (block.type === 'table') {
-      columnsByDataKey[block.dataKey] = (columnsByDataKey[block.dataKey] || []).concat(block.columns)
+      columnsByDataKey[block.dataKey] = columnsByDataKey[block.dataKey] || []
+
+      // заголовок-группа (children) — только визуальная группировка колонок
+      const walkColumn = (col, cpath) => {
+        if (Array.isArray(col.children)) {
+          if (col.field || col.expression || col.aggregate || col.group || col.subtotal) {
+            errors.push({
+              path: cpath,
+              message: 'у колонки-группы с children не может быть field/expression/aggregate/group'
+            })
+          }
+          col.children.forEach((child, ci) => walkColumn(child, `${cpath}.children.${ci}`))
+          return
+        }
+        columnsByDataKey[block.dataKey].push({ col, path: cpath })
+      }
+
+      block.columns.forEach((col, ci) => walkColumn(col, `${base}.columns.${ci}`))
 
       let seenLeaf = false
       block.columns.forEach((col, ci) => {
@@ -144,6 +161,12 @@ export function validateTemplate(template) {
         const hasField = typeof col.field === 'string' && col.field.length > 0
         const hasExpr = typeof col.expression === 'string' && col.expression.length > 0
 
+        if (Array.isArray(col.children)) {
+          if (col.group) {
+            errors.push({ path: cpath, message: 'группировать по колонке-заголовку нельзя: нужна колонка с field' })
+          }
+          return
+        }
         if (!hasField && !hasExpr) {
           errors.push({ path: cpath, message: 'нужно указать field или expression' })
         }
@@ -178,8 +201,8 @@ export function validateTemplate(template) {
     }
 
     if (block.type === 'chart') {
-      const cols = columnsByDataKey[block.dataKey] || []
-      const known = new Set(cols.map((c) => c.field).filter(Boolean))
+    const cols = (columnsByDataKey[block.dataKey] || []).map((c) => c.col)
+    const known = new Set(cols.map((c) => c.field).filter(Boolean))
       if (known.size) {
         for (const field of ['xField', 'yField']) {
           if (!known.has(block[field])) {

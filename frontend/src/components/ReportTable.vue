@@ -5,9 +5,15 @@
           <col v-for="c in columns" :key="c.field" :style="{ width: c.width ? c.width + 'px' : 'auto' }" />
         </colgroup>
         <thead>
-          <tr>
-            <th v-for="c in columns" :key="c.field" :class="{ num: c.align === 'right' }">
-              {{ c.title }}
+          <tr v-for="(row, ri) in headerRows" :key="ri">
+            <th
+              v-for="(cell, ci) in row"
+              :key="ci"
+              :colspan="cell.colspan || 1"
+              :rowspan="cell.rowspan || 1"
+              :class="{ num: cell.align === 'right', group: (cell.rowspan || 1) > 1 && ri < headerRows.length - 1 }"
+            >
+              {{ cell.title }}
             </th>
           </tr>
         </thead>
@@ -61,6 +67,32 @@ const emit = defineEmits(['toggle'])
 
 const scroller = ref(null)
 const scrollTop = ref(0)
+
+// Многоуровневый заголовок: группы берут colspan по числу листьев, листья —
+// rowspan на остаток строк; колонка без группы занимает все строки заголовка.
+const headerRows = computed(() => {
+  const cols = props.columns
+  const depth = Math.max(1, ...cols.map((c) => (c.headerPath?.length || 0) + 1))
+  const rows = Array.from({ length: depth }, () => [])
+  const runs = Array.from({ length: depth }, () => new Map())
+
+  for (const col of cols) {
+    const path = col.headerPath || []
+    for (let l = 0; l < path.length; l++) {
+      const prefix = path.slice(0, l + 1).join('\u0001')
+      const existing = runs[l].get(prefix)
+      if (existing) {
+        existing.colspan++
+        continue
+      }
+      const cell = { title: path[l], colspan: 1, rowspan: 1, align: 'left' }
+      runs[l].set(prefix, cell)
+      rows[l].push(cell)
+    }
+    rows[path.length].push({ title: col.title, colspan: 1, rowspan: depth - path.length, align: col.align })
+  }
+  return rows
+})
 
 const topPad = computed(() => start.value * props.rowHeight)
 const bottomPad = computed(() => Math.max(0, (props.rows.length - end.value) * props.rowHeight))

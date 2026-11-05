@@ -33,10 +33,22 @@ async function main() {
   ).json()
 
   const block = template.blocks.find((b) => b.type === 'table')
-  const model = buildTableModel(data.rows, block.columns, { grandTotal: true })
+
+  // листья: заголовки-группы (children) разворачиваются, данные живут только в листьях
+  const leaves = []
+  const walk = (col, path) => {
+    if (Array.isArray(col.children)) {
+      for (const child of col.children) walk(child, path.concat(col.title))
+      return
+    }
+    leaves.push(col)
+  }
+  for (const col of block.columns) walk(col, [])
+
+  const model = buildTableModel(data.rows, leaves, { grandTotal: true })
 
   // эталон: SUM по тем же полям, что объявлены в колонках
-  const aggCols = block.columns
+  const aggCols = leaves
     .map((c, i) => ({ ...c, index: i }))
     .filter((c) => c.aggregate === 'sum' && c.field)
   const sumExpr = aggCols.map((c) => `sum(${c.field})::bigint`).join(', ')

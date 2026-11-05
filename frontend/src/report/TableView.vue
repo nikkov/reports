@@ -29,17 +29,35 @@ const collapsed = ref(new Set())
 
 watch(() => props.rows, () => { collapsed.value = new Set() })
 
+// Листья колонок: заголовки-группы (children) разворачиваются в path для thead,
+// данные и агрегаты считаются только по листьям.
+const leaves = computed(() => {
+  const out = []
+  const walk = (col, path) => {
+    if (Array.isArray(col.children)) {
+      for (const child of col.children) walk(child, path.concat(col.title))
+      return
+    }
+    out.push({ col, headerPath: path })
+  }
+  for (const col of props.block.columns) walk(col, [])
+  return out
+})
+
+const leafCols = computed(() => leaves.value.map((l) => l.col))
+
 const columns = computed(() =>
-  props.block.columns.map((c, i) => ({
+  leaves.value.map((l, i) => ({
     field: String(i),
-    title: c.title,
-    width: c.width || 150,
-    align: c.align || (c.aggregate || c.expression || c.format === 'percent' ? 'right' : 'left')
+    title: l.col.title,
+    headerPath: l.headerPath,
+    width: l.col.width || 150,
+    align: l.col.align || (l.col.aggregate || l.col.expression || l.col.format === 'percent' ? 'right' : 'left')
   }))
 )
 
 function flatView() {
-  const cols = props.block.columns
+  const cols = leafCols.value
   const total = {}
   for (const col of cols) {
     if (col.aggregate && col.field) {
@@ -76,7 +94,7 @@ function flatView() {
 }
 
 function groupedView() {
-  const model = buildTableModel(props.rows, props.block.columns, {
+  const model = buildTableModel(props.rows, leafCols.value, {
     collapsed: collapsed.value.size ? collapsed.value : undefined,
     grandTotal: props.block.grandTotal !== false,
     nullLabel: props.block.nullText || '(пусто)'
@@ -88,7 +106,7 @@ function groupedView() {
   return { rows: model.rows, merges: model.merges, groupCount: model.groupFields.length, ids }
 }
 
-const view = computed(() => (props.block.columns.some((c) => c.group) ? groupedView() : flatView()))
+const view = computed(() => (leafCols.value.some((c) => c.group) ? groupedView() : flatView()))
 
 // Для витрины: все группы раскрыты, кроме явно свёрнутых.
 const expandedIds = computed(() => {
@@ -121,7 +139,7 @@ function formatValue(col, value) {
 
 function cellText(row, key) {
   const index = Number(key)
-  const col = props.block.columns[index]
+  const col = leafCols.value[index]
   if (!col) return ''
   return formatValue(col, row.values?.[index])
 }
