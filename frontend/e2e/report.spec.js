@@ -129,7 +129,8 @@ test('сворачивание категории внутри региона', 
   const heightCollapsed = await page.locator('.rt').evaluate((el) => el.scrollHeight)
   expect(heightCollapsed).toBeLessThan(heightBefore)
 
-  await total.locator('.chev').first().click()
+  // разворачиваем обратно именно категорию (второй шеврон строки итога)
+  await total.locator('.chev').nth(1).click()
   await expect(page.locator('.rt-table tbody tr:not(.spacer)').first()).not.toContainText('Итого')
 })
 
