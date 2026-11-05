@@ -41,6 +41,11 @@ if [ -f "$ROOT/frontend/package.json" ]; then
   (
     cd "$ROOT/frontend"
     npm run --silent build >/dev/null && echo "build ok"
+    if node -e "const s=require('./package.json').scripts||{}; process.exit(s.validate?0:1)"; then
+      npm run --silent validate -- ../backend/templates/*.json && echo "templates ok"
+    else
+      echo "skip templates (нет npm-скрипта validate)"
+    fi
     if node -e "const s=require('./package.json').scripts||{}; process.exit(s.test?0:1)"; then
       npm run --silent test
     else
