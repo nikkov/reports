@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "id": "params-demo",
+  "title": "Демо параметров: справочники, мультивыбор, статический набор, даты",
+  "description": "Синтетический пример со всеми поддерживаемыми способами получения значений параметров.",
+  "params": [
+    {
+      "name": "region",
+      "type": "select",
+      "label": "Регион (справочник, ID→NAME)",
+      "required": true,
+      "source": { "kind": "lookup", "queryId": "lookup_regions" }
+    },
+    {
+      "name": "category",
+      "type": "select",
+      "label": "Категории (мультивыбор, каскад)",
+      "multiple": true,
+      "source": {
+        "kind": "lookup",
+        "queryId": "lookup_categories_by_region",
+        "dependsOn": "region"
+      }
+    },
+    {
+      "name": "scope",
+      "type": "select",
+      "label": "Состав (статический набор)",
+      "required": true,
+      "default": "all",
+      "source": {
+        "kind": "static",
+        "options": [
+          { "value": "all", "label": "Все строки" },
+          { "value": "profit_only", "label": "Только прибыльные" }
+        ]
+      }
+    },
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": { "kind": "date" }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": { "kind": "date" }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "queryId": "sales_multi_filter",
+      "params": {
+        "region": "$region",
+        "category": "$category",
+        "from": "$from",
+        "to": "$to",
+        "scope": "$scope"
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Регион: {{region}}. Категории: {{category}}. Состав: {{scope}}. Период: {{from}} — {{to}}"
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "grandTotal": true,
+      "columns": [
+        { "field": "category", "title": "Категория", "group": true, "subtotal": true },
+        { "field": "product", "title": "Продукт" },
+        { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number" },
+        { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number" },
+        { "title": "Рентабельность", "expression": "sum(profit) / sum(amount)", "format": "percent" }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "bar",
+      "title": "Сумма по выбранным категориям",
+      "xField": "category",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "half"
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "pie",
+      "title": "Доля продуктов в сумме",
+      "xField": "product",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "half"
+    }
+  ]
+}

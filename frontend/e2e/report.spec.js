@@ -240,3 +240,24 @@ test('параметр-справочник: NAME в интерфейсе, ID в
   await expect.poll(() => page.url()).toContain('region=1')
   await expect(page.locator('.meta')).toContainText('строк')
 })
+
+test('демо параметров: мультивыбор и статический набор фильтруют данные', async ({ page }) => {
+  await page.goto('/report.html?report=params-demo')
+
+  // по умолчанию выбраны все категории региона
+  await expect.poll(async () => page.locator('.params select').nth(1).evaluate((s) => s.selectedOptions.length)).toBe(4)
+  await expect(page.locator('.meta')).toContainText('строк')
+  const rowsAll = Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])
+
+  // оставляем одну категорию — строк меньше
+  await page.locator('.params select').nth(1).selectOption(['Мебель'])
+  await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThan(rowsAll)
+  const rowsOne = Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])
+
+  // статический набор «только прибыльные» — ещё меньше
+  await page.locator('.params select').nth(2).selectOption('profit_only')
+  await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThanOrEqual(rowsOne)
+
+  await expect(page.locator('.text')).toContainText('Только прибыльные')
+  await expect.poll(() => page.url()).toContain('scope=profit_only')
+})

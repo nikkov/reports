@@ -17,13 +17,19 @@
         v-else-if="kind(p) === 'lookup' || kind(p) === 'static'"
         :multiple="!!p.multiple"
         :size="p.multiple ? Math.min(4, optionsFor(p).length || 1) : 1"
-        :value="modelValue[p.name] ?? (p.multiple ? [] : '')"
         :disabled="isBlocked(p)"
         :required="p.required"
         @change="onSelect(p, $event)"
       >
         <option v-if="!p.multiple" value="" disabled>—</option>
-        <option v-for="o in optionsFor(p)" :key="o.value" :value="o.value">{{ o.label }}</option>
+        <option
+          v-for="o in optionsFor(p)"
+          :key="o.value"
+          :value="o.value"
+          :selected="isSelected(p, o.value)"
+        >
+          {{ o.label }}
+        </option>
       </select>
 
       <input
@@ -83,6 +89,14 @@ function optionsFor(p) {
   return fetched[p.name] || []
 }
 
+// выбранность задаём на каждом option: для <select multiple> это надёжнее value-биндинга,
+// который применяется до появления опций после загрузки справочника
+function isSelected(p, value) {
+  const raw = String(props.modelValue[p.name] ?? '')
+  if (!raw) return false
+  return raw.split(',').some((v) => v === String(value))
+}
+
 function isBlocked(p) {
   const dep = p.source?.dependsOn
   return !!dep && !props.modelValue[dep]
@@ -137,8 +151,14 @@ async function loadOptions(p) {
     : list.some((o) => o.value === current)
 
   if (!valid && list.length) {
-    const fallback = p.default !== undefined ? String(p.default) : list[0].value
-    update(p.name, String(fallback))
+    if (p.default !== undefined) {
+      update(p.name, String(p.default))
+    } else if (p.multiple) {
+      // для множественного выбора разумный дефолт — все доступные значения
+      update(p.name, list.map((o) => String(o.value)).join(','))
+    } else {
+      update(p.name, String(list[0].value))
+    }
   }
 }
 

@@ -123,5 +123,40 @@
       "profit": "int",
       "order_date": "date"
     }
+  },
+  "sales_multi_filter": {
+    "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND s.order_date >= :from::date AND s.order_date <= :to::date AND (:scope = 'all' OR s.profit > 0) ORDER BY s.category NULLS LAST, s.product, s.id",
+    "params": {
+      "region": {
+        "type": "int",
+        "required": true
+      },
+      "category": {
+        "type": "text",
+        "required": false,
+        "default": ""
+      },
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      },
+      "scope": {
+        "type": "text",
+        "required": false,
+        "default": "all"
+      }
+    },
+    "columns": {
+      "region": "text",
+      "category": "text",
+      "product": "text",
+      "amount": "int",
+      "profit": "int",
+      "order_date": "date"
+    }
   }
 }
