@@ -83,7 +83,7 @@ const props = defineProps({
   modelValue: { type: Object, required: true },
   loading: { type: Boolean, default: false }
 })
-const emit = defineEmits(['update:modelValue', 'submit', 'labels'])
+const emit = defineEmits(['update:modelValue', 'submit', 'labels', 'ready'])
 
 const fetched = reactive({}) // имя параметра → [{value,label}]
 const errors = reactive({})
@@ -176,6 +176,8 @@ async function initAll() {
     }
   }
   for (const p of props.params) await loadOptions(p)
+  // все справочники загружены и значения выставлены — можно строить отчёт
+  emit('ready')
 }
 
 // Подписи выбранных значений: в тексте отчёта пользователь должен видеть NAME, а не ID.

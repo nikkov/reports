@@ -16,6 +16,7 @@
       :loading="loading"
       @update:model-value="onParams"
       @labels="paramLabels = $event"
+      @ready="onParamsReady"
       @submit="load"
     />
 
@@ -108,15 +109,24 @@ async function load() {
   }
 }
 
+// отчёт с параметрами-справочниками нельзя запрашивать до загрузки списков:
+// обязательный параметр ещё пуст, и первый же запрос вернул бы 422
+const needsLookups = (tpl) =>
+  (tpl.params || []).some((p) => p.source?.kind === 'lookup' || p.source?.kind === 'static')
+
 onMounted(async () => {
   try {
     template.value = await api.template(reportId)
     Object.assign(paramValues, defaultParams(template.value))
-    await load()
+    if (!needsLookups(template.value)) await load()
   } catch (e) {
     error.value = { code: e.code || 'ERROR', message: e.message }
   }
 })
+
+function onParamsReady() {
+  if (!loading.value && !lastLoadedKey) load()
+}
 
 // Автовыбор параметра (в т.ч. из справочника) должен сразу строить отчёт: дебаунс на изменение значений.
 let reloadTimer = null

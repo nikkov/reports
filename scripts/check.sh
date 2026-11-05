@@ -43,6 +43,13 @@ else
   echo "skip (нет backend/CMakeLists.txt)"
 fi
 
+step "Frontend: покрытие engine/ (DoD ≥ 90%)"
+if [ -f "$ROOT/frontend/package.json" ]; then
+  ( cd "$ROOT/frontend" && npm run --silent coverage | tail -2 )
+else
+  echo "skip (нет frontend)"
+fi
+
 step "Frontend: build + tests"
 if [ -f "$ROOT/frontend/package.json" ]; then
   (

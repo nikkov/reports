@@ -2,6 +2,30 @@ import { expect, test } from '@playwright/test'
 
 const BASE = '/report.html?report=sales-summary'
 
+// DoD: «отсутствие ошибок в консоли браузера». Собираем console.error и необработанные
+// исключения на каждой странице и валим тест, если что-то появилось.
+const consoleErrors = new WeakMap()
+
+test.beforeEach(async ({ page }) => {
+  const errors = []
+  consoleErrors.set(page, errors)
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') errors.push(msg.text())
+  })
+  page.on('pageerror', (err) => errors.push(String(err && err.message ? err.message : err)))
+})
+
+test.afterEach(async ({ page }) => {
+  const errors = (consoleErrors.get(page) || []).filter((t) => {
+    // запрос favicon браузер делает сам, к отчёту отношения не имеет
+    if (/favicon/i.test(t)) return false
+    // тест, который намеренно шлёт неверный параметр, ожидает HTTP-ошибку от API
+    if (page.__allowHttpErrors && /Failed to load resource/i.test(t)) return false
+    return true
+  })
+  expect(errors, `ошибки в консоли: ${errors.join(' | ')}`).toEqual([])
+})
+
 test('отчёт открывается с параметрами из URL и показывает строки', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-01-01&to=2026-03-31`)
 
@@ -40,6 +64,8 @@ test('смена параметра меняет данные и попадае�
 })
 
 test('битый параметр показывает типизированную ошибку', async ({ page }) => {
+  // здесь 422 — ожидаемый результат, браузерная запись об этом не считается дефектом
+  page.__allowHttpErrors = true
   await page.goto(`${BASE}&from=01.01.2026&to=2026-03-31`)
   const error = page.locator('.error')
   await expect(error).toBeVisible()
@@ -210,10 +236,12 @@ test('диаграмма получает агрегаты из того же д
 
 test('диаграмма с seriesField показывает несколько серий', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
-  // последний блок шаблона — столбцы по категориям в разрезе регионов; ждём, пока он отрисуется
-  await expect.poll(async () => (await page.evaluate(() => window.__chart))?.type).toBe('bar')
-  const info = await page.evaluate(() => window.__chart)
-  expect(info.series).toBeGreaterThan(1)
+  // последний блок шаблона — столбцы по категориям в разрезе регионов; ждём, пока он отрисуется.
+  // Проверяем в одном вычислении: между отдельными чтениями window.__chart успевает перезаписаться
+  // другим графиком страницы, и тест ловит «чужие» данные.
+  await expect
+    .poll(async () => page.evaluate(() => (window.__chart?.type === 'bar' ? window.__chart.series : 0)))
+    .toBeGreaterThan(1)
 })
 
 test('скриншот диаграммы стабилен между прогонами', async ({ page }) => {

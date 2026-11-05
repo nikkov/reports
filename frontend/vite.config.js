@@ -18,7 +18,15 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.js'],
-    exclude: ['e2e/**', 'node_modules/**']
+    exclude: ['e2e/**', 'node_modules/**'],
+    // DoD: покрытие engine/ не ниже 90% — порог проверяется в `npm run coverage`
+    coverage: {
+      provider: 'v8',
+      include: ['src/engine/**/*.js'],
+      exclude: ['src/engine/**/*.test.js'],
+      reporter: ['text'],
+      thresholds: { lines: 90, branches: 90, functions: 90, statements: 90 }
+    }
   },
   build: {
     rollupOptions: {
