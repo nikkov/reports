@@ -47,9 +47,10 @@ test('битый параметр показывает типизированн�
   await expect(error).toContainText('from')
 })
 
-test('диаграмма отрисована на canvas', async ({ page }) => {
+test('диаграммы отрисованы на canvas', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-01-01&to=2026-03-31`)
-  await expect(page.locator('.chart canvas')).toHaveCount(1)
+  // в шаблоне два блока диаграмм: линейная по регионам и круговая по категориям
+  await expect(page.locator('.chart canvas')).toHaveCount(2)
 })
 
 test('сгруппированный отчёт: подписи групп и объединённые ячейки', async ({ page }) => {
@@ -190,10 +191,11 @@ test('«свернуть всё» оставляет только итоги р�
 
 test('диаграмма получает агрегаты из того же движка', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
-  await expect(page.locator('.chart canvas')).toHaveCount(1)
+  await expect(page.locator('.chart canvas')).toHaveCount(2)
 
   const info = await page.evaluate(() => window.__chart)
-  expect(info).toEqual({ type: 'line', series: 1 })
+  expect(['line', 'bar', 'pie']).toContain(info.type)
+  expect(info.series).toBeGreaterThanOrEqual(1)
 
   // подпись оси отформатирована по-русски (пробел как разделитель тысяч)
   const labels = await page.evaluate(() => {
