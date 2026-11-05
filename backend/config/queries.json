@@ -1,0 +1,53 @@
+{
+  "sales_by_region": {
+    "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id",
+    "params": {
+      "from": {"type": "date", "required": true},
+      "to": {"type": "date", "required": true}
+    },
+    "columns": {
+      "region": "text",
+      "category": "text",
+      "product": "text",
+      "amount": "int",
+      "profit": "int",
+      "order_date": "date"
+    }
+  },
+  "ops_by_day": {
+    "sql": "SELECT day, service, team, requests, failures, avg_ms FROM ops WHERE day >= :from::date AND day <= :to::date ORDER BY day, service",
+    "params": {
+      "from": {"type": "date", "required": true},
+      "to": {"type": "date", "required": true}
+    },
+    "columns": {
+      "day": "date",
+      "service": "text",
+      "team": "text",
+      "requests": "int",
+      "failures": "int",
+      "avg_ms": "int"
+    }
+  },
+  "finance_by_period": {
+    "sql": "SELECT period, cost_center, account, plan_amount, fact_amount FROM finance WHERE period >= :from::date AND period <= :to::date ORDER BY period, cost_center NULLS LAST, account",
+    "params": {
+      "from": {"type": "date", "required": true},
+      "to": {"type": "date", "required": true}
+    },
+    "columns": {
+      "period": "date",
+      "cost_center": "text",
+      "account": "text",
+      "plan_amount": "int",
+      "fact_amount": "int"
+    }
+  },
+  "slow_probe": {
+    "sql": "SELECT pg_sleep(:seconds::int) IS NULL AS done",
+    "params": {
+      "seconds": {"type": "int", "required": true}
+    },
+    "columns": {"done": "bool"}
+  }
+}

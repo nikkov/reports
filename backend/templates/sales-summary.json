@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "id": "sales-summary",
+  "title": "Сводная таблица продаж",
+  "params": [
+    {"name": "from", "type": "date", "label": "Период с", "required": true, "default": "2026-01-01"},
+    {"name": "to", "type": "date", "label": "по", "required": true, "default": "2026-03-31"}
+  ],
+  "datasets": {
+    "sales": {"queryId": "sales_by_region", "params": {"from": "$from", "to": "$to"}}
+  },
+  "blocks": [
+    {"type": "text", "text": "Отчёт за период {{from}} — {{to}}"},
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "collapsible": true,
+      "grandTotal": true,
+      "columns": [
+        {"field": "region", "title": "Регион", "group": true, "subtotal": true},
+        {"field": "category", "title": "Категория", "group": true},
+        {"field": "product", "title": "Продукт"},
+        {"field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number"},
+        {"field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number"},
+        {"title": "Рентабельность", "expression": "sum(profit) / sum(amount)", "format": "percent"}
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "line",
+      "xField": "region",
+      "yField": "amount",
+      "aggregate": "sum"
+    }
+  ]
+}

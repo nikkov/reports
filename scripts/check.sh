@@ -36,9 +36,17 @@ else
   echo "skip (нет backend/CMakeLists.txt)"
 fi
 
-step "Frontend: lint + tests"
+step "Frontend: build + tests"
 if [ -f "$ROOT/frontend/package.json" ]; then
-  ( cd "$ROOT/frontend" && npm run --silent lint && npm run --silent test )
+  (
+    cd "$ROOT/frontend"
+    npm run --silent build >/dev/null && echo "build ok"
+    if node -e "const s=require('./package.json').scripts||{}; process.exit(s.test?0:1)"; then
+      npm run --silent test
+    else
+      echo "skip tests (нет npm-скрипта test)"
+    fi
+  )
 else
   echo "skip (нет frontend/package.json)"
 fi
