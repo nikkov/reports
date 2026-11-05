@@ -1,7 +1,6 @@
 <template>
   <div class="rt" :style="{ height: height + 'px' }" ref="scroller" @scroll="onScroll">
-    <div class="rt-canvas" :style="{ height: totalHeight + 'px' }">
-      <table class="rt-table" :style="{ transform: `translateY(${offsetY}px)` }">
+    <table class="rt-table">
         <colgroup>
           <col v-for="c in columns" :key="c.field" :style="{ width: c.width ? c.width + 'px' : 'auto' }" />
         </colgroup>
@@ -13,6 +12,10 @@
           </tr>
         </thead>
         <tbody>
+          <!-- Верхний/нижний спейсер вместо полотна высотой rows*rowHeight (1,3 млн px при 50k). -->
+          <tr v-if="topPad > 0" class="spacer" :style="{ height: topPad + 'px' }">
+            <td :colspan="columns.length"></td>
+          </tr>
           <tr v-for="(row, i) in windowRows" :key="rowKey(row, i)" :class="row.kind">
             <template v-for="(cell, ci) in cellsAt(start + i)" :key="cell.key">
               <td
@@ -28,9 +31,11 @@
               </td>
             </template>
           </tr>
+          <tr v-if="bottomPad > 0" class="spacer" :style="{ height: bottomPad + 'px' }">
+            <td :colspan="columns.length"></td>
+          </tr>
         </tbody>
       </table>
-    </div>
   </div>
 </template>
 
@@ -56,7 +61,8 @@ const emit = defineEmits(['toggle'])
 const scroller = ref(null)
 const scrollTop = ref(0)
 
-const totalHeight = computed(() => props.rows.length * props.rowHeight)
+const topPad = computed(() => start.value * props.rowHeight)
+const bottomPad = computed(() => Math.max(0, (props.rows.length - end.value) * props.rowHeight))
 const visibleCount = computed(() => Math.ceil(props.height / props.rowHeight))
 
 const start = computed(() => {
@@ -68,7 +74,6 @@ const end = computed(() =>
   Math.min(props.rows.length, start.value + visibleCount.value + props.overscan * 2)
 )
 
-const offsetY = computed(() => start.value * props.rowHeight)
 const windowRows = computed(() => props.rows.slice(start.value, end.value))
 
 function onScroll(e) {
@@ -150,14 +155,7 @@ function cellsAt(index) {
   position: relative;
   contain: strict;
 }
-.rt-canvas {
-  position: relative;
-  width: 100%;
-}
 .rt-table {
-  position: absolute;
-  top: 0;
-  left: 0;
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
@@ -199,6 +197,10 @@ function cellsAt(index) {
 }
 .rt-table tr.grandtotal td {
   border-top: 2px solid #c9d3e0;
+}
+.rt-table tr.spacer td {
+  padding: 0;
+  border: 0;
 }
 .rt-table td.cont {
   color: #8a94a3;

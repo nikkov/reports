@@ -35,5 +35,17 @@ cmake --build backend/build -j"$(nproc)"
 |---|---|
 | `scripts/env.sh` | source: PATH с venv, креды БД из `backend/.env` |
 | `scripts/conan` | обёртка Conan v1 с жёсткой проверкой версии |
-| `scripts/check.sh` | полная проверка: версия Conan, enterprise-API, сборка+тесты, фронтенд |
+| `scripts/check.sh` | полная проверка: версия Conan, запрещённые компоненты, сборка+тесты, валидация шаблонов, фронтенд-тесты |
+
+## Страница отчёта и e2e
+
+```bash
+# бэкенд и dev-сервер должны быть запущены
+./backend/build/rep &                      # :8080
+cd frontend && npm run dev &               # :5173 (проксирует /api на :8080)
+
+open http://127.0.0.1:5173/report.html?report=sales-summary&from=2026-01-01&to=2026-03-31
+cd frontend && npm run e2e                 # 4 теста Playwright
+REP_E2E=1 ./scripts/check.sh               # всё вместе
+```
 | `db/init.sh` | создание БД и загрузка синтетики (идемпотентно) |
