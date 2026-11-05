@@ -599,40 +599,43 @@ test('экспорт в Excel: файл со шапкой, числами и л�
   expect(ws.properties?.outlineProperties?.summaryBelow).toBe(true)
 })
 
-test('печатный вид: интерфейс скрыт, шапка повторяется, таблица целиком', async ({ page }) => {
-  // диалог печати в тесте не нужен: подменяем его и смотрим на макет
-  await page.addInitScript(() => { window.__printed = 0; window.print = () => { window.__printed++ } })
+test('печатный вид: таблица сразу под заголовком, шапка повторяется, строки не рвутся', async ({ page, context }) => {
+  // диалог печати не нужен: подменяем print и проверяем печатный документ
+  await context.addInitScript(() => { window.print = () => {} })
   await page.goto('/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
   await expect(page.locator('.meta')).toContainText('строк')
-
   const total = Number((await page.locator('.meta b').first().textContent()).replace(/\s/g, ''))
+
+  const popupPromise = context.waitForEvent('page')
   await page.getByRole('button', { name: 'Печать / PDF' }).click()
-  await page.waitForFunction(() => window.__printed > 0, null, { timeout: 30000 })
-  await page.emulateMedia({ media: 'print' })
+  const print = await popupPromise
+  await print.waitForSelector('table')
 
-  // без окна виртуализации в макете все строки, а контейнер не схлопнут (contain: none)
-  const layout = await page.evaluate(() => {
-    const rt = document.querySelector('.rt')
-    const tb = document.querySelector('.rt-table')
-    return { rows: tb.tBodies[0].rows.length, height: Math.round(rt.getBoundingClientRect().height), contain: getComputedStyle(rt).contain }
-  })
-  // строки данных + подытоги и общий итог
-  expect(layout.rows).toBeGreaterThanOrEqual(total)
-  expect(layout.height).toBeGreaterThan(1000)
-  expect(layout.contain).toBe('none')
-
-  const state = await page.evaluate(() => {
-    const disp = (sel) => {
-      const el = document.querySelector(sel)
-      return el ? getComputedStyle(el).display : 'нет'
+  const doc = await print.evaluate(() => {
+    const tables = Array.from(document.querySelectorAll('table'))
+    const h1 = document.querySelector('h1').getBoundingClientRect()
+    const first = tables[0].getBoundingClientRect()
+    return {
+      tables: tables.length,
+      rows: tables.reduce((sum, t) => sum + t.tBodies[0].rows.length, 0),
+      gap: Math.round(first.top - h1.bottom),
+      firstTop: Math.round(first.top),
+      rowspans: document.querySelectorAll('td[rowspan]').length,
+      charts: document.querySelectorAll('canvas').length,
+      chevrons: document.querySelectorAll('.chev').length
     }
-    const thead = getComputedStyle(document.querySelector('.rt-table thead'))
-    const rt = getComputedStyle(document.querySelector('.rt'))
-    return { params: disp('.params'), tools: disp('.tools'), theadPosition: thead.position, theadDisplay: thead.display, overflow: rt.overflow }
   })
-  expect(state.params).toBe('none')
-  expect(state.tools).toBe('none')
-  expect(state.theadPosition).toBe('static')
-  expect(state.theadDisplay).toBe('table-header-group')
-  expect(state.overflow).toBe('visible')
+
+  // печать режется на блоки (каждая страница получает шапку),
+  // таблица начинается сразу под заголовком, а не со второй страницы
+  expect(doc.tables).toBeGreaterThan(1)
+  expect(doc.rows).toBeGreaterThanOrEqual(total)
+  expect(doc.firstTop).toBeLessThan(120)
+  expect(doc.gap).toBeLessThan(40)
+  expect(doc.rowspans).toBe(0) // объединения развёрнуты — иначе строку нельзя перенести
+  expect(doc.charts).toBe(0) // диаграммы в печать не попадают
+  expect(doc.chevrons).toBe(0) // «▾» на бумаге не нужен
+
+  const pdf = await print.pdf({ format: 'A4', landscape: true })
+  expect(pdf.length).toBeGreaterThan(10000)
 })

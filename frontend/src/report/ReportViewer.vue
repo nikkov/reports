@@ -242,14 +242,23 @@ async function printReport() {
   printing.value = true
   printMode.value = true
   try {
-    // Ключевой момент: window.print() снимает уже отрисованный макет. Без ожидания кадра
-    // в PDF попадали диаграммы (canvas готов сразу) и пустое место вместо таблицы.
+    // Ждём полную отрисовку таблицы: печатный документ собирается из готового DOM.
     await nextTick()
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    await new Promise((resolve) => setTimeout(resolve, 250)) // запас на снятие снапшота раскладки
-    window.addEventListener('afterprint', () => { printMode.value = false }, { once: true })
-    window.print()
+
+    const { printPayload, openPrintWindow, printWindow } = await import('./export/print-doc.js')
+    const meta = `Отчёт за период ${paramValues.from || '—'} — ${paramValues.to || '—'}`
+    const payload = printPayload(document, { title: template.value?.title || reportId, meta })
+    const win = payload && openPrintWindow(payload)
+    if (!win) {
+      error.value = { code: 'PRINT_BLOCKED', message: 'браузер заблокировал окно печати — разрешите всплывающие окна' }
+      return
+    }
+    win.addEventListener('afterprint', () => win.close(), { once: true })
+    await printWindow(win)
   } finally {
+    // приложение возвращаем в обычный режим сразу: таблица в печатном окне уже своя
+    printMode.value = false
     printing.value = false
   }
 }
