@@ -1,0 +1,102 @@
+import { describe, expect, it } from 'vitest'
+import { buildTableModel, computeMerges } from './group.js'
+
+//             0          1           2          3        4        5
+const columns = [
+  { field: 'region', title: 'Регион', group: true, subtotal: true },
+  { field: 'category', title: 'Категория', group: true },
+  { field: 'product', title: 'Продукт' },
+  { field: 'amount', title: 'Сумма', aggregate: 'sum' },
+  { field: 'profit', title: 'Прибыль', aggregate: 'sum' },
+  { title: 'Рентаб.', expression: 'sum(profit) / sum(amount)' }
+]
+
+const rows = [
+  { region: 'Север', category: 'А', product: 'p1', amount: 100, profit: 10 },
+  { region: 'Север', category: 'А', product: 'p2', amount: 100, profit: 30 },
+  { region: 'Север', category: 'Б', product: 'p3', amount: 50, profit: 5 },
+  { region: 'Юг', category: 'А', product: 'p4', amount: 250, profit: 25 },
+  { region: null, category: 'А', product: 'p5', amount: 10, profit: 1 }
+]
+
+describe('buildTableModel', () => {
+  it('строит дерево и подытог на каждый регион', () => {
+    const m = buildTableModel(rows, columns, { grandTotal: true })
+    expect(m.rows.filter((r) => r.kind === 'subtotal')).toHaveLength(3) // Север, Юг, (пусто)
+    expect(m.rows.filter((r) => r.kind === 'detail')).toHaveLength(5)
+    expect(m.rows.at(-1).kind).toBe('grandtotal')
+
+    const north = m.rows.find((r) => r.kind === 'subtotal' && r.groupPath[0] === 'Север')
+    expect(north.values[3]).toBe(250) // сумма
+    expect(north.values[5]).toBeCloseTo(45 / 250, 6) // рентабельность по области
+    expect(north.values[0]).toBe('Итого Север')
+  })
+
+  it('общий итог равен сумме подытогов и всех деталей', () => {
+    const m = buildTableModel(rows, columns, { grandTotal: true })
+    const grand = m.rows.at(-1)
+    expect(grand.values[3]).toBe(510)
+    expect(grand.values[4]).toBe(71)
+    expect(grand.values[5]).toBeCloseTo(71 / 510, 6)
+
+    const subSum = m.rows
+      .filter((r) => r.kind === 'subtotal' && r.groupPath.length === 1)
+      .reduce((a, r) => a + r.values[3], 0)
+    expect(subSum).toBe(grand.values[3])
+  })
+
+  it('null-ключ попадает в группу «(пусто)»', () => {
+    const m = buildTableModel(rows, columns, {})
+    expect(m.rows.some((r) => r.groupPath[0] === '(пусто)')).toBe(true)
+  })
+
+  it('свёрнутая группа отдаёт только свой итог', () => {
+    const m = buildTableModel(rows, columns, { collapsed: new Set(['Север', '(пусто)']) })
+    const north = m.rows.filter((r) => r.groupPath[0] === 'Север')
+    expect(north).toHaveLength(1)
+    expect(north[0].kind).toBe('subtotal')
+    expect(m.rows.filter((r) => r.kind === 'detail').length).toBeLessThan(5)
+  })
+
+  it('вычисляемая колонка не падает при нулевом знаменателе', () => {
+    const cols = [
+      { field: 'region', title: 'Регион', group: true },
+      { field: 'amount', title: 'Сумма', aggregate: 'sum' },
+      { title: 'Доля', expression: 'sum(profit) / sum(amount)' }
+    ]
+    const m = buildTableModel([{ region: 'X', amount: 0, profit: 5 }], cols, {})
+    expect(m.rows[0].values[2]).toBeNull()
+  })
+
+  it('агрегаты avg/min/max/count', () => {
+    const cols = [
+      { field: 'region', title: 'Регион', group: true },
+      { field: 'amount', title: 'avg', aggregate: 'avg' },
+      { field: 'amount', title: 'min', aggregate: 'min' },
+      { field: 'amount', title: 'max', aggregate: 'max' },
+      { field: 'amount', title: 'cnt', aggregate: 'count' }
+    ]
+    const m = buildTableModel(rows, cols, {})
+    const grand = m.rows.at(-1)
+    expect(grand.values[1]).toBeCloseTo(510 / 5, 6)
+    expect(grand.values[2]).toBe(10)
+    expect(grand.values[3]).toBe(250)
+    expect(grand.values[4]).toBe(5)
+  })
+})
+
+describe('computeMerges', () => {
+  it('объединяет детальные строки группы и не накрывает подытог', () => {
+    const flat = [
+      { kind: 'detail', groupPath: ['A', 'x'] },
+      { kind: 'detail', groupPath: ['A', 'x'] },
+      { kind: 'subtotal', groupPath: ['A', 'x'] },
+      { kind: 'detail', groupPath: ['B', 'y'] }
+    ]
+    const merges = computeMerges(flat, 2)
+    expect(merges).toContainEqual({ row: 0, col: 0, rowspan: 2, colspan: 1 })
+    expect(merges).toContainEqual({ row: 0, col: 1, rowspan: 2, colspan: 1 })
+    // подытог не покрыт ни одним объединением
+    expect(merges.some((m) => m.row + m.rowspan > 2)).toBe(false)
+  })
+})

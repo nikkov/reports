@@ -1,0 +1,128 @@
+<template>
+  <ReportTable
+    :rows="view.rows"
+    :columns="columns"
+    :merges="view.merges"
+    :group-count="view.groupCount"
+    :height="height"
+    :expanded="expandedIds"
+    :cell-text="cellText"
+    @toggle="toggle"
+  />
+</template>
+
+<script setup>
+// Табличный блок отчёта: одна точка, где шаблон превращается в строки витрины.
+import { computed, ref, watch } from 'vue'
+import ReportTable from '../components/ReportTable.vue'
+import { buildTableModel } from '../engine/group.js'
+import { evaluate } from '../engine/expr.js'
+
+const props = defineProps({
+  block: { type: Object, required: true },
+  rows: { type: Array, required: true },
+  height: { type: Number, default: 460 }
+})
+
+const nf = new Intl.NumberFormat('ru-RU')
+const collapsed = ref(new Set())
+
+watch(() => props.rows, () => { collapsed.value = new Set() })
+
+const columns = computed(() =>
+  props.block.columns.map((c, i) => ({
+    field: String(i),
+    title: c.title,
+    width: c.width || 150,
+    align: c.align || (c.aggregate || c.expression || c.format === 'percent' ? 'right' : 'left')
+  }))
+)
+
+function flatView() {
+  const cols = props.block.columns
+  const total = {}
+  for (const col of cols) {
+    if (col.aggregate && col.field) {
+      let sum = 0
+      for (const r of props.rows) {
+        const v = Number(r[col.field])
+        if (Number.isFinite(v)) sum += v
+      }
+      total[col.field] = { sum, count: props.rows.length }
+    }
+  }
+
+  const values = props.rows.map((r) => cols.map((c) => (c.field ? r[c.field] : null)))
+  const out = values.map((v) => ({ kind: 'detail', level: -1, groupPath: [], values: v }))
+
+  if (props.block.grandTotal !== false) {
+    const totalValues = cols.map((c, i) => {
+      if (i === 0) return 'ИТОГО'
+      if (c.expression) {
+        try {
+          return evaluate(c.expression, {
+            field: () => undefined,
+            agg: (fn, name) => { const t = total[name]; return fn === 'sum' ? t?.sum : undefined }
+          })
+        } catch {
+          return null
+        }
+      }
+      return c.aggregate ? total[c.field]?.sum ?? null : null
+    })
+    out.push({ kind: 'grandtotal', level: -1, groupPath: [], values: totalValues })
+  }
+  return { rows: out, merges: [], groupCount: 0, ids: [] }
+}
+
+function groupedView() {
+  const model = buildTableModel(props.rows, props.block.columns, {
+    collapsed: collapsed.value.size ? collapsed.value : undefined,
+    grandTotal: props.block.grandTotal !== false,
+    nullLabel: props.block.nullText || '(пусто)'
+  })
+  const ids = new Set()
+  for (const row of model.rows) {
+    for (let i = 1; i <= row.groupPath.length; i++) ids.add(row.groupPath.slice(0, i).join('\u0001'))
+  }
+  return { rows: model.rows, merges: model.merges, groupCount: model.groupFields.length, ids }
+}
+
+const view = computed(() => (props.block.columns.some((c) => c.group) ? groupedView() : flatView()))
+
+// Для витрины: все группы раскрыты, кроме явно свёрнутых.
+const expandedIds = computed(() => {
+  if (!view.value.groupCount) return new Set()
+  const open = new Set(view.value.ids)
+  for (const id of collapsed.value) open.delete(id)
+  return open
+})
+
+function toggle(path) {
+  const id = path.join('\u0001')
+  const next = new Set(collapsed.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  collapsed.value = next
+}
+
+function formatValue(col, value) {
+  if (value === null || value === undefined || value === '') return col.aggregate || col.expression ? '—' : ''
+  if (col.format === 'percent') {
+    const n = Number(value)
+    return Number.isFinite(n) ? (n * 100).toFixed(col.decimals ?? 1).replace('.', ',') + ' %' : '—'
+  }
+  if (col.format === 'number' || col.format === 'integer' || col.aggregate) {
+    const n = Number(value)
+    return Number.isFinite(n) ? nf.format(n) : String(value)
+  }
+  return String(value)
+}
+
+function cellText(row, key) {
+  const index = Number(key)
+  const col = props.block.columns[index]
+  if (!col) return ''
+  return formatValue(col, row.values?.[index])
+}
+</script>

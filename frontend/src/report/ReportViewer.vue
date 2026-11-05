@@ -27,13 +27,11 @@
       >
         <p v-if="block.type === 'text'" class="text">{{ renderText(block.text) }}</p>
 
-        <ReportTable
+        <TableView
           v-else-if="block.type === 'table'"
-          :rows="tableRows(block)"
-          :columns="tableColumns(block)"
-          :group-count="0"
-          :height="420"
-          :cell-text="(row, field) => cellText(block, row, field)"
+          :block="block"
+          :rows="rows"
+          :height="460"
         />
 
         <div v-else-if="block.type === 'chart'" class="chart-box">
@@ -50,8 +48,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import * as echarts from 'echarts'
 import { api } from '../api/client.js'
 import ParamsForm from '../components/ParamsForm.vue'
-import ReportTable from '../components/ReportTable.vue'
-import { evaluate } from '../engine/expr.js'
+import TableView from './TableView.vue'
 
 const params = new URLSearchParams(location.search)
 const reportId = params.get('report') || 'sales-summary'
@@ -141,110 +138,6 @@ function tableColumns(block) {
     width: c.width || 150,
     align: c.align || (c.aggregate || c.format === 'percent' ? 'right' : 'left')
   }))
-}
-
-const AGG_NAMES = new Set(['sum', 'avg', 'min', 'max', 'count'])
-
-// Поля, нужные для строки ИТОГО: агрегаты колонок и всё, что упомянуто в выражениях.
-function fieldsForTotals(block) {
-  const fields = new Set()
-  for (const col of block.columns) {
-    if (col.field && col.aggregate) fields.add(col.field)
-    if (col.expression) {
-      for (const m of col.expression.matchAll(/([a-z_][a-z0-9_]*)/gi)) {
-        if (!AGG_NAMES.has(m[1])) fields.add(m[1])
-      }
-    }
-  }
-  return fields
-}
-
-function computeTotals(block) {
-  const out = {}
-  for (const field of fieldsForTotals(block)) {
-    let sum = 0
-    let count = 0
-    let min = Infinity
-    let max = -Infinity
-    for (const r of rows.value) {
-      const v = Number(r[field])
-      if (!Number.isFinite(v)) continue
-      sum += v
-      count++
-      if (v < min) min = v
-      if (v > max) max = v
-    }
-    out[field] = { sum, count, min: count ? min : 0, max: count ? max : 0 }
-  }
-  return out
-}
-
-// Ф1: плоская таблица. Строка ИТОГО синтезируется здесь же (2a переносит это в движок).
-function tableRows(block) {
-  if (!block.grandTotal) return rows.value
-  const totals = computeTotals(block)
-  const totalRow = { kind: 'grandtotal', cells: {}, totals }
-
-  const first = block.columns[0]
-  totalRow.cells[first.field || first.title] = 'ИТОГО'
-  for (const col of block.columns) {
-    const key = col.field || col.title
-    if (key !== (first.field || first.title)) totalRow.cells[key] = ''
-  }
-  return [...rows.value, totalRow]
-}
-
-function formatValue(col, value) {
-  if (value === null || value === undefined) return '—'
-  if (col.format === 'percent') {
-    const n = Number(value)
-    return Number.isFinite(n) ? (n * 100).toFixed(col.decimals ?? 1).replace('.', ',') + ' %' : '—'
-  }
-  if (col.format === 'integer' || col.format === 'number') {
-    const n = Number(value)
-    return Number.isFinite(n) ? nf.format(n) : String(value)
-  }
-  return String(value)
-}
-
-function aggFromTotals(totals, fn, name) {
-  const t = totals[name]
-  if (!t) return null
-  if (fn === 'sum') return t.sum
-  if (fn === 'count') return t.count
-  if (fn === 'avg') return t.count ? t.sum / t.count : null
-  if (fn === 'min') return t.min
-  if (fn === 'max') return t.max
-  return null
-}
-
-function cellText(block, row, field) {
-  const col = block.columns.find((c) => (c.field || c.title) === field)
-  if (!col) return ''
-
-  if (col.expression) {
-    let value = null
-    try {
-      if (row.kind === 'grandtotal') {
-        value = evaluate(col.expression, { field: () => undefined, agg: (fn, name) => aggFromTotals(row.totals, fn, name) })
-      } else {
-        value = evaluate(col.expression, { field: (n) => row[n], agg: () => undefined })
-      }
-    } catch {
-      value = null
-    }
-    if (value === null) return row.kind === 'grandtotal' ? '—' : '—'
-    return formatValue(col, value)
-  }
-
-  if (row.kind === 'grandtotal') {
-    if (col.aggregate && col.field) {
-      const t = row.totals[col.field]
-      return t ? formatValue(col, t.sum) : '—'
-    }
-    return row.cells[field] || '—'
-  }
-  return formatValue(col, row[col.field])
 }
 
 // --- диаграммы ---

@@ -70,6 +70,10 @@ const start = computed(() => {
   return Math.max(0, Math.min(raw, Math.max(0, props.rows.length - 1)))
 })
 
+// Первая реально видимая строка (без overscan): на ней показываем подпись группы,
+// чей объединённый блок начался выше окна.
+const firstVisible = computed(() => Math.max(0, Math.floor(scrollTop.value / props.rowHeight)))
+
 const end = computed(() =>
   Math.min(props.rows.length, start.value + visibleCount.value + props.overscan * 2)
 )
@@ -114,12 +118,12 @@ function cellsAt(index) {
 
     if (covering) {
       // Первый видимый ряд продолжения: показываем подпись группы сверху окна.
-      if (covering.row < start.value && index === start.value) {
+      if (covering.row < firstVisible.value && index === firstVisible.value) {
         cells.push({
           key: col,
           col,
           render: true,
-          rowspan: covering.row + covering.rowspan - start.value,
+          rowspan: Math.min(end.value, covering.row + covering.rowspan) - firstVisible.value,
           colspan: covering.colspan || 1,
           continued: true,
           text: props.cellText(props.rows[covering.row], props.columns[col].field),
