@@ -138,6 +138,7 @@ test('сворачивание категории внутри региона', 
 
 test('свёрнутая категория не меняет шеврон региона (и после прокрутки)', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  await waitRows(page)
 
   const first = page.locator('.rt-table tbody tr:not(.spacer)').first()
   const regionBefore = (await first.locator('.chev').nth(0).innerText()).trim()
@@ -155,6 +156,7 @@ test('свёрнутая категория не меняет шеврон ре�
 
 test('свёрнутая категория не перекрашивает ячейку региона (и после прокрутки)', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  await waitRows(page)
   const bg = (loc) => loc.evaluate((el) => getComputedStyle(el).backgroundColor)
 
   const firstRow = page.locator('.rt-table tbody tr:not(.spacer)').first()
@@ -301,3 +303,11 @@ test('список отчётов: карточки, поиск, переход 
   await expect(page).toHaveURL(/report\.html\?report=sales-summary/)
   await expect(page.locator('.meta')).toContainText('строк')
 })
+
+// Данные приходят асинхронно: до клика по шеврону ждём метаданные и строки,
+// иначе клик попадает в таблицу, которая перерисуется после загрузки.
+async function waitRows(page) {
+  await expect(page.locator('.meta')).toContainText('строк')
+  await expect(page.locator('.rt-table tbody tr:not(.spacer)').first()).toBeVisible()
+  await page.waitForTimeout(150)
+}
