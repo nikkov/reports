@@ -213,7 +213,10 @@ function cellsAt(index) {
           : row.kind === 'subtotal'
             ? row.groupPath
             : null,
-      expanded: row.groupPath ? props.expanded.has(row.groupPath.join('\u0001')) : false
+        // направление шеврона — по id именно этой группы, а не по полному пути строки
+        expanded: props.expanded.has(
+          (row.kind === 'detail' ? row.groupPath.slice(0, col + 1) : row.groupPath || []).join('\u0001')
+        )
     })
   }
   return cells

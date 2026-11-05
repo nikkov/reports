@@ -115,3 +115,20 @@ test('сворачивание и разворачивание группы', as
   const heightExpanded = await page.locator('.rt').evaluate((el) => el.scrollHeight)
   expect(heightExpanded).toBe(heightBefore)
 })
+
+test('сворачивание категории внутри региона', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  const heightBefore = await page.locator('.rt').evaluate((el) => el.scrollHeight)
+
+  // второй шеврон в строке — колонка «Категория»
+  await page.locator('.rt-table tbody tr:not(.spacer)').first().locator('.chev').nth(1).click()
+
+  const total = page.locator('.rt-table tbody tr:not(.spacer)').first()
+  await expect(total).toContainText('Итого')
+  await expect(total.locator('td').nth(1)).not.toHaveText('')
+  const heightCollapsed = await page.locator('.rt').evaluate((el) => el.scrollHeight)
+  expect(heightCollapsed).toBeLessThan(heightBefore)
+
+  await total.locator('.chev').first().click()
+  await expect(page.locator('.rt-table tbody tr:not(.spacer)').first()).not.toContainText('Итого')
+})

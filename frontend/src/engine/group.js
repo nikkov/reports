@@ -168,8 +168,12 @@ export function buildTableModel(rows, columns, opts = {}) {
     const childrenVisible = visible && isOpen(node.path)
 
     if (isLeaf) {
-      if (visible) for (const r of node.details) flat.push(makeRow('detail', groupFields.length, node, null, r, null))
-      if (subtotalLevels.has(node.level)) pushSubtotal(node)
+      const open = isOpen(node.path)
+      if (visible && open) {
+        for (const r of node.details) flat.push(makeRow('detail', groupFields.length, node, null, r, null))
+      }
+      // свёрнутый лист показывает только свой итог — независимо от subtotal:true
+      if (visible && (!open || subtotalLevels.has(node.level))) pushSubtotal(node)
       return
     }
 
