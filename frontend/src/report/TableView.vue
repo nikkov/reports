@@ -1,4 +1,9 @@
 <template>
+  <div v-if="isGrouped" class="tv-bar">
+    <button type="button" @click="collapseAll">Свернуть всё</button>
+    <button type="button" @click="expandAll">Развернуть всё</button>
+    <span class="tv-info">{{ collapsed.size }} свёрнуто</span>
+  </div>
   <ReportTable
     :rows="view.rows"
     :columns="columns"
@@ -116,6 +121,29 @@ const expandedIds = computed(() => {
   return open
 })
 
+const isGrouped = computed(() => leafCols.value.some((c) => c.group))
+
+// Все идентификаторы групп считаются по исходным строкам — не зависит от текущей свёрнутости.
+const allGroupIds = computed(() => {
+  const fields = leafCols.value.filter((c) => c.group).map((c) => c.field)
+  const norm = (v) => (v === null || v === undefined || v === '' ? '(пусто)' : String(v))
+  const ids = new Set()
+  for (const row of props.rows) {
+    for (let d = 1; d <= fields.length; d++) {
+      ids.add(fields.slice(0, d).map((f) => norm(row[f])).join('\u0001'))
+    }
+  }
+  return ids
+})
+
+function collapseAll() {
+  collapsed.value = new Set(allGroupIds.value)
+}
+
+function expandAll() {
+  collapsed.value = new Set()
+}
+
 function toggle(path) {
   const id = path.join('\u0001')
   const next = new Set(collapsed.value)
@@ -144,3 +172,25 @@ function cellText(row, key) {
   return formatValue(col, row.values?.[index])
 }
 </script>
+
+<style scoped>
+.tv-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #5b6472;
+}
+.tv-bar button {
+  font: inherit;
+  padding: 3px 10px;
+  border: 1px solid #cfd6de;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.tv-info {
+  font-variant-numeric: tabular-nums;
+}
+</style>

@@ -172,3 +172,18 @@ test('свёрнутая категория не перекрашивает яч
   const scrolledRegion = page.locator('.rt-table tbody tr:not(.spacer)').first().locator('td').nth(0)
   expect(await bg(scrolledRegion)).not.toBe(GREY)
 })
+
+test('«свернуть всё» оставляет только итоги регионов, «развернуть всё» возвращает детали', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  const heightBefore = await page.locator('.rt').evaluate((el) => el.scrollHeight)
+
+  await page.getByRole('button', { name: 'Свернуть всё' }).click()
+  await expect(page.locator('.rt-table tbody tr.subtotal').first()).toContainText('Итого')
+  const heightCollapsed = await page.locator('.rt').evaluate((el) => el.scrollHeight)
+  expect(heightCollapsed).toBeLessThan(heightBefore / 2)
+
+  await page.getByRole('button', { name: 'Развернуть всё' }).click()
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
+  const heightExpanded = await page.locator('.rt').evaluate((el) => el.scrollHeight)
+  expect(heightExpanded).toBe(heightBefore)
+})
