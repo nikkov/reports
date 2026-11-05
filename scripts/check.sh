@@ -52,6 +52,7 @@ if [ -f "$ROOT/frontend/package.json" ]; then
       echo "skip tests (нет npm-скрипта test)"
     fi
     if [ "${REP_E2E:-0}" = "1" ]; then
+      npm run --silent golden
       npm run --silent e2e
     else
       echo "skip e2e (нужны запущенные backend:8080 и vite:5173; включить: REP_E2E=1 ./scripts/check.sh)"

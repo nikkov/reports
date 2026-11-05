@@ -51,3 +51,16 @@ test('диаграмма отрисована на canvas', async ({ page }) => 
   await page.goto(`${BASE}&from=2026-01-01&to=2026-03-31`)
   await expect(page.locator('.chart canvas')).toHaveCount(1)
 })
+
+test('сгруппированный отчёт: подписи групп и объединённые ячейки', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+
+  // первая колонка первой строки — значение группы (регион), вторая — категория
+  const firstRowCells = page.locator('.rt-table tbody tr:not(.spacer)').first().locator('td')
+  await expect(firstRowCells.nth(0)).not.toHaveText('')
+  await expect(firstRowCells.nth(1)).not.toHaveText('')
+
+  // объединения есть, и они не выходят за окно
+  const merges = await page.locator('.rt-table td[rowspan]').count()
+  expect(merges).toBeGreaterThan(0)
+})

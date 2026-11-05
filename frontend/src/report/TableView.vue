@@ -7,7 +7,7 @@
     :height="height"
     :expanded="expandedIds"
     :cell-text="cellText"
-    @toggle="toggle"
+    :on-toggle="toggle"
   />
 </template>
 

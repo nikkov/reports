@@ -24,7 +24,7 @@
                 :colspan="cell.colspan"
                 :class="{ num: columns[cell.col].align === 'right', total: row.kind !== 'detail', cont: cell.continued }"
               >
-                <span v-if="cell.toggle" class="chev" @click.stop="$emit('toggle', cell.toggle)">{{
+                <span v-if="cell.toggle" class="chev"            @click.stop="handleToggle(cell.toggle)">{{
                   cell.expanded ? '▾' : '▸'
                 }}</span>
                 {{ cell.text }}
@@ -53,7 +53,8 @@ const props = defineProps({
   rowHeight: { type: Number, default: 26 },
   overscan: { type: Number, default: 8 },
   expanded: { type: Set, default: () => new Set() },
-  cellText: { type: Function, required: true } // (row, colField) => string
+  cellText: { type: Function, required: true }, // (row, colField) => string
+  onToggle: { type: Function, default: null } // (groupPath) => void — надёжнее emit из вложенного шаблона
 })
 
 const emit = defineEmits(['toggle'])
@@ -84,6 +85,12 @@ const end = computed(() =>
 )
 
 const windowRows = computed(() => props.rows.slice(start.value, end.value))
+
+function handleToggle(path) {
+  if (!path) return
+  if (props.onToggle) props.onToggle(path)
+  else emit('toggle', path)
+}
 
 function onScroll(e) {
   scrollTop.value = e.target.scrollTop
@@ -161,7 +168,7 @@ function cellsAt(index) {
       colspan: 1,
       continued: false,
       text: props.cellText(row, props.columns[col].field),
-      toggle: row.level === 0 ? row.groupPath : null,
+      toggle: row.kind === 'detail' ? row.groupPath.slice(0, col + 1) : null,
       expanded: row.groupPath ? props.expanded.has(row.groupPath.join('\u0001')) : false
     })
   }
