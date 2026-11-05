@@ -380,7 +380,11 @@ int main() {
                 return;
             }
             runQuery(
-                db, "SELECT id, title, char_length(body::text) AS size, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated FROM report_templates ORDER BY id", {},
+                db,
+                "SELECT id, title, char_length(body::text) AS size, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated, "
+                "(draft IS NOT NULL) AS has_draft, to_char(draft_updated_at, 'YYYY-MM-DD HH24:MI') AS draft_at "
+                "FROM report_templates ORDER BY id",
+                {},
                 [cb](const orm::Result &res) {
                     Json::Value list(Json::arrayValue);
                     for (const auto &row : res) {
@@ -389,6 +393,8 @@ int main() {
                         item["title"] = row["title"].as<std::string>();
                         item["size"] = static_cast<Json::UInt64>(row["size"].as<long long>());
                         item["updated"] = row["updated"].as<std::string>();
+                        item["hasDraft"] = row["has_draft"].as<bool>();
+                        if (!row["draft_at"].isNull()) item["draftAt"] = row["draft_at"].as<std::string>();
                         list.append(item);
                     }
                     cb(jsonResponse(list));
@@ -648,6 +654,161 @@ int main() {
                         [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "ROLLBACK_FAILED", describeError(e)); });
                 },
                 [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "ROLLBACK_FAILED", describeError(e)); });
+        },
+        {Post});
+
+    // --- Черновик и публикация (ADR-31) -------------------------------------
+    // Правка в админке больше не попадает в отчёт сразу: она сохраняется в draft,
+    // публичный /api/reports/{id} продолжает отдавать опубликованное тело, пока не вызван publish.
+
+    // GET /api/admin/reports/{id}/draft — тело черновика для редактора
+    app().registerHandler(
+        "/api/admin/reports/{id}/draft",
+        [db, adminEnabled](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+                           const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            runQuery(
+                db,
+                "SELECT draft::text AS draft, to_char(draft_updated_at, 'YYYY-MM-DD HH24:MI') AS draft_at "
+                "FROM report_templates WHERE id = $1 AND draft IS NOT NULL",
+                {id},
+                [cb](const orm::Result &res) {
+                    if (res.empty()) {
+                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "черновика нет");
+                        return;
+                    }
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setContentTypeCode(CT_APPLICATION_JSON);
+                    resp->setBody(res[0]["draft"].as<std::string>());
+                    resp->addHeader("Cache-Control", "no-store");
+                    if (!res[0]["draft_at"].isNull()) resp->addHeader("X-Draft-Updated", res[0]["draft_at"].as<std::string>());
+                    cb(resp);
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "DRAFT_FAILED", describeError(e)); });
+        },
+        {Get});
+
+    // PUT /api/admin/reports/{id}/draft — сохранить черновик (валидируется, в память не идёт)
+    app().registerHandler(
+        "/api/admin/reports/{id}/draft",
+        [db, adminEnabled, &validateTemplate](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
+                           const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            Json::Value tpl = (*body)["body"].isObject() ? (*body)["body"] : *body;
+            tpl["id"] = id;
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            const std::string raw = Json::writeString(wb, tpl);
+            std::string err;
+            if (!validateTemplate(raw, id, err)) {
+                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", err);
+                return;
+            }
+            runQuery(
+                db, "UPDATE report_templates SET draft = $2::jsonb, draft_updated_at = now() WHERE id = $1",
+                {id, raw},
+                [cb, id](const orm::Result &updated) {
+                    if (updated.affectedRows() == 0) {
+                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
+                        return;
+                    }
+                    Json::Value out;
+                    out["id"] = id;
+                    out["draft"] = true;
+                    cb(jsonResponse(out));
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "DRAFT_FAILED", describeError(e)); });
+        },
+        {Put});
+
+    // DELETE /api/admin/reports/{id}/draft — отменить черновик
+    app().registerHandler(
+        "/api/admin/reports/{id}/draft",
+        [db, adminEnabled](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+                           const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            runQuery(
+                db, "UPDATE report_templates SET draft = NULL, draft_updated_at = NULL WHERE id = $1", {id},
+                [cb, id](const orm::Result &) {
+                    Json::Value out;
+                    out["id"] = id;
+                    out["discarded"] = true;
+                    cb(jsonResponse(out));
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "DRAFT_FAILED", describeError(e)); });
+        },
+        {Delete});
+
+    // POST /api/admin/reports/{id}/publish — опубликовать черновик: снапшот прежней версии,
+    // тело = draft, draft очищается, память обновляется (hot-reload без рестарта)
+    app().registerHandler(
+        "/api/admin/reports/{id}/publish",
+        [db, adminEnabled, &applyTemplateInMemory, &validateTemplate](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+                                                   const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            runQuery(
+                db, "SELECT draft::text AS draft FROM report_templates WHERE id = $1", {id},
+                [cb, db, id, &applyTemplateInMemory, &validateTemplate](const orm::Result &res) {
+                    if (res.empty()) {
+                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
+                        return;
+                    }
+                    if (res[0]["draft"].isNull()) {
+                        sendError(cb, k409Conflict, "NO_DRAFT", "у отчёта нет черновика");
+                        return;
+                    }
+                    const std::string raw = res[0]["draft"].as<std::string>();
+                    std::string err;
+                    if (!validateTemplate(raw, id, err)) {
+                        sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", err);
+                        return;
+                    }
+                    Json::CharReaderBuilder builder;
+                    Json::Value parsed;
+                    std::string errs;
+                    std::istringstream in(raw);
+                    Json::parseFromStream(builder, in, &parsed, &errs);
+                    const std::string title = parsed.get("title", id).asString();
+                    runQuery(
+                        db,
+                        "INSERT INTO report_templates_history (report_id, title, body) "
+                        "SELECT id, title, body FROM report_templates WHERE id = $1",
+                        {id},
+                        [cb, db, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                            runQuery(
+                                db,
+                                "UPDATE report_templates SET title = $2, body = $3::jsonb, updated_at = now(), "
+                                "draft = NULL, draft_updated_at = NULL WHERE id = $1",
+                                {id, title, raw},
+                                [cb, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                                    applyTemplateInMemory(id, raw, title);
+                                    Json::Value out;
+                                    out["id"] = id;
+                                    out["published"] = true;
+                                    cb(jsonResponse(out));
+                                },
+                                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "PUBLISH_FAILED", describeError(e)); });
+                        },
+                        [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "PUBLISH_FAILED", describeError(e)); });
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "PUBLISH_FAILED", describeError(e)); });
         },
         {Post});
 

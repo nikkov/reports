@@ -50,6 +50,17 @@ export const api = {
   // сырой шаблон для редактора: с SQL справочников, в отличие от публичного /api/reports/{id}
   adminTemplate: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`),
   adminHistory: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}/history`),
+  // черновик и публикация (ADR-31)
+  adminDraft: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}/draft`),
+  saveDraft: (id, body) =>
+    request(`/api/admin/reports/${encodeURIComponent(id)}/draft`, {
+      method: 'PUT',
+      body: JSON.stringify({ body })
+    }),
+  publishDraft: (id) =>
+    request(`/api/admin/reports/${encodeURIComponent(id)}/publish`, { method: 'POST' }),
+  discardDraft: (id) =>
+    request(`/api/admin/reports/${encodeURIComponent(id)}/draft`, { method: 'DELETE' }),
   adminRollback: (id, snapshot) =>
     request(
       `/api/admin/reports/${encodeURIComponent(id)}/rollback/${encodeURIComponent(snapshot)}`,

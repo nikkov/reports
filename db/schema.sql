@@ -68,8 +68,10 @@ CREATE INDEX ops_day_idx ON ops (day);
 
 -- Шаблоны отчётов хранятся в БД (ADR-21): id, заголовок и тело шаблона как jsonb.
 CREATE TABLE report_templates (
-    id         text        PRIMARY KEY,
-    title      text        NOT NULL,
-    body       jsonb       NOT NULL,
-    updated_at timestamptz NOT NULL DEFAULT now()
+    id               text        PRIMARY KEY,
+    title            text        NOT NULL,
+    body             jsonb       NOT NULL,        -- опубликованная версия
+    updated_at       timestamptz NOT NULL DEFAULT now(),
+    draft            jsonb,                       -- черновик правки (ADR-31)
+    draft_updated_at timestamptz
 );

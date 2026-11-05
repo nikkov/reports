@@ -53,17 +53,27 @@
           <p class="head-meta">
             <template v-if="currentId">
               <code>{{ currentId }}</code>
+              <span v-if="hasDraft" class="draft-chip">черновик{{ draftAt ? ' от ' + draftAt : '' }}</span>
               <span v-if="dirty" class="dirty">● не сохранено</span>
-              <span v-else class="saved">сохранено</span>
+              <span v-else-if="!hasDraft" class="saved">опубликовано</span>
             </template>
             <template v-else>Выберите отчёт слева или создайте новый.</template>
           </p>
         </div>
         <div class="actions">
           <button class="btn" :disabled="!canEdit" @click="runValidate">Проверить</button>
-          <button class="btn primary" :disabled="!canEdit || saving" @click="save">
-            {{ saving ? 'Сохранение…' : 'Сохранить' }}
+          <button v-if="!currentId" class="btn primary" :disabled="!canEdit || saving" @click="save">
+            {{ saving ? 'Сохранение…' : 'Создать' }}
           </button>
+          <template v-else>
+            <button class="btn" :disabled="!canEdit || saving" @click="saveDraftOnly">
+              {{ saving ? 'Сохранение…' : 'Сохранить черновик' }}
+            </button>
+            <button class="btn primary" :disabled="!canEdit || publishing" @click="publishNow">
+              {{ publishing ? 'Публикация…' : 'Опубликовать' }}
+            </button>
+            <button class="btn" :disabled="!hasDraft || publishing" @click="discardNow">Отменить черновик</button>
+          </template>
           <button class="btn" :disabled="!canEdit" @click="openSaveAs">Сохранить как…</button>
           <button class="btn" :disabled="!currentId" @click="previewDraft">Предпросмотр (черновик)</button>
           <a
@@ -256,6 +266,9 @@ const statusKind = ref('info')
 const errors = ref([])
 const warnings = ref([])
 const saving = ref(false)
+const publishing = ref(false)
+const hasDraft = ref(false)
+const draftAt = ref('')
 
 const historyOpen = ref(false)
 const history = ref([])
@@ -381,7 +394,7 @@ function setDoc(value) {
   text.value = value
 }
 
-function showTemplate(id, tpl) {
+async function showTemplate(id, tpl) {
   currentId.value = id
   savedTitle.value = tpl.title || ''
   const pretty = JSON.stringify(tpl, null, 2)
@@ -392,6 +405,22 @@ function showTemplate(id, tpl) {
   clearProblems()
   setStatus('')
   rememberBody(id, tpl)
+
+  // черновик (ADR-31): редактор открывает его, если он есть; публичный отчёт не меняется
+  hasDraft.value = false
+  draftAt.value = ''
+  const row = reports.value.find((r) => r.id === id)
+  if (row?.hasDraft) {
+    hasDraft.value = true
+    draftAt.value = row.draftAt || ''
+    try {
+      const draft = await api.adminDraft(id)
+      setDoc(JSON.stringify(draft, null, 2)) // редактор синхронизируем через CodeMirror
+      rememberBody(id, draft)
+    } catch {
+      /* черновик мог быть опубликован другим пользователем — остаёмся на опубликованной версии */
+    }
+  }
 }
 
 async function loadTemplate(id, force = false) {
@@ -547,6 +576,70 @@ function jumpTo(path) {
   const line = doc.line(targetLine)
   view.dispatch({ selection: { anchor: line.from, head: line.to }, scrollIntoView: true })
   view.focus()
+}
+
+// Сохранить правку как черновик: публичный отчёт не меняется до публикации.
+async function saveDraftOnly() {
+  if (!canEdit.value || saving.value) return
+  clearProblems()
+  const parsed = parseDraft()
+  if (parsed.error) return
+  const body = parsed.value
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    errors.value = [{ path: '(корень)', message: 'Шаблон должен быть JSON-объектом' }]
+    return
+  }
+  body.id = currentId.value
+  saving.value = true
+  setStatus('Сохранение черновика…')
+  try {
+    await api.saveDraft(currentId.value, body)
+    hasDraft.value = true
+    draftAt.value = new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    await loadList()
+    setStatus('черновик сохранён — отчёт пока не изменился')
+  } catch (e) {
+    setStatus('не сохранено: ' + e.message, 'err')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function publishNow() {
+  if (!canEdit.value || publishing.value) return
+  publishing.value = true
+  setStatus('Публикация…')
+  try {
+    await api.publishDraft(currentId.value)
+    const published = await api.adminTemplate(currentId.value)
+    setDoc(JSON.stringify(published, null, 2))
+    savedText.value = text.value
+    hasDraft.value = false
+    draftAt.value = ''
+    await loadList()
+    rememberBody(currentId.value, published)
+    setStatus('опубликовано')
+  } catch (e) {
+    setStatus('не опубликовано: ' + e.message, 'err')
+  } finally {
+    publishing.value = false
+  }
+}
+
+async function discardNow() {
+  if (!hasDraft.value) return
+  try {
+    await api.discardDraft(currentId.value)
+    const published = await api.adminTemplate(currentId.value)
+    setDoc(JSON.stringify(published, null, 2))
+    savedText.value = text.value
+    hasDraft.value = false
+    draftAt.value = ''
+    await loadList()
+    setStatus('черновик отменён')
+  } catch (e) {
+    setStatus('не удалось отменить: ' + e.message, 'err')
+  }
 }
 
 async function save() {
@@ -1116,6 +1209,14 @@ h1 {
   padding: 1px 6px;
   border-radius: 4px;
   color: #40506b;
+}
+.draft-chip {
+  font-size: 11px;
+  color: #6b4a17;
+  background: #fdf3e6;
+  border: 1px solid #f3e0c4;
+  border-radius: 999px;
+  padding: 1px 8px;
 }
 .dirty {
   color: #a05a00;

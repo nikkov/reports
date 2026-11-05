@@ -698,3 +698,48 @@ test('каталог: папки, теги и избранное', async ({ page
   await page.locator('.folder', { hasText: 'Избранное' }).click()
   await expect(page.locator('.card')).toHaveCount(1)
 })
+
+test('публикация: правка живёт в черновике и попадает в отчёт только после публикации', async ({ page, request }) => {
+  const id = 'draft-e2e'
+  const base = {
+    version: 1,
+    id,
+    title: 'Черновик e2e',
+    params: [],
+    datasets: { s: { sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }]
+  }
+  await request.delete(`/api/reports/${id}`)
+  const created = await request.post('/api/reports', { data: { id, body: base } })
+  expect(created.ok()).toBeTruthy()
+
+  // черновик с новым заголовком
+  const draft = await request.put(`/api/admin/reports/${id}/draft`, { data: { body: { ...base, title: 'Черновик e2e (правка)' } } })
+  expect(draft.ok()).toBeTruthy()
+
+  // публичный отчёт не изменился
+  const before = await (await request.get(`/api/reports/${id}`)).json()
+  expect(before.title).toBe('Черновик e2e')
+
+  // админка открывает черновик и показывает его статус
+  await page.goto('/admin.html')
+  await page.locator('.search').fill(id)
+  await page.locator(`[data-report=${id}] .report-main`).click()
+  await expect(page.locator('.draft-chip')).toBeVisible()
+  await expect(page.locator('.draft-chip')).toContainText('черновик')
+  await expect(page.locator('.cm-content')).toContainText('Черновик e2e (правка)')
+
+  // публикация из админки
+  await page.getByRole('button', { name: 'Опубликовать' }).click()
+  await expect(page.locator('.status')).toContainText('опубликовано')
+  await expect(page.locator('.draft-chip')).toHaveCount(0)
+
+  const after = await (await request.get(`/api/reports/${id}`)).json()
+  expect(after.title).toBe('Черновик e2e (правка)')
+
+  // отчёт открывается с новой версией и данными
+  await page.goto(`/report.html?report=${id}`)
+  await expect(page.locator('h1')).toHaveText('Черновик e2e (правка)')
+
+  await request.delete(`/api/reports/${id}`)
+})
