@@ -263,6 +263,9 @@ export function validateTemplate(template) {
   })
 
   for (const [key, ds] of Object.entries(template.datasets || {})) {
+    if (ds?.queryId) {
+      errors.push({ path: `datasets.${key}`, message: 'queryId больше не поддерживается: SQL задаётся в datasets.<key>.sql' })
+    }
     for (const [paramName, source] of Object.entries(ds.params || {})) {
       if (typeof source === 'string' && source.startsWith('$')) {
         const ref = source.slice(1)

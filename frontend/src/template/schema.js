@@ -171,10 +171,10 @@ export default {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "queryId"
+        "sql"
       ],
       "properties": {
-        "queryId": {
+        "sql": {
           "type": "string",
           "minLength": 1
         },

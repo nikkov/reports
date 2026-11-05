@@ -9,7 +9,7 @@ const base = () => ({
     { name: 'from', type: 'date', label: 'с', required: true, default: '2026-01-01' },
     { name: 'to', type: 'date', label: 'по', required: true, default: '2026-03-31' }
   ],
-  datasets: { sales: { queryId: 'sales_by_region', params: { from: '$from', to: '$to' } } },
+  datasets: { sales: { sql: 'SELECT 1', params: { from: '$from', to: '$to' } } },
   blocks: [
     { type: 'text', text: 'Период {{from}} — {{to}}' },
     {

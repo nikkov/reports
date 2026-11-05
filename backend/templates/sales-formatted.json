@@ -4,11 +4,35 @@
   "title": "Продажи: форматы чисел и выравнивание",
   "description": "Показывает выравнивание (политика для чисел, центр в заголовке) и форматы: суммы с суффиксом, отрицательные в скобках, проценты с двумя знаками, даты.",
   "params": [
-    { "name": "from", "type": "date", "label": "Период с", "required": true, "default": "2026-03-01", "source": { "kind": "date" } },
-    { "name": "to", "type": "date", "label": "по", "required": true, "default": "2026-03-10", "source": { "kind": "date" } }
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
   ],
   "datasets": {
-    "sales": { "queryId": "sales_by_region", "params": { "from": "$from", "to": "$to" } }
+    "sales": {
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id"
+    }
   },
   "styles": {
     "preset": "compact",
@@ -18,41 +42,96 @@
       "numericAlign": "right",
       "zebra": true
     },
-    "header": { "align": "center" },
+    "header": {
+      "align": "center"
+    },
     "columns": {
-      "order_date": { "width": 110, "align": "center", "format": "date" },
-      "region": { "width": 120 },
-      "category": { "width": 150 },
+      "order_date": {
+        "width": 110,
+        "align": "center",
+        "format": "date"
+      },
+      "region": {
+        "width": 120
+      },
+      "category": {
+        "width": 150
+      },
       "amount": {
         "width": 160,
         "align": "right",
         "headerAlign": "right",
-        "format": { "style": "number", "decimals": 0, "group": " ", "suffix": " ₽" }
+        "format": {
+          "style": "number",
+          "decimals": 0,
+          "group": " ",
+          "suffix": " ₽"
+        }
       },
       "profit": {
         "width": 150,
         "align": "right",
         "headerAlign": "right",
-        "format": { "style": "number", "decimals": 0, "group": " ", "negative": "parentheses", "suffix": " ₽" }
+        "format": {
+          "style": "number",
+          "decimals": 0,
+          "group": " ",
+          "negative": "parentheses",
+          "suffix": " ₽"
+        }
       }
     }
   },
   "blocks": [
-    { "type": "text", "text": "Форматы: суммы с суффиксом «₽», отрицательные в скобках, маржа — проценты с двумя знаками." },
+    {
+      "type": "text",
+      "text": "Форматы: суммы с суффиксом «₽», отрицательные в скобках, маржа — проценты с двумя знаками."
+    },
     {
       "type": "table",
       "dataKey": "sales",
       "grandTotal": true,
       "columns": [
-        { "field": "order_date", "title": "Дата", "type": "date", "format": "date", "width": 110 },
-        { "field": "region", "title": "Регион", "width": 120 },
-        { "field": "category", "title": "Категория", "width": 150 },
-        { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number", "width": 160 },
-        { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number", "width": 150 },
+        {
+          "field": "order_date",
+          "title": "Дата",
+          "type": "date",
+          "format": "date",
+          "width": 110
+        },
+        {
+          "field": "region",
+          "title": "Регион",
+          "width": 120
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "width": 150
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "width": 160
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "width": 150
+        },
         {
           "title": "Маржа",
           "expression": "sum(profit) / sum(amount)",
-          "format": { "style": "percent", "decimals": 2 },
+          "format": {
+            "style": "percent",
+            "decimals": 2
+          },
           "width": 110
         }
       ]

@@ -54,6 +54,7 @@ std::string columnType(const std::string &name,
         const orm::Field f = row[name];
         if (f.isNull()) continue;
         const std::string v = f.as<std::string>();
+        if (v.size() >= 10 && v[4] == '-' && v[7] == '-') return "date";
         if (v.find_first_of(".eE") != std::string::npos) return "float";
         const bool digits = !v.empty() && std::all_of(v.begin(), v.end(), [](char c) {
                                 return std::isdigit(static_cast<unsigned char>(c)) || c == '-';
@@ -78,7 +79,7 @@ Json::Value fieldToJson(const orm::Field &f, const std::string &type) {
 struct TemplateInfo {
     std::string id;
     std::string title;
-    std::string queryId;
+    std::string datasetSql;                             // SQL набора данных из шаблона (ADR-27)
     std::map<std::string, std::string> datasetParams;  // имя параметра запроса → "$param" шаблона
 };
 
@@ -107,7 +108,9 @@ bool parseTemplate(const std::string &text, const std::string &fallbackId, Templ
     const Json::Value &datasets = root["datasets"];
     if (!datasets.isObject() || datasets.empty()) return true;  // шаблон без данных
     const auto first = datasets.begin();
-    out.queryId = (*first).get("queryId", "").asString();
+    // SQL набора данных живёт в шаблоне (ADR-27); queryId из реестра больше не поддерживается
+    if ((*first).isMember("queryId")) return false;
+    out.datasetSql = (*first).get("sql", "").asString();
     const Json::Value &p = (*first)["params"];
     if (p.isObject()) {
         for (auto it = p.begin(); it != p.end(); ++it) out.datasetParams[it.name()] = it->asString();
@@ -289,6 +292,16 @@ int main() {
         if (!root["datasets"].isNull() && !root["datasets"].isObject()) {
             err = "datasets должен быть объектом";
             return false;
+        }
+        for (const auto &ds : root["datasets"]) {
+            if (ds.isMember("queryId")) {
+                err = "queryId больше не поддерживается: SQL набора данных задаётся в datasets.<key>.sql";
+                return false;
+            }
+            if (ds.get("sql", Json::Value("")).asString().empty()) {
+                err = "у набора данных нет sql";
+                return false;
+            }
         }
         for (const auto &param : root["params"]) {
             const Json::Value &source = param["source"];
@@ -736,6 +749,9 @@ int main() {
                 for (auto &p : body["params"]) {
                     if (p["source"].isObject()) p["source"].removeMember("sql");
                 }
+                for (auto &ds : body["datasets"]) {
+                    if (ds.isObject()) ds.removeMember("sql");
+                }
                 Json::StreamWriterBuilder wb;
                 wb["indentation"] = "";
                 resp->setBody(Json::writeString(wb, body));
@@ -858,30 +874,28 @@ int main() {
                 return;
             }
 
-            std::string queryId = (*body).get("queryId", "").asString();
             const std::string reportId = (*body).get("reportId", "").asString();
-            const TemplateInfo *tpl = nullptr;
+            if (reportId.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                          "нужен reportId: SQL набора данных берётся из шаблона");
+                return;
+            }
 
-            if (!reportId.empty()) {
+            std::string datasetSql;
+            std::map<std::string, std::string> datasetParams;
+            {
                 std::lock_guard<std::mutex> lock(templatesMutex);
                 const auto it = templates.find(reportId);
                 if (it == templates.end()) {
                     sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
                     return;
                 }
-                tpl = &it->second;
-                if (queryId.empty()) queryId = tpl->queryId;
+                datasetSql = it->second.datasetSql;
+                datasetParams = it->second.datasetParams;
             }
-            if (queryId.empty()) {
-                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
-                          "нужен reportId с объявленным datasets или queryId");
-                return;
-            }
-
-            const rep::CompiledQuery *query = registry.find(queryId);
-            if (query == nullptr) {
-                sendError(cb, k500InternalServerError, "QUERY_NOT_FOUND",
-                          "запрос '" + queryId + "' не зарегистрирован");
+            if (datasetSql.empty()) {
+                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
+                          "в шаблоне не задан datasets.<key>.sql");
                 return;
             }
 
@@ -901,10 +915,10 @@ int main() {
                 }
             }
 
-            // Значения приходят по имени шаблона ("$from"), а уходят в запрос как значения параметра.
-            if (tpl != nullptr) {
+            // Значения приходят по имени шаблона ("$from"), уходят в SQL как значения параметра.
+            if (!datasetParams.empty()) {
                 rep::ParamBag mapped;
-                for (const auto &kv : tpl->datasetParams) {
+                for (const auto &kv : datasetParams) {
                     const std::string &src = kv.second;
                     const std::string name = (!src.empty() && src[0] == '$') ? src.substr(1) : src;
                     if (const auto *v = bag.find(name)) mapped.set(kv.first, *v);
@@ -914,23 +928,70 @@ int main() {
                 bag = mapped;
             }
 
-            rep::applyDefaults(query->binding, bag);
-            const std::string err = rep::validateParams(query->binding, bag);
-            if (!err.empty()) {
-                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
-                return;
-            }
-
+            // ':name' → $N, значения из bag; '::' остаётся кастом типа
+            std::string compiled;
             std::vector<std::string> values;
-            values.reserve(query->binding.size());
-            for (const auto &d : query->binding) {
-                const auto *v = bag.find(d.name);
-                values.push_back(v != nullptr ? *v : std::string());
+            for (size_t i = 0; i < datasetSql.size();) {
+                const char c = datasetSql[i];
+                if (c == ':') {
+                    if (i + 1 < datasetSql.size() && datasetSql[i + 1] == ':') {
+                        compiled += "::";
+                        i += 2;
+                        continue;
+                    }
+                    size_t j = i + 1;
+                    while (j < datasetSql.size() &&
+                           (std::isalnum(static_cast<unsigned char>(datasetSql[j])) || datasetSql[j] == '_')) ++j;
+                    const std::string name = datasetSql.substr(i + 1, j - i - 1);
+                    if (name.empty()) {
+                        compiled.push_back(c);
+                        ++i;
+                        continue;
+                    }
+                    const auto *v = bag.find(name);
+                    if (v == nullptr) {
+                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                  "не передан параметр '" + name + "'");
+                        return;
+                    }
+                    // тип параметра берём из каста в SQL: без реестра это единственный источник.
+                    const std::string tail = datasetSql.substr(std::min(j, datasetSql.size()));
+                    const bool asDate = tail.rfind("::date", 0) == 0;
+                    const bool asInt = tail.rfind("::int", 0) == 0;
+                    if (asDate && !v->empty()) {
+                        const std::string &s = *v;
+                        const bool ok = (s.size() >= 10 && std::isdigit(static_cast<unsigned char>(s[0])) && s[4] == '-' && s[7] == '-');
+                        if (!ok) {
+                            sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                      "параметр '" + name + "' должен быть датой в формате ГГГГ-ММ-ДД");
+                            return;
+                        }
+                    }
+                    if (asInt && !v->empty()) {
+                        const std::string &s = *v;
+                        const bool ok = std::all_of(s.begin(), s.end(), [](char c) {
+                            return std::isdigit(static_cast<unsigned char>(c)) || c == '-';
+                        });
+                        if (!ok) {
+                            sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                      "параметр '" + name + "' должен быть целым числом");
+                            return;
+                        }
+                    }
+                    // пустая строка — законное значение («все», фильтр не задан)
+                    values.push_back(*v);
+                    compiled += "$" + std::to_string(values.size());
+                    i = j;
+                    continue;
+                }
+                compiled.push_back(c);
+                ++i;
             }
 
+            static const std::map<std::string, std::string> noDeclared;
             runQuery(
-                db, query->sql, values,
-                [cb, query, maxRows](const orm::Result &res) {
+                db, compiled, values,
+                [cb, maxRows](const orm::Result &res) {
                     if (res.size() > maxRows) {
                         sendError(cb, k422UnprocessableEntity, "ROW_LIMIT",
                                   "результат " + std::to_string(res.size()) + " строк > лимита " +
@@ -946,7 +1007,7 @@ int main() {
                     types.reserve(ncols);
                     for (size_t c = 0; c < ncols; ++c) {
                         names.emplace_back(res.columnName(static_cast<unsigned long>(c)));
-                        types.push_back(columnType(names.back(), query->columns, res));
+                        types.push_back(columnType(names.back(), noDeclared, res));
                         Json::Value col;
                         col["name"] = names.back();
                         col["type"] = types.back();
@@ -977,6 +1038,12 @@ int main() {
                     if (msg.find("statement timeout") != std::string::npos ||
                         msg.find("canceling statement") != std::string::npos) {
                         sendError(cb, k504GatewayTimeout, "SQL_TIMEOUT", msg);
+                        return;
+                    }
+                    // типы параметров больше не описаны в реестре: ошибку приведения значения
+                    // PostgreSQL отдаём как 422, чтобы контракт API не менялся
+                    if (msg.find("invalid input syntax") != std::string::npos) {
+                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", msg);
                         return;
                     }
                     if (msg.find("Connection refused") != std::string::npos ||

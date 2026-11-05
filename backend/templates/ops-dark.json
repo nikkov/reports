@@ -36,12 +36,12 @@
   ],
   "datasets": {
     "ops": {
-      "queryId": "ops_by_service",
       "params": {
         "service": "$service",
         "from": "$from",
         "to": "$to"
-      }
+      },
+      "sql": "SELECT o.day, o.service, o.team, o.requests, o.failures, o.avg_ms FROM ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) ORDER BY o.day, o.service, o.id"
     }
   },
   "styles": {

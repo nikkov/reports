@@ -3,40 +3,18 @@
 Путь шаблона: файл в репозитории → валидатор → загрузка в PostgreSQL → рестарт бэкенда → проверка в браузере.
 SQL живёт только на сервере (`backend/config/queries.json`), шаблон его не содержит.
 
-## 1. Запрос в реестре SQL
+## 1. SQL набора данных — в шаблоне
 
-`backend/config/queries.json`:
+Пишется прямо в шаблоне, в секции `datasets` (ADR-27). Ниже — как выглядел реестровый вариант,
+он больше не нужен; сами SQL перенесены в шаблоны:
 
 ```json
-{
-  "sales_by_region_id": {
+"datasets": {
+  "sales": {
     "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id",
-    "params": {
-      "region":   { "type": "int",  "required": true },
-      "category": { "type": "text", "required": false, "default": "" },
-      "from":     { "type": "date", "required": true },
-      "to":       { "type": "date", "required": true }
-    },
-    "columns": { "region": "text", "category": "text", "product": "text", "amount": "int", "profit": "int", "order_date": "date" }
+    "params": { "region": "$region", "category": "$category", "from": "$from", "to": "$to" }
   }
 }
-```
-
-Правила, которые проверены на практике:
-
-- параметры пишутся как `:name`, сервер сам превращает их в `$1…$N` и передаёт через binding;
-- рядом с placeholder нужен явный каст PostgreSQL: `:from::date`, `:region::int` — иначе СУБД не выведет тип;
-- множественный выбор приходит строкой: `= ANY(string_to_array(:param, ','))`;
-- необязательный фильтр удобно делать как `(:param = '' OR col = :param)` с `default: ""`;
-- `columns` задаёт типы полей для фронтенда; перечисляйте все поля из `SELECT`;
-- лимит строк — 50 000 (`maxRows`, `REP_MAX_ROWS`), при превышении API вернёт `422 ROW_LIMIT`;
-- `statement_timeout` — 2 секунды, дольше — 504.
-
-### Справочник для параметра (`source.kind = "lookup"`)
-
-SQL справочника живёт **в шаблоне** (ADR-24), реестр запросов для справочников не используется.
-Запрос обязан вернуть ровно две колонки: `value` (что уходит в основной запрос) и `label` (что видит пользователь).
-
 ```json
 {
   "name": "region",

@@ -36,12 +36,12 @@
   ],
   "datasets": {
     "finance": {
-      "queryId": "finance_by_cost_center",
       "params": {
         "cost_center": "$cost_center",
         "from": "$from",
         "to": "$to"
-      }
+      },
+      "sql": "SELECT f.period, f.cost_center, f.account, f.plan_amount, f.fact_amount FROM finance f WHERE f.period >= :from::date AND f.period <= :to::date AND (:cost_center = '' OR f.cost_center = :cost_center) ORDER BY f.period, f.account, f.id"
     }
   },
   "blocks": [

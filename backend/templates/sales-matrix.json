@@ -10,7 +10,9 @@
       "label": "Период с",
       "required": true,
       "default": "2026-01-01",
-      "source": { "kind": "date" }
+      "source": {
+        "kind": "date"
+      }
     },
     {
       "name": "to",
@@ -18,30 +20,62 @@
       "label": "по",
       "required": true,
       "default": "2026-03-31",
-      "source": { "kind": "date" }
+      "source": {
+        "kind": "date"
+      }
     }
   ],
   "datasets": {
     "sales": {
-      "queryId": "sales_by_region",
-      "params": { "from": "$from", "to": "$to" }
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id"
     }
   },
   "blocks": [
-    { "type": "text", "text": "Период: {{from}} — {{to}}. Группировка: регион → категория." },
+    {
+      "type": "text",
+      "text": "Период: {{from}} — {{to}}. Группировка: регион → категория."
+    },
     {
       "type": "table",
       "dataKey": "sales",
       "collapsible": true,
       "grandTotal": true,
       "columns": [
-        { "field": "region", "title": "Регион", "group": true, "subtotal": true },
-        { "field": "category", "title": "Категория", "group": true, "subtotal": true },
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true,
+          "subtotal": true
+        },
         {
           "title": "Финансы",
           "children": [
-            { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number", "width": 150 },
-            { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number", "width": 150 }
+            {
+              "field": "amount",
+              "title": "Сумма",
+              "type": "int",
+              "aggregate": "sum",
+              "format": "number",
+              "width": 150
+            },
+            {
+              "field": "profit",
+              "title": "Прибыль",
+              "type": "int",
+              "aggregate": "sum",
+              "format": "number",
+              "width": 150
+            }
           ]
         },
         {

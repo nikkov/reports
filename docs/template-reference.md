@@ -85,18 +85,21 @@
 ```json
 "datasets": {
   "sales": {
-    "queryId": "sales_by_region_id",
-    "params": { "region": "$region", "from": "$from", "to": "$to" }
+    "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date",
+    "params": { "from": "$from", "to": "$to" }
   }
 }
 ```
 
 | Поле | Смысл |
 |---|---|
-| `queryId` | ключ из `backend/config/queries.json` |
-| `params` | отображение «параметр запроса → ссылка `$<имя параметра отчёта>`» |
+| `sql` | запрос набора данных; плейсхолдеры `:name` подставляются через binding (ADR-27) |
+| `params` | отображение «параметр SQL → `$<имя параметра отчёта>`»; необязательно, если имена совпадают |
 
-Валидатор проверяет, что `queryId` зарегистрирован, а каждая ссылка указывает на объявленный параметр.
+`queryId` и реестр `backend/config/queries.json` для наборов данных больше не используются.
+Типы колонок сервер определяет по результату запроса. Валидатор проверяет, что `sql` задан,
+а каждая ссылка `$name` указывает на объявленный параметр. Клиенту `sql` не отдаётся:
+`GET /api/reports/{id}` вырезает его так же, как SQL справочников.
 
 ## blocks[] — блоки вывода
 

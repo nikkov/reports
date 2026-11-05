@@ -10,7 +10,9 @@
       "label": "Период с",
       "required": true,
       "default": "2026-03-01",
-      "source": { "kind": "date" }
+      "source": {
+        "kind": "date"
+      }
     },
     {
       "name": "to",
@@ -18,29 +20,67 @@
       "label": "по",
       "required": true,
       "default": "2026-03-10",
-      "source": { "kind": "date" }
+      "source": {
+        "kind": "date"
+      }
     }
   ],
   "datasets": {
     "sales": {
-      "queryId": "sales_by_region",
-      "params": { "from": "$from", "to": "$to" }
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id"
     }
   },
   "blocks": [
-    { "type": "text", "text": "Реестр строк продаж за {{from}} — {{to}}" },
+    {
+      "type": "text",
+      "text": "Реестр строк продаж за {{from}} — {{to}}"
+    },
     {
       "type": "table",
       "dataKey": "sales",
       "grandTotal": true,
       "nullText": "—",
       "columns": [
-        { "field": "order_date", "title": "Дата", "type": "date", "width": 110 },
-        { "field": "region", "title": "Регион", "width": 110 },
-        { "field": "category", "title": "Категория", "width": 150 },
-        { "field": "product", "title": "Продукт" },
-        { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "format": "number", "width": 130 },
-        { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "format": "number", "width": 130 },
+        {
+          "field": "order_date",
+          "title": "Дата",
+          "type": "date",
+          "width": 110
+        },
+        {
+          "field": "region",
+          "title": "Регион",
+          "width": 110
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "width": 150
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "width": 130
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "width": 130
+        },
         {
           "title": "Маржа",
           "expression": "sum(profit) / sum(amount)",

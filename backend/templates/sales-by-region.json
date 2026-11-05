@@ -46,13 +46,13 @@
   ],
   "datasets": {
     "sales": {
-      "queryId": "sales_by_region_id",
       "params": {
         "region": "$region",
         "category": "$category",
         "from": "$from",
         "to": "$to"
-      }
+      },
+      "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = :category) AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id"
     }
   },
   "blocks": [

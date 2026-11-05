@@ -4,16 +4,49 @@
   "title": "Продажи: типографика и выравнивания",
   "description": "Пример оформления: разные размеры шрифта у шапки, тела, подытогов и итога; выравнивание по левому краю, по центру и по правому краю.",
   "params": [
-    { "name": "from", "type": "date", "label": "Период с", "required": true, "default": "2026-03-01", "source": { "kind": "date" } },
-    { "name": "to", "type": "date", "label": "по", "required": true, "default": "2026-03-10", "source": { "kind": "date" } }
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
   ],
   "datasets": {
-    "sales": { "queryId": "sales_by_region", "params": { "from": "$from", "to": "$to" } }
+    "sales": {
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id"
+    }
   },
   "styles": {
     "preset": "default",
-    "font": { "family": "Inter", "size": 12, "weight": 400, "lineHeight": 1.35 },
-    "colors": { "text": "#20262e", "background": "#ffffff", "border": "#c9d3e0" },
+    "font": {
+      "family": "Inter",
+      "size": 12,
+      "weight": 400,
+      "lineHeight": 1.35
+    },
+    "colors": {
+      "text": "#20262e",
+      "background": "#ffffff",
+      "border": "#c9d3e0"
+    },
     "layout": {
       "rowHeight": 26,
       "headerHeight": 40,
@@ -26,53 +59,150 @@
       "tableLayout": "fixed"
     },
     "header": {
-      "font": { "size": 15, "weight": 700, "lineHeight": 1.2 },
-      "colors": { "text": "#10233d", "background": "#e8eef8" },
+      "font": {
+        "size": 15,
+        "weight": 700,
+        "lineHeight": 1.2
+      },
+      "colors": {
+        "text": "#10233d",
+        "background": "#e8eef8"
+      },
       "align": "center",
       "verticalAlign": "middle"
     },
     "body": {
-      "font": { "size": 12, "weight": 400 },
-      "colors": { "text": "#20262e", "background": "#ffffff" },
+      "font": {
+        "size": 12,
+        "weight": 400
+      },
+      "colors": {
+        "text": "#20262e",
+        "background": "#ffffff"
+      },
       "verticalAlign": "middle"
     },
     "subtotal": {
-      "font": { "size": 13, "weight": 600 },
-      "colors": { "text": "#12324f", "background": "#f0f4fa" },
+      "font": {
+        "size": 13,
+        "weight": 600
+      },
+      "colors": {
+        "text": "#12324f",
+        "background": "#f0f4fa"
+      },
       "verticalAlign": "middle"
     },
     "grandtotal": {
-      "font": { "size": 14, "weight": 800 },
-      "colors": { "text": "#0b2138", "background": "#dfe8f5" },
+      "font": {
+        "size": 14,
+        "weight": 800
+      },
+      "colors": {
+        "text": "#0b2138",
+        "background": "#dfe8f5"
+      },
       "verticalAlign": "middle"
     },
     "columns": {
-      "order_date": { "width": 110, "align": "center", "headerAlign": "center", "format": "date" },
-      "region": { "width": 130, "align": "left", "headerAlign": "left" },
-      "category": { "width": 170, "align": "center", "headerAlign": "center" },
-      "product": { "width": 180, "align": "left", "headerAlign": "left" },
-      "amount": { "width": 150, "align": "right", "headerAlign": "right", "format": { "style": "number", "decimals": 0, "group": " " } },
-      "profit": { "width": 150, "align": "right", "headerAlign": "right", "format": { "style": "number", "decimals": 0, "group": " " } }
+      "order_date": {
+        "width": 110,
+        "align": "center",
+        "headerAlign": "center",
+        "format": "date"
+      },
+      "region": {
+        "width": 130,
+        "align": "left",
+        "headerAlign": "left"
+      },
+      "category": {
+        "width": 170,
+        "align": "center",
+        "headerAlign": "center"
+      },
+      "product": {
+        "width": 180,
+        "align": "left",
+        "headerAlign": "left"
+      },
+      "amount": {
+        "width": 150,
+        "align": "right",
+        "headerAlign": "right",
+        "format": {
+          "style": "number",
+          "decimals": 0,
+          "group": " "
+        }
+      },
+      "profit": {
+        "width": 150,
+        "align": "right",
+        "headerAlign": "right",
+        "format": {
+          "style": "number",
+          "decimals": 0,
+          "group": " "
+        }
+      }
     }
   },
   "blocks": [
-    { "type": "text", "text": "Шапка 15 px, тело 12 px, подытоги 13 px, итог 14 px. Выравнивание: дата — центр, регион и продукт — влево, суммы — вправо." },
+    {
+      "type": "text",
+      "text": "Шапка 15 px, тело 12 px, подытоги 13 px, итог 14 px. Выравнивание: дата — центр, регион и продукт — влево, суммы — вправо."
+    },
     {
       "type": "table",
       "dataKey": "sales",
       "collapsible": true,
       "grandTotal": true,
       "columns": [
-        { "field": "region", "title": "Регион", "group": true, "subtotal": true, "width": 130 },
-        { "field": "order_date", "title": "Дата", "type": "date", "width": 110 },
-        { "field": "category", "title": "Категория", "width": 170 },
-        { "field": "product", "title": "Продукт", "width": 180 },
-        { "field": "amount", "title": "Сумма", "type": "int", "aggregate": "sum", "width": 150 },
-        { "field": "profit", "title": "Прибыль", "type": "int", "aggregate": "sum", "width": 150 },
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true,
+          "width": 130
+        },
+        {
+          "field": "order_date",
+          "title": "Дата",
+          "type": "date",
+          "width": 110
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "width": 170
+        },
+        {
+          "field": "product",
+          "title": "Продукт",
+          "width": 180
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "width": 150
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "width": 150
+        },
         {
           "title": "Рентабельность",
           "expression": "sum(profit) / sum(amount)",
-          "format": { "style": "percent", "decimals": 1 },
+          "format": {
+            "style": "percent",
+            "decimals": 1
+          },
           "width": 140
         }
       ]
