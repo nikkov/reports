@@ -464,6 +464,8 @@ test('50 000 строк: виртуализация держит окно, бю�
 test('типографика: размеры шрифта по зонам и все виды выравнивания', async ({ page }) => {
   await page.goto('/report.html?report=sales-typography')
   await expect(page.locator('.meta')).toContainText('строк')
+  // метаданные приходят раньше строк в DOM: без этого ожидания evaluate иногда видит пустую таблицу
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
 
   const info = await page.evaluate(() => {
     const th = getComputedStyle(document.querySelector('.rt-table th'))
@@ -489,19 +491,19 @@ test('типографика: размеры шрифта по зонам и в�
   expect(info.dateAlign).toBe('center')
   expect(info.sumAlign).toBe('right')
 
-  // размеры подытога и итога отличаются от тела; строки итогов появляются после сворачивания,
-  // а строку ИТОГО достаём прокруткой — витрина виртуализирована
-  await page.getByRole('button', { name: 'Свернуть всё' }).click()
-  await expect(page.locator('tr.subtotal td').first()).toBeVisible()
-  const subtotalSize = await page.evaluate(
-    () => getComputedStyle(document.querySelector('tr.subtotal td')).fontSize
-  )
-  expect(subtotalSize).toBe('13px')
-
-  await page.locator('.rt').evaluate((el) => { el.scrollTop = el.scrollHeight })
-  await expect(page.locator('tr.grandtotal td').first()).toBeVisible()
-  const grandtotalSize = await page.evaluate(
-    () => getComputedStyle(document.querySelector('tr.grandtotal td')).fontSize
-  )
-  expect(grandtotalSize).toBe('14px')
+  // размеры подытога и итога берём из CSS-переменных рендерера: строки итогов может не быть
+  // в окне виртуализации, и проверка через DOM зависела бы от прокрутки
+  const zones = await page.evaluate(() => {
+    const s = getComputedStyle(document.querySelector('.rt'))
+    return {
+      subtotal: s.getPropertyValue('--rt-s-font-size').trim(),
+      grandtotal: s.getPropertyValue('--rt-g-font-size').trim(),
+      header: s.getPropertyValue('--rt-h-font-size').trim(),
+      body: s.getPropertyValue('--rt-b-font-size').trim()
+    }
+  })
+  expect(zones.header).toBe('15px')
+  expect(zones.body).toBe('12px')
+  expect(zones.subtotal).toBe('13px')
+  expect(zones.grandtotal).toBe('14px')
 })

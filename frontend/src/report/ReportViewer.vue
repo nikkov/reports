@@ -90,7 +90,16 @@ function syncUrl() {
   history.replaceState(null, '', `${location.pathname}?${q}`)
 }
 
+// Обязательный параметр, ещё не заполненный справочником, не должен уходить в запрос:
+// иначе сервер отвечает 422, и в консоли браузера появляется ошибка.
+function missingRequired() {
+  return (template.value?.params || []).filter(
+    (p) => p.required && String(paramValues[p.name] ?? '') === ''
+  )
+}
+
 async function load() {
+  if (template.value && missingRequired().length) return // ждём автовыбор справочника
   if (controller) controller.abort()
   controller = new AbortController()
   loading.value = true
