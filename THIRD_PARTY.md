@@ -7,12 +7,12 @@ DoD ТЗ §5: только MIT / BSD / Apache-2.0. Проверка — `scripts
 | Пакет | Версия | Лицензия | Назначение |
 |---|---|---|---|
 | vue | 3.5.44 | MIT | фреймворк |
-| vxe-table | 4.23.14 | MIT | таблицы (только ядро; enterprise-фичи запрещены, ADR-10) |
 | echarts | 5.6.0 | Apache-2.0 | диаграммы |
 | vite | 5.4.21 | MIT | сборка |
 | @vitejs/plugin-vue | 5.x | MIT | плагин Vite |
 
-Требуется также peer-пакет `@vxe-ui/core` (MIT) — без него vxe-table 4.23 не собирается.
+Таблицы рендерит собственный компонент `frontend/src/components/ReportTable.vue` (ADR-20);
+vxe-table и `@vxe-ui/core` из зависимостей удалены.
 
 ## Backend (Conan v1, фактические версии)
 

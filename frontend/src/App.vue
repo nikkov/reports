@@ -1,10 +1,10 @@
 <template>
   <div class="page">
     <header>
-      <h1>Spike S1 — vxe-table: группировка, объединения, подытоги, виртуальный скролл</h1>
+      <h1>Spike S1 — свой рендерер (ADR-20): группировка, объединения, подытоги, витрина</h1>
       <p class="hint">
         Все объединения и итоговые строки выводятся из одного массива строк (ADR-1/2).
-        Toggle группы пересобирает модель — индексы не могут устареть.
+        Окно витрины и обрезка rowspan по окну — ADR-20; сторонних табличных библиотек нет.
       </p>
     </header>
 
@@ -38,36 +38,16 @@
       </span>
     </div>
 
-    <vxe-table
-      ref="tableRef"
-      class="grid"
-      :data="view.rows"
-      :merge-cells="useMerges ? view.merges : []"
-      :scroll-y="!paginate && useVirtual ? { enabled: true, gt: 20 } : undefined"
-      :row-config="{ isHover: true }"
-      :column-config="{ resizable: true }"
-      :height="520"
-      border
-      show-overflow
-      size="small"
-    >
-      <vxe-column field="region" title="Регион" width="230">
-        <template #default="{ row }">
-          <span
-            v-if="row.level === 0 && (row.kind === 'detail' || row.kind === 'subtotal')"
-            class="chev"
-            @click.stop="toggle(row.groupPath)"
-            >{{ isExpanded(row.groupPath) ? '▾' : '▸' }}</span
-          >
-          <span :class="{ total: row.kind !== 'detail' }">{{ firstCell(row) }}</span>
-        </template>
-      </vxe-column>
-      <vxe-column field="category" title="Категория" width="220" :formatter="fCategory" />
-      <vxe-column field="product" title="Продукт" width="160" :formatter="fProduct" />
-      <vxe-column field="amount" title="Сумма" width="170" align="right" :formatter="fAmount" />
-      <vxe-column field="profit" title="Прибыль" width="170" align="right" :formatter="fProfit" />
-      <vxe-column field="margin" title="Рентабельность" width="160" align="right" :formatter="fMargin" />
-    </vxe-table>
+    <ReportTable
+      :rows="view.rows"
+      :columns="columns"
+      :merges="useMerges ? view.merges : []"
+      :group-count="2"
+      :height="560"
+      :expanded="expanded"
+      :cell-text="cellText"
+      @toggle="toggle"
+    />
 
     <section class="chart-wrap">
       <h2>Итоги по регионам (из тех же агрегатов)</h2>
@@ -80,6 +60,16 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { buildTableModel, computeMerges, genRows } from './spike/model.js'
+import ReportTable from './components/ReportTable.vue'
+
+const columns = [
+  { field: 'region', title: 'Регион', width: 200 },
+  { field: 'category', title: 'Категория', width: 190 },
+  { field: 'product', title: 'Продукт', width: 150 },
+  { field: 'amount', title: 'Сумма', width: 150, align: 'right' },
+  { field: 'profit', title: 'Прибыль', width: 150, align: 'right' },
+  { field: 'margin', title: 'Рентабельность', width: 150, align: 'right' }
+]
 
 const SEP = '\u0001'
 const tStart = performance.now()
@@ -120,7 +110,7 @@ function rowsFor(m, n) {
 }
 
 const PAGE_SIZE = Math.min(20000, Math.max(50, Number(params.get('ps') || 200)))
-const paginate = params.get('page') !== '0'
+const paginate = params.get('page') === '1'
 const page = ref(0)
 
 const expanded = ref(makeTopLevelSet(mode.value, size.value))
@@ -155,6 +145,22 @@ const view = computed(() => {
 })
 
 const nf = new Intl.NumberFormat('ru-RU')
+
+function pct(amount, profit) {
+  if (!amount) return '—'
+  return (profit / amount * 100).toFixed(1).replace('.', ',') + ' %'
+}
+
+function cellText(row, field) {
+  const totals = row.totals ?? { amount: 0, profit: 0 }
+  if (field === 'margin') return pct(totals.amount, totals.profit)
+  if (field === 'amount') return nf.format(totals.amount ?? 0)
+  if (field === 'profit') return nf.format(totals.profit ?? 0)
+
+  if (row.kind === 'grandtotal') return field === 'region' ? 'ИТОГО' : ''
+  if (row.kind === 'subtotal') return row.cells[field] ?? ''
+  return row.cells[field] ?? (field === 'region' || field === 'category' ? '(пусто)' : '')
+}
 
 function firstCell(row) {
   if (row.kind === 'grandtotal') return 'ИТОГО'
@@ -223,8 +229,7 @@ function collapseAll() {
 }
 
 function countDomRows() {
-  const el = tableRef.value?.$el ?? document
-  return el.querySelectorAll('.vxe-body--row').length
+  return document.querySelectorAll('.rt-table tbody tr').length
 }
 
 function renderChart() {
@@ -343,11 +348,6 @@ h1 {
 }
 .grid {
   background: #fff;
-}
-/* Подпись объединённой ячейки должна читаться сверху, иначе при rowspan
-   в сотни строк она уезжает в середину блока. */
-.grid .vxe-table--body td {
-  vertical-align: top;
 }
 .chev {
   display: inline-block;

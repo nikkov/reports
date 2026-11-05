@@ -16,10 +16,10 @@ case "$VER" in
   *) fail "нужен Conan v1, получен '$VER'" ;;
 esac
 
-step "Запрещённые enterprise-API vxe-table (ADR-10)"
+step "Запрещённые коммерческие/enterprise-компоненты (ADR-10, ADR-20)"
 if [ -d "$ROOT/frontend/src" ]; then
-  if grep -RInE "aggregateConfig|vxe-table-pro|@vxe-ui/plugin-|企业版" "$ROOT/frontend/src" >/dev/null 2>&1; then
-    fail "найдены обращения к enterprise-фичам vxe-table"
+  if grep -RInE "from ['\"]vxe-table|vxe-table-pro|aggregateConfig|@vxe-ui/|ag-grid|handsontable|ag-studio|企业版" "$ROOT/frontend/src" >/dev/null 2>&1; then
+    fail "найдена зависимость от коммерческого/enterprise табличного компонента"
   fi
   echo "ok"
 else
