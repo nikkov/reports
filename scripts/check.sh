@@ -26,6 +26,13 @@ else
   echo "skip (нет frontend/src)"
 fi
 
+step "Лицензии прямых зависимостей (DoD §5)"
+if [ -f "$ROOT/scripts/licenses.mjs" ] && command -v node >/dev/null 2>&1; then
+  node "$ROOT/scripts/licenses.mjs" | tail -1
+else
+  echo "skip (нет node или scripts/licenses.mjs)"
+fi
+
 step "Backend: сборка и тесты"
 if [ -f "$ROOT/backend/CMakeLists.txt" ]; then
   cmake -S "$ROOT/backend" -B "$ROOT/backend/build" \
