@@ -2,12 +2,17 @@
 -- Значения получаются арифметикой от i, поэтому результат не зависит от random()/версии СУБД.
 BEGIN;
 
-TRUNCATE sales, finance, ops RESTART IDENTITY;
+TRUNCATE sales, finance, ops, regions RESTART IDENTITY;
+
+INSERT INTO regions (id, name) VALUES
+    (1, 'Север'), (2, 'Юг'), (3, 'Запад'), (4, 'Восток'), (5, 'Центр');
 
 -- sales: 50 000 строк, период 2025-10-01 .. 2026-03-31 (182 дня)
-INSERT INTO sales (id, order_date, region, category, product, customer, qty, amount, profit)
+INSERT INTO sales (id, order_date, region_id, region, category, product, customer, qty, amount, profit)
 SELECT i,
        DATE '2025-10-01' + ((i * 17) % 182),
+       (SELECT id FROM regions WHERE name = CASE WHEN i % 1009 = 0 THEN NULL
+            ELSE (ARRAY['Север','Юг','Запад','Восток','Центр'])[1 + (i * 7) % 5] END),
        CASE WHEN i % 1009 = 0 THEN NULL
             ELSE (ARRAY['Север','Юг','Запад','Восток','Центр'])[1 + (i * 7) % 5] END,
        CASE WHEN i % 2113 = 0 THEN NULL

@@ -3,11 +3,19 @@ DROP TABLE IF EXISTS report_templates;
 DROP TABLE IF EXISTS sales;
 DROP TABLE IF EXISTS finance;
 DROP TABLE IF EXISTS ops;
+DROP TABLE IF EXISTS regions;
 
 -- Денежные величины — целые минорные единицы (копейки), ADR-8.
+-- Справочник для параметров-списков (ID → NAME), ADR-22.
+CREATE TABLE regions (
+    id   integer PRIMARY KEY,
+    name text    NOT NULL UNIQUE
+);
+
 CREATE TABLE sales (
     id          bigint PRIMARY KEY,
     order_date  date    NOT NULL,
+    region_id   integer REFERENCES regions (id),
     region      text,
     category    text,
     product     text    NOT NULL,
@@ -19,6 +27,7 @@ CREATE TABLE sales (
 
 CREATE INDEX sales_order_date_idx ON sales (order_date);
 CREATE INDEX sales_region_idx     ON sales (region);
+CREATE INDEX sales_region_id_idx  ON sales (region_id);
 CREATE INDEX sales_category_idx   ON sales (category);
 
 CREATE TABLE finance (

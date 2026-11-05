@@ -2,8 +2,14 @@
   "sales_by_region": {
     "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id",
     "params": {
-      "from": {"type": "date", "required": true},
-      "to": {"type": "date", "required": true}
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      }
     },
     "columns": {
       "region": "text",
@@ -17,8 +23,14 @@
   "ops_by_day": {
     "sql": "SELECT day, service, team, requests, failures, avg_ms FROM ops WHERE day >= :from::date AND day <= :to::date ORDER BY day, service",
     "params": {
-      "from": {"type": "date", "required": true},
-      "to": {"type": "date", "required": true}
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      }
     },
     "columns": {
       "day": "date",
@@ -32,8 +44,14 @@
   "finance_by_period": {
     "sql": "SELECT period, cost_center, account, plan_amount, fact_amount FROM finance WHERE period >= :from::date AND period <= :to::date ORDER BY period, cost_center NULLS LAST, account",
     "params": {
-      "from": {"type": "date", "required": true},
-      "to": {"type": "date", "required": true}
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      }
     },
     "columns": {
       "period": "date",
@@ -46,8 +64,59 @@
   "slow_probe": {
     "sql": "SELECT pg_sleep(:seconds::int) IS NULL AS done",
     "params": {
-      "seconds": {"type": "int", "required": true}
+      "seconds": {
+        "type": "int",
+        "required": true
+      }
     },
-    "columns": {"done": "bool"}
+    "columns": {
+      "done": "bool"
+    }
+  },
+  "lookup_regions": {
+    "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name",
+    "params": {},
+    "columns": {
+      "value": "text",
+      "label": "text"
+    }
+  },
+  "lookup_categories_by_region": {
+    "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1",
+    "params": {
+      "region": {
+        "type": "int",
+        "required": true
+      }
+    },
+    "columns": {
+      "value": "text",
+      "label": "text"
+    }
+  },
+  "sales_by_region_id": {
+    "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id",
+    "params": {
+      "region": {
+        "type": "int",
+        "required": true
+      },
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      }
+    },
+    "columns": {
+      "region": "text",
+      "category": "text",
+      "product": "text",
+      "amount": "int",
+      "profit": "int",
+      "order_date": "date"
+    }
   }
 }

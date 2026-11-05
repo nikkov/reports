@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
 #include <map>
+#include <mutex>
 #include <memory>
 #include <string>
 #include <vector>
@@ -245,6 +247,87 @@ int main() {
             resp->setBody(it->second);
             resp->addHeader("Cache-Control", "no-store");
             cb(resp);
+        },
+        {Get});
+
+    // Кеш справочников (ADR-22): ключ = id + значения параметров, TTL в секундах.
+    struct LookupCache {
+        std::mutex mutex;
+        std::map<std::string, std::pair<std::chrono::steady_clock::time_point, Json::Value>> items;
+    };
+    auto lookupCache = std::make_shared<LookupCache>();
+    const int lookupTtl = std::stoi(rep::envOr("REP_LOOKUP_TTL_SECONDS", "60"));
+
+    app().registerHandler(
+        "/api/lookups/{id}",
+        [db, &registry, lookupCache, lookupTtl](const HttpRequestPtr &req,
+                                                std::function<void(const HttpResponsePtr &)> &&cb,
+                                                const std::string &id) {
+            const rep::CompiledQuery *query = registry.find(id);
+            if (query == nullptr) {
+                sendError(cb, k404NotFound, "LOOKUP_NOT_FOUND", "справочник '" + id + "' не зарегистрирован");
+                return;
+            }
+
+            rep::ParamBag bag;
+            for (const auto &d : query->binding) {
+                const std::string &v = req->getParameter(d.name);
+                if (!v.empty()) bag.set(d.name, v);
+            }
+            rep::applyDefaults(query->binding, bag);
+            const std::string err = rep::validateParams(query->binding, bag);
+            if (!err.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+
+            std::string cacheKey = id;
+            std::vector<std::string> values;
+            values.reserve(query->binding.size());
+            for (const auto &d : query->binding) {
+                const auto *v = bag.find(d.name);
+                values.push_back(v != nullptr ? *v : std::string());
+                cacheKey += "\u0001" + d.name + "=" + values.back();
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(lookupCache->mutex);
+                const auto it = lookupCache->items.find(cacheKey);
+                if (it != lookupCache->items.end() && std::chrono::steady_clock::now() < it->second.first) {
+                    cb(jsonResponse(it->second.second));
+                    return;
+                }
+            }
+
+            runQuery(
+                db, query->sql, values,
+                [cb, lookupCache, lookupTtl, cacheKey](const orm::Result &res) {
+                    Json::Value list(Json::arrayValue);
+                    for (const auto &row : res) {
+                        const orm::Field v = row[0];
+                        const orm::Field l = row[1];
+                        Json::Value item;
+                        item["value"] = v.isNull() ? "" : v.as<std::string>();
+                        item["label"] = l.isNull() ? (v.isNull() ? "" : v.as<std::string>()) : l.as<std::string>();
+                        list.append(item);
+                    }
+                    {
+                        std::lock_guard<std::mutex> lock(lookupCache->mutex);
+                        lookupCache->items[cacheKey] = {std::chrono::steady_clock::now() +
+                                                            std::chrono::seconds(lookupTtl),
+                                                        list};
+                    }
+                    cb(jsonResponse(list));
+                },
+                [cb](const std::exception_ptr &eptr) {
+                    std::string msg = "lookup failed";
+                    try {
+                        if (eptr) std::rethrow_exception(eptr);
+                    } catch (const std::exception &e) {
+                        msg = e.what();
+                    }
+                    sendError(cb, k500InternalServerError, "LOOKUP_FAILED", msg);
+                });
         },
         {Get});
 
