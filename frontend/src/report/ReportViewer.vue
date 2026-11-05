@@ -132,7 +132,20 @@ const needsLookups = (tpl) =>
 
 onMounted(async () => {
   try {
-    template.value = await api.template(reportId)
+    // Черновик из админки: report.html?report=<id>&draft=1 читает тело из localStorage,
+    // а не из API — так можно посмотреть несохранённые правки.
+    let draft = null
+    if (params.get('draft') === '1') {
+      const raw = localStorage.getItem(`rep:draft:${reportId}`)
+      if (raw) {
+        try {
+          draft = JSON.parse(raw)
+        } catch {
+          draft = null
+        }
+      }
+    }
+    template.value = draft || (await api.template(reportId))
     stylesCache = new WeakMap()
     Object.assign(paramValues, defaultParams(template.value))
     if (!needsLookups(template.value)) await load()

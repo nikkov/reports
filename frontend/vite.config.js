@@ -2,7 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'node:path'
 
-// Два входа: index.html — песочница рендерера (спайк), report.html — страница отчёта.
+// Три входа: index.html — песочница рендерера (спайк), report.html — страница отчёта,
+// admin.html — админка шаблонов (CodeMirror попадает только в её чанк).
 export default defineConfig({
   plugins: [vue()],
   server: {
@@ -33,7 +34,8 @@ export default defineConfig({
       input: {
         list: resolve(__dirname, 'index.html'),
         spike: resolve(__dirname, 'spike.html'),
-        report: resolve(__dirname, 'report.html')
+        report: resolve(__dirname, 'report.html'),
+        admin: resolve(__dirname, 'admin.html')
       }
     }
   }

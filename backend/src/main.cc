@@ -331,6 +331,34 @@ int main() {
         templatesRaw.erase(id);
     };
 
+    // Сырой шаблон для редактора: с SQL справочников (публичный /api/reports/{id} его вырезает).
+    app().registerHandler(
+        "/api/admin/reports/{id}",
+        [adminEnabled, &templatesRaw, &templatesMutex](const HttpRequestPtr &,
+                                                       std::function<void(const HttpResponsePtr &)> &&cb,
+                                                       const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            std::string raw;
+            {
+                std::lock_guard<std::mutex> lock(templatesMutex);
+                const auto it = templatesRaw.find(id);
+                if (it == templatesRaw.end()) {
+                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
+                    return;
+                }
+                raw = it->second;
+            }
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(raw);
+            resp->addHeader("Cache-Control", "no-store");
+            cb(resp);
+        },
+        {Get});
+
     app().registerHandler(
         "/api/admin/reports",
         [db, adminEnabled](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
@@ -637,10 +665,15 @@ int main() {
 
     app().registerHandler(
         "/api/reports",
-        [templatesRaw](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [&templatesRaw, &templatesMutex](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+            std::map<std::string, std::string> snapshot;
+            {
+                std::lock_guard<std::mutex> lock(templatesMutex);
+                snapshot = templatesRaw;
+            }
             // список для экрана отчётов: заголовок, описание и состав параметров
             Json::Value list(Json::arrayValue);
-            for (const auto &kv : templatesRaw) {
+            for (const auto &kv : snapshot) {
                 Json::Value item;
                 item["id"] = kv.first;
 
@@ -678,12 +711,17 @@ int main() {
 
     app().registerHandler(
         "/api/reports/{id}",
-        [templatesRaw](const HttpRequestPtr &req,
-                       std::function<void(const HttpResponsePtr &)> &&cb,
-                       const std::string &id) {
+        [&templatesRaw, &templatesMutex](const HttpRequestPtr &req,
+                                          std::function<void(const HttpResponsePtr &)> &&cb,
+                                          const std::string &id) {
             (void)req;
-            const auto it = templatesRaw.find(id);
-            if (it == templatesRaw.end()) {
+            std::map<std::string, std::string> snapshot;
+            {
+                std::lock_guard<std::mutex> lock(templatesMutex);
+                snapshot = templatesRaw;
+            }
+            const auto it = snapshot.find(id);
+            if (it == snapshot.end()) {
                 sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
                 return;
             }
@@ -713,11 +751,16 @@ int main() {
     // Кэша на сервере нет — списки кэширует клиент; защита от тяжёлого SQL — statement_timeout.
     app().registerHandler(
         "/api/reports/{reportId}/lookups/{param}",
-        [db, templatesRaw](const HttpRequestPtr &req,
-                           std::function<void(const HttpResponsePtr &)> &&cb,
-                           const std::string &reportId, const std::string &param) {
-            const auto it = templatesRaw.find(reportId);
-            if (it == templatesRaw.end()) {
+        [db, &templatesRaw, &templatesMutex](const HttpRequestPtr &req,
+                                              std::function<void(const HttpResponsePtr &)> &&cb,
+                                              const std::string &reportId, const std::string &param) {
+            std::map<std::string, std::string> snapshot;
+            {
+                std::lock_guard<std::mutex> lock(templatesMutex);
+                snapshot = templatesRaw;
+            }
+            const auto it = snapshot.find(reportId);
+            if (it == snapshot.end()) {
                 sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
                 return;
             }
@@ -807,7 +850,7 @@ int main() {
 
     app().registerHandler(
         "/api/report/data",
-        [db, &registry, templates, maxRows](const HttpRequestPtr &req,
+        [db, &registry, &templates, &templatesMutex, maxRows](const HttpRequestPtr &req,
                                             std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -820,6 +863,7 @@ int main() {
             const TemplateInfo *tpl = nullptr;
 
             if (!reportId.empty()) {
+                std::lock_guard<std::mutex> lock(templatesMutex);
                 const auto it = templates.find(reportId);
                 if (it == templates.end()) {
                     sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");

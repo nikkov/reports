@@ -43,5 +43,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reportId, params }),
       signal
+    }),
+
+  // --- администрирование шаблонов (ADR-26) ---
+  adminReports: () => request('/api/admin/reports'),
+  // сырой шаблон для редактора: с SQL справочников, в отличие от публичного /api/reports/{id}
+  adminTemplate: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`),
+  adminHistory: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}/history`),
+  adminRollback: (id, snapshot) =>
+    request(
+      `/api/admin/reports/${encodeURIComponent(id)}/rollback/${encodeURIComponent(snapshot)}`,
+      { method: 'POST' }
+    ),
+  createReport: (id, title, body) =>
+    request('/api/reports', { method: 'POST', body: JSON.stringify({ id, title, body }) }),
+  updateReport: (id, body) =>
+    request(`/api/reports/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ body })
+    }),
+  deleteReport: (id) =>
+    request(`/api/reports/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  validateReport: (id, body) =>
+    request(`/api/reports/${encodeURIComponent(id)}/validate`, {
+      method: 'POST',
+      body: JSON.stringify({ body })
     })
 }
