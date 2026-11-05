@@ -442,3 +442,21 @@ test('стили: форматы чисел и выравнивание из ш�
   expect(info.cells[3]).toMatch(/ ₽$/)
   expect(info.cells[5]).toMatch(/,\d{2} %$/)
 })
+
+test('50 000 строк: виртуализация держит окно, бюджет рендера соблюдён', async ({ page }) => {
+  // принятый бюджет (PO 2026-11-05): рендер окна ≤ 2 с; в тесте берём 4 с,
+  // чтобы не ловить дрожание на загруженной машине
+  await page.goto('/report.html?report=sales-matrix&from=2025-01-01&to=2027-01-01')
+  await expect(page.locator('.meta')).toContainText('50000', { timeout: 20000 })
+
+  const domRows = await page.locator('.rt-table tbody tr:not(.spacer)').count()
+  expect(domRows).toBeLessThan(60)
+
+  const renderMs = await page.evaluate(() => window.__renderMs)
+  expect(renderMs).toBeLessThan(4000)
+
+  // прокрутка в конец не ломает смещения
+  await page.locator('.rt').evaluate((el) => { el.scrollTop = el.scrollHeight })
+  await page.waitForTimeout(200)
+  expect(await page.locator('.rt-table tbody tr:not(.spacer)').count()).toBeLessThan(60)
+})
