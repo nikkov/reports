@@ -150,3 +150,25 @@ test('свёрнутая категория не меняет шеврон ре�
   const scrolled = page.locator('.rt-table tbody tr:not(.spacer)').first()
   await expect(scrolled.locator('.chev').nth(0)).toHaveText(regionBefore)
 })
+
+test('свёрнутая категория не перекрашивает ячейку региона (и после прокрутки)', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  const bg = (loc) => loc.evaluate((el) => getComputedStyle(el).backgroundColor)
+
+  const firstRow = page.locator('.rt-table tbody tr:not(.spacer)').first()
+  await firstRow.locator('.chev').nth(1).click()
+
+  const row = page.locator('.rt-table tbody tr.subtotal').first()
+  const regionCell = row.locator('td').nth(0)
+  const categoryCell = row.locator('td').nth(1)
+
+  const GREY = 'rgb(247, 249, 252)' // фон строки итога
+  // ячейка-предок осталась обычной (белая/прозрачная), а подпись итога — подсвечена
+  expect(await bg(regionCell)).not.toBe(GREY)
+  expect(await bg(categoryCell)).toBe(GREY)
+
+  await page.locator('.rt').evaluate((el) => { el.scrollTop = 20000 })
+  await page.waitForTimeout(300)
+  const scrolledRegion = page.locator('.rt-table tbody tr:not(.spacer)').first().locator('td').nth(0)
+  expect(await bg(scrolledRegion)).not.toBe(GREY)
+})

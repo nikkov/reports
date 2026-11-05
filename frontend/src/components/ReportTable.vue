@@ -28,7 +28,12 @@
                 v-if="cell.render"
                 :rowspan="cell.rowspan"
                 :colspan="cell.colspan"
-                :class="{ num: columns[cell.col].align === 'right', total: row.kind !== 'detail', cont: cell.continued }"
+                :class="{
+                  num: columns[cell.col].align === 'right',
+                  total: row.kind !== 'detail',
+                  inherit: cell.inherit,
+                  cont: cell.continued
+                }"
               >
                 <span v-if="cell.toggle" class="chev"            @click.stop="handleToggle(cell.toggle)">{{
                   cell.expanded ? '▾' : '▸'
@@ -190,6 +195,7 @@ function cellsAt(index) {
         colspan: 1,
         continued: false,
         text: props.cellText(row, props.columns[col].field),
+        inherit: row.kind === 'subtotal' && col < row.level,
         // строка итога: клик по её подписи разворачивает группу обратно
         toggle: row.kind === 'subtotal' && col === row.level ? row.groupPath : null,
         expanded: props.expanded.has((row.groupPath || []).slice(0, col + 1).join('\u0001'))
@@ -209,6 +215,8 @@ function cellsAt(index) {
       rowspan: run.end - run.start,
       colspan: 1,
       continued: false,
+      // ячейка группы-предка в строке итога: фон и начертание как у обычных строк
+      inherit: row.kind === 'subtotal' && col < row.level,
       text: props.cellText(row, props.columns[col].field),
       // у детальной строки сворачиваем группу этого уровня, у строки итога — саму группу
       toggle: row.kind === 'detail' || row.kind === 'subtotal' ? row.groupPath.slice(0, col + 1) : null,
@@ -279,6 +287,12 @@ function cellsAt(index) {
 }
 .rt-table tr.grandtotal td {
   border-top: 2px solid #c9d3e0;
+}
+/* ячейки групп-предков внутри строки итога остаются обычными */
+.rt-table tr.subtotal td.inherit,
+.rt-table tr.grandtotal td.inherit {
+  background: #fff;
+  font-weight: 400;
 }
 .rt-table tr.spacer td {
   padding: 0;
