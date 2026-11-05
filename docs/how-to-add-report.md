@@ -1,7 +1,7 @@
 # Как добавить отчёт
 
 Путь шаблона: файл в репозитории → валидатор → загрузка в PostgreSQL → рестарт бэкенда → проверка в браузере.
-SQL живёт только на сервере (`backend/config/queries.json`), шаблон его не содержит.
+SQL живёт в шаблоне: `datasets.<key>.sql` для данных и `params[].source.sql` для справочников (ADR-24, ADR-27).
 
 ## 1. SQL набора данных — в шаблоне
 
@@ -57,12 +57,13 @@ SQL живёт только на сервере (`backend/config/queries.json`),
   "title": "Продажи по региону",
   "description": "Сводная по выбранному региону за период",
   "params": [
-    { "name": "region", "type": "select", "label": "Регион", "required": true, "source": { "kind": "lookup", "queryId": "lookup_regions" } },
+    { "name": "region", "type": "select", "label": "Регион", "required": true,
+      "source": { "kind": "lookup", "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name" } },
     { "name": "from", "type": "date", "label": "Период с", "required": true, "default": "2026-01-01", "source": { "kind": "date" } },
     { "name": "to", "type": "date", "label": "по", "required": true, "default": "2026-03-31", "source": { "kind": "date" } }
   ],
   "datasets": {
-    "sales": { "queryId": "sales_by_region_id", "params": { "region": "$region", "from": "$from", "to": "$to" } }
+    "sales": { "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE region_id = :region::int AND order_date >= :from::date AND order_date <= :to::date", "params": { "region": "$region", "from": "$from", "to": "$to" } }
   },
   "blocks": [
     { "type": "text", "text": "Регион {{region}}, период {{from}} — {{to}}" },
@@ -161,7 +162,7 @@ REP_E2E=1 ./scripts/check.sh     # всё вместе: conan, запрещён�
 
 | Файл | Назначение |
 |---|---|
-| `backend/config/queries.json` | реестр SQL и типы колонок |
+| `backend/templates/*.json` | SQL наборов данных и справочников — внутри шаблонов |
 | `backend/templates/*.json` | шаблоны (источник в репозитории) |
 | `frontend/src/template/schema.js` | канон JSON Schema |
 | `frontend/src/template/validate.js` | семантический валидатор |

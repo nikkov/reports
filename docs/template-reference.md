@@ -26,7 +26,7 @@
 | `title` | string | да | заголовок страницы и карточки в списке |
 | `description` | string | нет | пояснение на карточке списка отчётов |
 | `params` | array | нет | параметры, которые пользователь задаёт перед построением |
-| `datasets` | object | да | именованные наборы данных: `имя → { queryId, params }` |
+| `datasets` | object | да | именованные наборы данных: `имя → { sql, params }` (ADR-27) |
 | `blocks` | array | да | блоки вывода по порядку: текст, таблица, диаграмма |
 
 ## params[] — параметры отчёта
@@ -263,7 +263,7 @@
 - групповые колонки идут до обычных; `subtotal` только у групповых; у группы с `children` нет `field`;
 - есть хотя бы одна листовая колонка, если включён `grandTotal`;
 - `{{name}}` в тексте и `$name` в `datasets` ссылаются на объявленные параметры;
-- правила `source`: `lookup` → `queryId`; `static` → непустой `options`; `date`/`datetime` → без `queryId`
+- правила `source`: `lookup` → `sql` (и запрет `queryId`); `static` → непустой `options`; `date`/`datetime` → без `sql`
   и `options`; `multiple` только для `lookup`/`static`; `dependsOn` — на объявленный выше параметр,
   не множественный;
 - стили: форматы цветов, диапазоны высот и размеров шрифта, allowlist шрифтов, `minWidth ≤ maxWidth`,
