@@ -3,6 +3,7 @@
 // а не лавина от oneOf на все варианты сразу.
 import Ajv2020 from 'ajv/dist/2020.js'
 import schema from './schema.js'
+import { analyzeExpression } from '../engine/expr.js'
 
 const ajv = new Ajv2020({ allErrors: true, strict: false })
 
@@ -215,7 +216,29 @@ export function validateTemplate(template) {
         columnsByDataKey[block.dataKey].push({ col, path: cpath })
       }
 
+      const firstNew = columnsByDataKey[block.dataKey].length
       block.columns.forEach((col, ci) => walkColumn(col, `${base}.columns.${ci}`))
+
+      // выражения разбираются статически: грамматика — ошибка, неизвестное поле — предупреждение
+      const knownFields = new Set(
+        columnsByDataKey[block.dataKey].slice(firstNew).map(({ col }) => col.field).filter(Boolean)
+      )
+      for (const { col, path } of columnsByDataKey[block.dataKey].slice(firstNew)) {
+        if (typeof col.expression !== 'string' || !col.expression) continue
+        try {
+          const { fields } = analyzeExpression(col.expression)
+          for (const name of fields) {
+            if (knownFields.size && !knownFields.has(name)) {
+              warnings.push({
+                path,
+                message: `в выражении поле «${name}» не встречается в колонках таблицы этого набора — проверьте имя`
+              })
+            }
+          }
+        } catch (e) {
+          errors.push({ path, message: `ошибка выражения: ${e.message}` })
+        }
+      }
 
       let seenLeaf = false
       block.columns.forEach((col, ci) => {

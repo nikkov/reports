@@ -27,8 +27,15 @@ function tokenize(input) {
       while (j < input.length && /[a-zA-Z0-9_]/.test(input[j])) j++
       const name = input.slice(i, j)
       i = j
-      if (FUNCS.has(name)) tokens.push({ type: 'func', value: name })
-      else tokens.push({ type: 'ident', value: name })
+      if (FUNCS.has(name)) {
+        tokens.push({ type: 'func', value: name })
+      } else {
+        // идентификатор перед «(» — это попытка вызвать несуществующую функцию
+        let k = j
+        while (k < input.length && /\s/.test(input[k])) k++
+        if (input[k] === '(') throw new Error(`неизвестная функция «${name}»`)
+        tokens.push({ type: 'ident', value: name })
+      }
       continue
     }
     if ('+-*/()'.includes(ch)) {
@@ -39,6 +46,30 @@ function tokenize(input) {
     throw new Error(`недопустимый символ «${ch}» в выражении`)
   }
   return tokens
+}
+
+/**
+ * Проверка выражения без вычисления: возвращает используемые поля и агрегаты
+ * либо бросает ошибку грамматики. Значения подменяются единицей, чтобы деление
+ * и null-ветки не влияли на разбор.
+ * @param {string} expression
+ * @returns {{fields: string[], aggs: Array<{fn: string, field: string}>}}
+ */
+export function analyzeExpression(expression) {
+  const fields = new Set()
+  const aggs = []
+  evaluate(expression, {
+    field: (name) => {
+      fields.add(name)
+      return 1
+    },
+    agg: (fn, name) => {
+      aggs.push({ fn, field: name })
+      fields.add(name)
+      return 1
+    }
+  })
+  return { fields: [...fields], aggs }
 }
 
 /**

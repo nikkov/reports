@@ -170,6 +170,31 @@ describe('validateTemplate', () => {
     expect(paths(validateTemplate(t))).toContain('params.1.source.dependsOn')
   })
 
+  it('ловит синтаксическую ошибку в выражении', () => {
+    const t = base()
+    t.blocks[1].columns.push({ title: 'Плохо', expression: 'round(sum(profit))' })
+    const idx = t.blocks[1].columns.length - 1
+    expect(paths(validateTemplate(t))).toContain(`blocks.1.columns.${idx}`)
+  })
+
+  it('ловит недопустимый символ в выражении', () => {
+    const t = base()
+    t.blocks[1].columns.push({ title: 'Условие', expression: 'sum(profit) > 0' })
+    const idx = t.blocks[1].columns.length - 1
+    const res = validateTemplate(t)
+    expect(res.errors.map((e) => e.path)).toContain(`blocks.1.columns.${idx}`)
+    expect(res.errors.find((e) => e.path === `blocks.1.columns.${idx}`).message).toContain('>')
+  })
+
+  it('предупреждает об опечатке в поле выражения, не валя шаблон', () => {
+    const t = base()
+    t.blocks[1].columns.push({ title: 'Опечатка', expression: 'sum(profit) / sum(nope)' })
+    const idx = t.blocks[1].columns.length - 1
+    const res = validateTemplate(t)
+    expect(res.errors).toEqual([])
+    expect(res.warnings.map((w) => w.path)).toContain(`blocks.1.columns.${idx}`)
+  })
+
   it('ловит лишнее поле в шаблоне', () => {
     const t = base()
     t.blocks[0].unknown = 1

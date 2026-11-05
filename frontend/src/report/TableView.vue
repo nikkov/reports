@@ -4,6 +4,10 @@
     <button type="button" @click="expandAll">Развернуть всё</button>
     <span class="tv-info">{{ collapsed.size }} свёрнуто</span>
   </div>
+  <p v-if="brokenExpr.size" class="tv-broken">
+    Ошибка в вычисляемых колонках:
+    <span v-for="[title, msg] in [...brokenExpr]" :key="title">«{{ title }}» — {{ msg }};</span>
+  </p>
   <ReportTable
     :rows="view.rows"
     :columns="columns"
@@ -21,6 +25,7 @@
 import { computed, ref, watch } from 'vue'
 import ReportTable from '../components/ReportTable.vue'
 import { buildTableModel, evaluateRowExpression } from '../engine/group.js'
+import { analyzeExpression } from '../engine/expr.js'
 import { evaluate } from '../engine/expr.js'
 
 const props = defineProps({
@@ -114,6 +119,21 @@ function groupedView() {
   return { rows: model.rows, merges: model.merges, groupCount: model.groupFields.length, ids }
 }
 
+// Синтаксически неверное выражение раньше молча давало «—» во всех строках: помечаем колонку и ячейку.
+const brokenExpr = computed(() => {
+  const map = new Map()
+  for (const col of leafCols.value) {
+    if (!col.expression) continue
+    try {
+      analyzeExpression(col.expression)
+    } catch (e) {
+      map.set(col.title, e.message)
+    }
+  }
+  if (map.size) console.warn('[report] ошибки в выражениях:', Object.fromEntries(map))
+  return map
+})
+
 const view = computed(() => (leafCols.value.some((c) => c.group) ? groupedView() : flatView()))
 
 // Для витрины: все группы раскрыты, кроме явно свёрнутых.
@@ -156,6 +176,7 @@ function toggle(path) {
 }
 
 function formatValue(col, value) {
+  if (col.expression && brokenExpr.value.has(col.title)) return '⚠'
   if (value === null || value === undefined || value === '') return col.aggregate || col.expression ? '—' : ''
   if (col.format === 'percent') {
     const n = Number(value)
@@ -197,6 +218,15 @@ function cellText(row, key) {
   margin-bottom: 6px;
   font-size: 12px;
   color: #5b6472;
+}
+.tv-broken {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #8c1f1f;
+  background: #fdeaea;
+  border: 1px solid #f3cfcf;
+  border-radius: 6px;
 }
 .tv-bar button {
   font: inherit;
