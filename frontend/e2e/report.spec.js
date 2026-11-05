@@ -132,3 +132,20 @@ test('сворачивание категории внутри региона', 
   await total.locator('.chev').first().click()
   await expect(page.locator('.rt-table tbody tr:not(.spacer)').first()).not.toContainText('Итого')
 })
+
+test('свёрнутая категория не меняет шеврон региона (и после прокрутки)', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+
+  const first = page.locator('.rt-table tbody tr:not(.spacer)').first()
+  const regionBefore = (await first.locator('.chev').nth(0).innerText()).trim()
+  await first.locator('.chev').nth(1).click()
+
+  const row = page.locator('.rt-table tbody tr:not(.spacer)').first()
+  await expect(row.locator('.chev').nth(0)).toHaveText(regionBefore) // регион раскрыт
+  await expect(row.locator('.chev').nth(1)).toHaveText('▸')          // категория свёрнута
+
+  await page.locator('.rt').evaluate((el) => { el.scrollTop = 20000 })
+  await page.waitForTimeout(300)
+  const scrolled = page.locator('.rt-table tbody tr:not(.spacer)').first()
+  await expect(scrolled.locator('.chev').nth(0)).toHaveText(regionBefore)
+})

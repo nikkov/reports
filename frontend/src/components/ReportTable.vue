@@ -192,7 +192,7 @@ function cellsAt(index) {
         text: props.cellText(row, props.columns[col].field),
         // строка итога: клик по её подписи разворачивает группу обратно
         toggle: row.kind === 'subtotal' && col === row.level ? row.groupPath : null,
-        expanded: row.groupPath ? props.expanded.has(row.groupPath.join('\u0001')) : false
+        expanded: props.expanded.has((row.groupPath || []).slice(0, col + 1).join('\u0001'))
       })
       continue
     }
@@ -211,16 +211,10 @@ function cellsAt(index) {
       continued: false,
       text: props.cellText(row, props.columns[col].field),
       // у детальной строки сворачиваем группу этого уровня, у строки итога — саму группу
-      toggle:
-        row.kind === 'detail'
-          ? row.groupPath.slice(0, col + 1)
-          : row.kind === 'subtotal'
-            ? row.groupPath
-            : null,
-        // направление шеврона — по id именно этой группы, а не по полному пути строки
-        expanded: props.expanded.has(
-          (row.kind === 'detail' ? row.groupPath.slice(0, col + 1) : row.groupPath || []).join('\u0001')
-        )
+      toggle: row.kind === 'detail' || row.kind === 'subtotal' ? row.groupPath.slice(0, col + 1) : null,
+        // направление шеврона — всегда по префиксу своей колонки: свёрнутость категории
+        // не должна переключать галочку региона
+        expanded: props.expanded.has((row.groupPath || []).slice(0, col + 1).join('\u0001'))
     })
   }
   return cells
