@@ -126,3 +126,28 @@ describe('evaluateRowExpression (плоская таблица)', () => {
     expect(evaluateRowExpression('sum(profit) / sum(amount)', { amount: 100, profit: null })).toBeNull()
   })
 })
+
+describe('вычисляемые колонки в детальных строках группы', () => {
+  it('считает выражение по своей строке, а не оставляет пусто', () => {
+    const rows = [
+      { region: 'Север', product: 'A', plan_amount: 100, fact_amount: 110 },
+      { region: 'Север', product: 'B', plan_amount: 200, fact_amount: 190 }
+    ]
+    const cols = [
+      { field: 'region', title: 'Регион', group: true, subtotal: true },
+      { field: 'product', title: 'Продукт' },
+      { field: 'plan_amount', title: 'План', aggregate: 'sum' },
+      { field: 'fact_amount', title: 'Факт', aggregate: 'sum' },
+      { title: 'Отклонение', expression: 'sum(fact_amount) - sum(plan_amount)' },
+      { title: 'Исполнение', expression: 'sum(fact_amount) / sum(plan_amount)' }
+    ]
+    const m = buildTableModel(rows, cols, { grandTotal: true })
+    const details = m.rows.filter((r) => r.kind === 'detail')
+    expect(details).toHaveLength(2)
+    expect(details[0].values[4]).toBe(10)
+    expect(details[0].values[5]).toBeCloseTo(1.1)
+    const subtotal = m.rows.find((r) => r.kind === 'subtotal')
+    expect(subtotal.values[4]).toBe(0)
+    expect(subtotal.values[5]).toBeCloseTo(1)
+  })
+})

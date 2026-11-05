@@ -137,7 +137,9 @@ export function buildTableModel(rows, columns, opts = {}) {
         // в строках итогов — только подпись в колонке своей группы
         values[i] = rowScope ? rowScope[col.field] : labelIndex === i ? `Итого ${node.key}` : ''
       } else if (col.expression) {
-        values[i] = evalExpression(col.expression, rowScope, acc)
+        values[i] = acc
+          ? evalExpression(col.expression, rowScope, acc)
+          : evalExpression(col.expression, rowScope, rowAccumulator(col.expression, rowScope))
       } else if (rowScope) {
         values[i] = rowScope[col.field]
       } else if (col.aggregate) {
@@ -220,7 +222,7 @@ export function buildTableModel(rows, columns, opts = {}) {
  * Значение выражения в контексте одной строки (плоская таблица без группировки).
  * Агрегат по одной строке равен её значению; null-значение даёт null (как в группе).
  */
-export function evaluateRowExpression(expression, row) {
+export function rowAccumulator(expression, row) {
   const acc = {}
   for (const m of String(expression).matchAll(/[a-zA-Z_][a-zA-Z0-9_]*/g)) {
     const name = m[0]
@@ -232,7 +234,11 @@ export function evaluateRowExpression(expression, row) {
         ? { sum: 0, count: 0, min: null, max: null, distinct: 0 }
         : { sum: v, count: 1, min: v, max: v, distinct: 1 }
   }
-  return evalExpression(expression, row, acc)
+  return acc
+}
+
+export function evaluateRowExpression(expression, row) {
+  return evalExpression(expression, row, rowAccumulator(expression, row))
 }
 
 export function computeMerges(flat, groupCount) {
