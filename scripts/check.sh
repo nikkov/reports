@@ -9,6 +9,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 step() { echo; echo "=== $* ==="; }
 
+step "Node.js"
+if [ -f "$ROOT/frontend/package.json" ]; then
+  NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  if [ "$NODE_MAJOR" -lt 20 ]; then
+    fail "нужен Node.js >= 20 (требование Playwright), в PATH: $(node -v 2>/dev/null || echo 'node не найден'). Пример: export PATH=\"$HOME/.nvm/versions/node/v24.22.1/bin:$PATH\""
+  fi
+  echo "node $(node -v)"
+fi
+
 step "Conan v1"
 VER="$("$ROOT/scripts/conan" --version 2>/dev/null | tail -1 | awk '{print $3}')"
 case "$VER" in
