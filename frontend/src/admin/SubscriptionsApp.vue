@@ -105,6 +105,13 @@
         <span class="hint">через запятую</span>
       </label>
       <label>
+        Формат вложения
+        <select v-model="form.format">
+          <option value="csv">CSV (Excel открывает двойным щелчком)</option>
+          <option value="xlsx">XLSX (книга Excel)</option>
+        </select>
+      </label>
+      <label>
         Параметры отчёта (JSON)
         <textarea v-model="form.params" rows="4" spellcheck="false"></textarea>
         <span class="hint">например {"from":"2026-03-01","to":"2026-03-31"}</span>
@@ -135,7 +142,16 @@ const journalId = ref(null)
 const journal = ref([])
 const journalLoading = ref(false)
 
-const emptyForm = () => ({ id: null, reportId: '', title: '', cron: '0 9 * * 1-5', recipients: '', params: '{}', enabled: true })
+const emptyForm = () => ({
+  id: null,
+  reportId: '',
+  title: '',
+  cron: '0 9 * * 1-5',
+  recipients: '',
+  params: '{}',
+  format: 'csv',
+  enabled: true
+})
 const form = reactive(emptyForm())
 
 function reset() {
@@ -176,7 +192,7 @@ function parseForm() {
     cron: form.cron.trim(),
     params,
     recipients,
-    format: 'csv',
+    format: form.format,
     enabled: form.enabled
   }
 }
@@ -298,6 +314,7 @@ function edit(s) {
     cron: s.cron,
     recipients: s.recipients.join(', '),
     params: JSON.stringify(s.params || {}, null, 0),
+    format: s.format || 'csv',
     enabled: s.enabled
   })
 }

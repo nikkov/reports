@@ -173,15 +173,17 @@ curl -b cookie -X POST localhost:8080/api/reports/sales-summary/validate \
 
 ## Рассылка по расписанию
 
-Подписка = отчёт + cron + параметры + получатели. Сервер раз в 30 с проверяет расписание, собирает CSV
-тем же кодом, что и `POST /api/report/export.csv`, и отправляет письмо с вложением (ADR-46).
+Подписка = отчёт + cron + параметры + получатели + формат вложения (`csv` или `xlsx`). Сервер раз в 30 с
+проверяет расписание, собирает файл тем же кодом, что и серверный экспорт, и отправляет письмо
+с вложением (ADR-46, ADR-48).
 
 ```bash
 # подписка: будни в 9:00, отчёт за март
 curl -b cookie -X POST localhost:8080/api/admin/subscriptions \
   -H 'Content-Type: application/json' \
   -d '{"reportId":"sales-aggregate","title":"Продажи за март","cron":"0 9 * * 1-5",
-       "params":{"from":"2026-03-01","to":"2026-03-31"},"recipients":["po@example.test"]}'
+       "params":{"from":"2026-03-01","to":"2026-03-31"},"recipients":["po@example.test"],
+       "format":"xlsx"}'
 
 # отправить сейчас (расписание не сдвигается)
 curl -b cookie -X POST localhost:8080/api/admin/subscriptions/1/run

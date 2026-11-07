@@ -1393,12 +1393,13 @@ int main() {
         {Post});
 
     // CSV-экспорт (ADR-40): тот же расчёт, что у .xlsx, но текстом; ';' и BOM — для Excel.
-    // Сборка CSV по шаблону: используется HTTP-экспортом и рассылкой (ADR-46).
-    // status 200 — payload содержит файл; иначе в payload текст ошибки, code — машинный код.
-    auto buildCsv = [dataDb, &templates, &templatesRaw, &templatesMutex](
-                        const std::string &reportId, const std::string &requestedDataset,
-                        const Json::Value &rawParams,
-                        std::function<void(int status, const std::string &code, const std::string &payload, int rows)> done) {
+    // Общая сборка листа отчёта: один расчёт для CSV, XLSX и рассылки (ADR-46, ADR-48).
+    // status 200 — sheet заполнен; иначе message содержит причину, code — машинный код.
+    auto buildSheet = [dataDb, &templates, &templatesRaw, &templatesMutex](
+                          const std::string &reportId, const std::string &requestedDataset,
+                          const Json::Value &rawParams,
+                          std::function<void(int status, const std::string &code,
+                                             const rep::ExportSheet &sheet, const std::string &message)> done) {
         std::string datasetSql;
         std::map<std::string, std::string> datasetParams;
         std::string datasetKey;
@@ -1407,7 +1408,7 @@ int main() {
             std::lock_guard<std::mutex> lock(templatesMutex);
             const auto it = templates.find(reportId);
             if (it == templates.end()) {
-                done(404, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден", 0);
+                done(404, "REPORT_NOT_FOUND", rep::ExportSheet{}, "отчёт '" + reportId + "' не найден");
                 return;
             }
             const auto &all = it->second.datasets;
@@ -1417,7 +1418,7 @@ int main() {
             } else {
                 const auto ds = all.find(requestedDataset.empty() ? all.begin()->first : requestedDataset);
                 if (ds == all.end()) {
-                    done(422, "DATASET_NOT_FOUND", "в шаблоне нет набора '" + requestedDataset + "'", 0);
+                    done(422, "DATASET_NOT_FOUND", rep::ExportSheet{}, "в шаблоне нет набора '" + requestedDataset + "'");
                     return;
                 }
                 datasetKey = ds->first;
@@ -1440,7 +1441,7 @@ int main() {
         rep::DatasetQuery query;
         std::string err;
         if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
-            done(422, "INVALID_PARAMS", err, 0);
+            done(422, "INVALID_PARAMS", rep::ExportSheet{}, err);
             return;
         }
 
@@ -1464,6 +1465,7 @@ int main() {
             std::string field;
             std::string title;
             bool numeric;
+            std::string numFmt;
         };
         std::vector<Leaf> leaves;
         std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
@@ -1472,9 +1474,10 @@ int main() {
                 return;
             }
             const std::string fmt = col["format"].isString() ? col["format"].asString() : "";
-            leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(),
-                              fmt == "number" || fmt == "integer" || fmt == "percent" ||
-                                  fmt == "currency" || col.isMember("aggregate")});
+            const bool numeric = fmt == "number" || fmt == "integer" || fmt == "percent" ||
+                                 fmt == "currency" || col.isMember("aggregate");
+            const std::string numFmt = fmt == "percent" ? "0.00%" : numeric ? "# ##0" : "";
+            leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(), numeric, numFmt});
         };
         for (const auto &col : block["columns"]) walk(col);
 
@@ -1493,15 +1496,16 @@ int main() {
             }
             std::string aggErr;
             if (!rep::buildAggregateSql(finalSql, groupBy, measures, finalSql, aggErr)) {
-                done(422, "INVALID_PARAMS", aggErr, 0);
+                done(422, "INVALID_PARAMS", rep::ExportSheet{}, aggErr);
                 return;
             }
         }
 
+        const std::string sheetTitle = tpl.get("title", "").asString();
         static const std::map<std::string, std::string> noDeclared;
         runQuery(
             dataDb, finalSql, query.values,
-            [done, leaves, bag, noDeclared](const orm::Result &res) {
+            [done, leaves, bag, noDeclared, sheetTitle](const orm::Result &res) {
                 const auto ncols = static_cast<size_t>(res.columns());
                 std::vector<std::string> names;
                 std::vector<std::string> types;
@@ -1510,7 +1514,10 @@ int main() {
                     types.push_back(columnType(names.back(), noDeclared, res));
                 }
                 rep::ExportSheet sheet;
-                for (const auto &leaf : leaves) sheet.columns.push_back({leaf.title, "", leaf.numeric});
+                sheet.title = sheetTitle;
+                for (const auto &leaf : leaves) {
+                    sheet.columns.push_back({leaf.title, leaf.numFmt, leaf.numeric});
+                }
                 for (const auto &kv : bag.values()) sheet.params.emplace_back(kv.first, kv.second);
 
                 for (const auto &row : res) {
@@ -1533,9 +1540,52 @@ int main() {
                     }
                     sheet.rows.push_back(values);
                 }
-                done(200, "", rep::toCsv(sheet), static_cast<int>(sheet.rows.size()));
+                done(200, "", sheet, "");
             },
-            [done](const std::exception_ptr &e) { done(500, "EXPORT_FAILED", describeError(e), 0); });
+            [done](const std::exception_ptr &e) { done(500, "EXPORT_FAILED", rep::ExportSheet{}, describeError(e)); });
+    };
+
+    // CSV и XLSX строятся из одного листа: письмо и скачивание не расходятся.
+    auto buildCsv = [buildSheet](const std::string &reportId, const std::string &requestedDataset,
+                                 const Json::Value &rawParams,
+                                 std::function<void(int, const std::string &, const std::string &, int)> done) {
+        buildSheet(reportId, requestedDataset, rawParams,
+                   [done](int status, const std::string &code, const rep::ExportSheet &sheet,
+                          const std::string &message) {
+                       if (status != 200) {
+                           done(status, code, message, 0);
+                           return;
+                       }
+                       done(200, "", rep::toCsv(sheet), static_cast<int>(sheet.rows.size()));
+                   });
+    };
+
+    auto buildXlsx = [buildSheet](const std::string &reportId, const std::string &requestedDataset,
+                                  const Json::Value &rawParams,
+                                  std::function<void(int, const std::string &, const std::string &, int)> done) {
+        buildSheet(reportId, requestedDataset, rawParams,
+                   [done, reportId](int status, const std::string &code, const rep::ExportSheet &sheet,
+                                    const std::string &message) {
+                       if (status != 200) {
+                           done(status, code, message, 0);
+                           return;
+                       }
+                       const std::string dir = rep::envOr("TMPDIR", "/tmp");
+                       const std::string path = dir + "/rep-mail-" + reportId + "-" +
+                                                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+                                                ".xlsx";
+                       std::string werr;
+                       if (!rep::writeXlsx(path, sheet, werr)) {
+                           done(500, "EXPORT_FAILED", werr, 0);
+                           return;
+                       }
+                       std::ifstream file(path, std::ios::binary);
+                       std::stringstream buffer;
+                       buffer << file.rdbuf();
+                       file.close();
+                       std::remove(path.c_str());
+                       done(200, "", buffer.str(), static_cast<int>(sheet.rows.size()));
+                   });
     };
 
     app().registerHandler(
@@ -1671,6 +1721,11 @@ int main() {
                 err = "некорректный адрес получателя: «" + address + "»";
                 return false;
             }
+        }
+        const std::string format = body.get("format", "csv").asString();
+        if (format != "csv" && format != "xlsx") {
+            err = "format должен быть csv или xlsx";
+            return false;
         }
         const std::string reportId = body.get("reportId", "").asString();
         if (reportId.empty()) {
@@ -2409,7 +2464,7 @@ int main() {
     // Одна подписка: собрать CSV через buildCsv (в цикле событий), отправить письма,
     // записать результат в журнал и пересчитать next_run_at. Ошибки не бросают
     // исключений — попадают в журнал и в lastError.
-    auto runSubscription = [buildCsv, smtpConfig, parseTextArray](long long id, bool manual) {
+    auto runSubscription = [buildCsv, buildXlsx, smtpConfig, parseTextArray](long long id, bool manual) {
         PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
         if (PQstatus(conn) != CONNECTION_OK) {
             LOG_ERROR << "рассылка: нет соединения с БД: " << PQerrorMessage(conn);
@@ -2420,7 +2475,8 @@ int main() {
         const char *values[] = {idText.c_str()};
         PGresult *res = PQexecParams(
             conn,
-            "SELECT report_id, title, cron, params::text, recipients::text FROM report_subscriptions WHERE id = $1",
+            "SELECT report_id, title, cron, params::text, recipients::text, format FROM report_subscriptions"
+            " WHERE id = $1",
             1, nullptr, values, nullptr, nullptr, 0);
         if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
             PQclear(res);
@@ -2433,6 +2489,7 @@ int main() {
         const std::string cronExpr = PQgetvalue(res, 0, 2);
         const std::string paramsText = PQgetvalue(res, 0, 3);
         const auto recipients = parseTextArray(PQgetvalue(res, 0, 4));
+        const std::string format = PQgetvalue(res, 0, 5);
         PQclear(res);
 
         Json::Value params;
@@ -2452,11 +2509,16 @@ int main() {
         // сборка файла идёт в цикле событий: buildCsv работает с пулом данных
         auto promise = std::make_shared<std::promise<std::tuple<int, std::string, std::string, int>>>();
         auto future = promise->get_future();
-        app().getLoop()->queueInLoop([buildCsv, reportId, params, promise]() {
-            buildCsv(reportId, "", params,
-                     [promise](int status, const std::string &code, const std::string &payload, int count) {
-                         promise->set_value({status, code, payload, count});
-                     });
+        const bool wantXlsx = format == "xlsx";
+        app().getLoop()->queueInLoop([buildCsv, buildXlsx, reportId, params, wantXlsx, promise]() {
+            auto emit = [promise](int status, const std::string &code, const std::string &payload, int count) {
+                promise->set_value({status, code, payload, count});
+            };
+            if (wantXlsx) {
+                buildXlsx(reportId, "", params, emit);
+            } else {
+                buildCsv(reportId, "", params, emit);
+            }
         });
 
         if (future.wait_for(std::chrono::seconds(120)) != std::future_status::ready) {
@@ -2468,7 +2530,10 @@ int main() {
             } else {
                 rows = count;
                 rep::MailConfig config = smtpConfig();
-                const std::string attachmentName = reportId + ".csv";
+                const bool xlsx = format == "xlsx";
+                const std::string attachmentName = reportId + (xlsx ? ".xlsx" : ".csv");
+                const std::string attachmentType =
+                    xlsx ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv";
                 std::string failures;
                 for (const auto &address : recipients) {
                     rep::MailMessage message;
@@ -2476,7 +2541,7 @@ int main() {
                     message.subject = "Отчёт: " + title;
                     message.text = "Отчёт «" + title + "» во вложении.\nСформирован автоматически сервером отчётов.";
                     message.attachmentName = attachmentName;
-                    message.attachmentType = "text/csv";
+                    message.attachmentType = attachmentType;
                     message.attachmentData = payload;
                     std::string mailErr;
                     if (rep::sendMail(config, message, mailErr)) {

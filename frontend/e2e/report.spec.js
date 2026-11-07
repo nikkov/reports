@@ -974,6 +974,12 @@ test('рассылка: подписки CRUD, cron и адреса провер
   })
   expect(invalidMail.status()).toBe(422)
 
+  const badFormat = await request.post('/api/admin/subscriptions', {
+    data: { reportId: 'sales-aggregate', cron: '0 9 * * *', recipients: ['po@example.test'], format: 'pdf' }
+  })
+  expect(badFormat.status()).toBe(422)
+  expect((await badFormat.json()).error.message).toContain('csv или xlsx')
+
   const created = await request.post('/api/admin/subscriptions', {
     data: {
       reportId: 'sales-aggregate',
@@ -981,6 +987,7 @@ test('рассылка: подписки CRUD, cron и адреса провер
       cron: '0 9 * * 1-5',
       params: { from: '2026-03-01', to: '2026-03-10' },
       recipients: ['po@example.test'],
+      format: 'xlsx',
       enabled: false
     }
   })
@@ -991,6 +998,7 @@ test('рассылка: подписки CRUD, cron и адреса провер
   const list = await (await request.get('/api/admin/subscriptions')).json()
   const item = list.items.find((s) => s.id === id)
   expect(item.title).toBe('e2e рассылка')
+  expect(item.format).toBe('xlsx')
   expect(item.enabled).toBe(false)
   expect(item.nextRunAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
 
