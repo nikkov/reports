@@ -66,4 +66,22 @@ std::string connInfoFromEnv() {
     return dsn.str();
 }
 
+std::string readOnlyConnInfoFromEnv() {
+    const std::string user = envOr("REP_RO_DB_USER", "");
+    const std::string password = envOr("REP_RO_DB_PASSWORD", "");
+    if (user.empty() || password.empty()) return {};
+
+    const std::string host = envOr("REP_RO_DB_HOST", envOr("PGHOST", "127.0.0.1"));
+    const std::string port = envOr("REP_RO_DB_PORT", envOr("PGPORT", "5432"));
+    const std::string dbname = envOr("REP_RO_DB_NAME", envOr("PGDATABASE", "reporting"));
+    const std::string timeoutMs = envOr("REP_STATEMENT_TIMEOUT_MS", "30000");
+
+    std::ostringstream dsn;
+    dsn << "host=" << host << " port=" << port << " user=" << user
+        << " password=" << password << " dbname=" << dbname
+        << " application_name=rep-backend-ro"
+        << " options='-c statement_timeout=" << timeoutMs << "'";
+    return dsn.str();
+}
+
 }  // namespace rep

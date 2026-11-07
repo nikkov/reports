@@ -15,4 +15,9 @@ size_t loadDotEnv(const std::string &path);
 // Значения берутся из переменных PGHOST/PGPORT/... (см. ADR-15).
 std::string connInfoFromEnv();
 
+// Отдельное подключение «только чтение» (ADR-33): если заданы REP_RO_DB_USER и
+// REP_RO_DB_PASSWORD, данные отчётов читаются под урезанной ролью, а запись шаблонов
+// остаётся на основной учётной записи. Пустая строка — роль не настроена.
+std::string readOnlyConnInfoFromEnv();
+
 }  // namespace rep

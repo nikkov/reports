@@ -170,6 +170,19 @@ int main() {
     // Клиент БД нужен и для данных, и для загрузки шаблонов (ADR-21).
     auto db = orm::DbClient::newPgClient(rep::connInfoFromEnv(), poolSize);
 
+    // Чтение данных отчётов — под ролью только-чтения (ADR-33), запись шаблонов и админка
+    // остаются на основной учётной записи. Если роль не настроена, работаем как раньше.
+    const std::string roDsn = rep::readOnlyConnInfoFromEnv();
+    orm::DbClientPtr dbRo;
+    if (!roDsn.empty()) {
+        dbRo = orm::DbClient::newPgClient(roDsn, 2);
+        LOG_INFO << "данные отчётов читаются под ролью только-чтения ("
+                 << rep::envOr("REP_RO_DB_USER", "") << ")";
+    } else {
+        LOG_WARN << "REP_RO_DB_USER/REP_RO_DB_PASSWORD не заданы: данные читаются основной ролью";
+    }
+    auto dataDb = dbRo ? dbRo : db;
+
     const std::string templatesSource = rep::envOr("REP_TEMPLATES_SOURCE", "db");
     std::map<std::string, TemplateInfo> templates;
     std::map<std::string, std::string> templatesRaw;  // id → исходный JSON, отдаётся клиенту как есть
@@ -834,15 +847,16 @@ int main() {
 
     app().registerHandler(
         "/api/health",
-        [db, maxRows](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [db, maxRows, &dbRo](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
             runQuery(
                 db, "SELECT 1", {},
-                [cb, maxRows](const orm::Result &res) {
+                [cb, maxRows, &dbRo](const orm::Result &res) {
                     Json::Value body;
                     body["status"] = "ok";
                     body["schemaVersion"] = 1;
                     body["db"] = !res.empty();
                     body["maxRows"] = static_cast<Json::UInt64>(maxRows);
+                    body["readOnlyRole"] = static_cast<bool>(dbRo);
                     cb(jsonResponse(body));
                 },
                 [cb](const std::exception_ptr &eptr) {
@@ -950,9 +964,9 @@ int main() {
     // Кэша на сервере нет — списки кэширует клиент; защита от тяжёлого SQL — statement_timeout.
     app().registerHandler(
         "/api/reports/{reportId}/lookups/{param}",
-        [db, &templatesRaw, &templatesMutex](const HttpRequestPtr &req,
-                                              std::function<void(const HttpResponsePtr &)> &&cb,
-                                              const std::string &reportId, const std::string &param) {
+        [dataDb, &templatesRaw, &templatesMutex](const HttpRequestPtr &req,
+                                                 std::function<void(const HttpResponsePtr &)> &&cb,
+                                                 const std::string &reportId, const std::string &param) {
             std::map<std::string, std::string> snapshot;
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
@@ -1022,7 +1036,7 @@ int main() {
             }
 
             runQuery(
-                db, compiled, values,
+                dataDb, compiled, values,
                 [cb](const orm::Result &res) {
                     Json::Value list(Json::arrayValue);
                     for (const auto &row : res) {
@@ -1049,7 +1063,7 @@ int main() {
 
     app().registerHandler(
         "/api/report/data",
-        [db, &registry, &templates, &templatesMutex, maxRows, &resultCache, &templatesVersion](
+        [dataDb, &registry, &templates, &templatesMutex, maxRows, &resultCache, &templatesVersion](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -1208,7 +1222,7 @@ int main() {
 
             static const std::map<std::string, std::string> noDeclared;
             runQuery(
-                db, compiled, values,
+                dataDb, compiled, values,
                 [cb, maxRows, &resultCache, cacheKey, etag](const orm::Result &res) {
                     if (res.size() > maxRows) {
                         sendError(cb, k422UnprocessableEntity, "ROW_LIMIT",
