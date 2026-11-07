@@ -38,9 +38,24 @@ for (const file of files) {
   templates.push({ file, raw, tpl })
 }
 
+let authCookie = ''
+
+async function login() {
+  const password = process.env.REP_ADMIN_PASSWORD || ''
+  if (!password) return
+  const res = await fetch(`${API}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: process.env.REP_ADMIN_LOGIN || 'admin', password })
+  })
+  if (res.status === 404) return
+  if (!res.ok) throw new Error(`вход: ${res.status}`)
+  authCookie = (res.headers.get('set-cookie') || '').split(';')[0]
+}
+
 async function pushViaApi({ file, tpl }) {
   const id = encodeURIComponent(tpl.id)
-  const json = { 'Content-Type': 'application/json' }
+  const json = { 'Content-Type': 'application/json', ...(authCookie ? { Cookie: authCookie } : {}) }
 
   const draft = await fetch(`${API}/api/admin/reports/${id}/draft`, {
     method: 'PUT',
@@ -65,7 +80,10 @@ async function pushViaApi({ file, tpl }) {
     throw new Error(`черновик: ${draft.status} ${code || ''} ${payload?.error?.message || ''}`.trim())
   }
 
-  const published = await fetch(`${API}/api/admin/reports/${id}/publish`, { method: 'POST' })
+  const published = await fetch(`${API}/api/admin/reports/${id}/publish`, {
+    method: 'POST',
+    headers: authCookie ? { Cookie: authCookie } : {}
+  })
   if (!published.ok) {
     throw new Error(`публикация: ${published.status} ${JSON.stringify(await published.json().catch(() => ({})))}`)
   }
@@ -105,6 +123,12 @@ async function apiAvailable() {
 if (useSql) {
   pushViaSql()
 } else if (await apiAvailable()) {
+  try {
+    await login()
+  } catch (e) {
+    console.error(`✗ ${e.message}`)
+    process.exit(1)
+  }
   for (const t of templates) {
     try {
       await pushViaApi(t)
