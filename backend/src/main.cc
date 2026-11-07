@@ -3,6 +3,7 @@
 #include <drogon/orm/Result.h>
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <cctype>
@@ -13,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "cache.h"
 #include "env.h"
 #include "params.h"
 #include "queries.h"
@@ -148,6 +150,10 @@ int main() {
     const std::string queriesPath = rep::envOr("REP_QUERIES", "backend/config/queries.json");
     const std::string templatesDir = rep::envOr("REP_TEMPLATES", "backend/templates");
     const size_t maxRows = std::stoul(rep::envOr("REP_MAX_ROWS", "50000"));
+    // Кэш результатов (ADR-32): TTL в секундах, 0 — выключен; второй лимит — число записей
+    const int cacheTtl = std::stoi(rep::envOr("REP_CACHE_TTL_SECONDS", "60"));
+    const size_t cacheMax = std::stoul(rep::envOr("REP_CACHE_MAX_ENTRIES", "200"));
+    const size_t cacheMaxBody = std::stoul(rep::envOr("REP_CACHE_MAX_BODY_BYTES", "2097152"));
     const size_t poolSize = std::stoul(rep::envOr("REP_DB_POOL", "8"));
     const unsigned threads = std::stoul(rep::envOr("REP_THREADS", "4"));
 
@@ -213,6 +219,10 @@ int main() {
     const bool adminEnabled = rep::envOr("REP_ADMIN", "0") == "1";
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
     std::mutex templatesMutex;
+    // Версия шаблонов: входит в ключ кэша, поэтому публикация/удаление отчёта
+    // автоматически «сбрасывают» устаревшие результаты.
+    std::atomic<std::uint64_t> templatesVersion{1};
+    rep::ResultCache resultCache(cacheTtl, cacheMax, cacheMaxBody);
 
     auto adminGuard = [adminEnabled](std::function<void(const HttpResponsePtr &)> &cb) {
         if (adminEnabled) return true;
@@ -325,23 +335,33 @@ int main() {
     };
 
     // Атомарная замена шаблона в памяти: сначала разбор, потом запись под мьютексом.
-    auto applyTemplateInMemory = [&templates, &templatesRaw, &templatesMutex](const std::string &id,
-                                                                            const std::string &raw,
-                                                                            const std::string &title) {
+    auto applyTemplateInMemory = [&templates, &templatesRaw, &templatesMutex, &templatesVersion,
+                                  &resultCache](const std::string &id, const std::string &raw,
+                                                const std::string &title) {
         TemplateInfo info;
         if (!parseTemplate(raw, id, info)) return false;
         info.id = id;
         info.title = title;
-        std::lock_guard<std::mutex> lock(templatesMutex);
-        templates[id] = info;
-        templatesRaw[id] = raw;
+        {
+            std::lock_guard<std::mutex> lock(templatesMutex);
+            templates[id] = info;
+            templatesRaw[id] = raw;
+        }
+        // новый шаблон — новые данные: старые результаты больше не валидны
+        templatesVersion.fetch_add(1);
+        resultCache.clear();
         return true;
     };
 
-    auto dropTemplateFromMemory = [&templates, &templatesRaw, &templatesMutex](const std::string &id) {
-        std::lock_guard<std::mutex> lock(templatesMutex);
-        templates.erase(id);
-        templatesRaw.erase(id);
+    auto dropTemplateFromMemory = [&templates, &templatesRaw, &templatesMutex, &templatesVersion,
+                                   &resultCache](const std::string &id) {
+        {
+            std::lock_guard<std::mutex> lock(templatesMutex);
+            templates.erase(id);
+            templatesRaw.erase(id);
+        }
+        templatesVersion.fetch_add(1);
+        resultCache.clear();
     };
 
     // Сырой шаблон для редактора: с SQL справочников (публичный /api/reports/{id} его вырезает).
@@ -1029,8 +1049,8 @@ int main() {
 
     app().registerHandler(
         "/api/report/data",
-        [db, &registry, &templates, &templatesMutex, maxRows](const HttpRequestPtr &req,
-                                            std::function<void(const HttpResponsePtr &)> &&cb) {
+        [db, &registry, &templates, &templatesMutex, maxRows, &resultCache, &templatesVersion](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -1089,6 +1109,41 @@ int main() {
                 for (const auto &kv : bag.values())
                     if (!mapped.has(kv.first)) mapped.set(kv.first, kv.second);
                 bag = mapped;
+            }
+
+            // Ключ кэша: отчёт + версия шаблонов + значения параметров (map уже отсортирован).
+            // Версия в ключе делает публикацию шаблона инвалидацией.
+            const std::uint64_t tplVersion = templatesVersion.load();
+            std::string cacheKey = reportId;
+            cacheKey += '|';
+            cacheKey += std::to_string(tplVersion);
+            for (const auto &kv : bag.values()) {
+                cacheKey += '|';
+                cacheKey += kv.first;
+                cacheKey += '=';
+                cacheKey += kv.second;
+            }
+            const std::string etag =
+                "\"" + std::to_string(std::hash<std::string>{}(cacheKey + datasetSql)) + "\"";
+
+            rep::ResultCache::Entry hit;
+            if (resultCache.get(cacheKey, hit)) {
+                if (req->getHeader("if-none-match") == hit.etag) {
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setStatusCode(k304NotModified);
+                    resp->addHeader("ETag", hit.etag);
+                    resp->addHeader("X-Cache", "hit");
+                    cb(resp);
+                    return;
+                }
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setContentTypeCode(CT_APPLICATION_JSON);
+                resp->setBody(hit.body);
+                resp->addHeader("ETag", hit.etag);
+                resp->addHeader("X-Cache", "hit");
+                resp->addHeader("Cache-Control", "no-store");
+                cb(resp);
+                return;
             }
 
             // ':name' → $N, значения из bag; '::' остаётся кастом типа
@@ -1154,7 +1209,7 @@ int main() {
             static const std::map<std::string, std::string> noDeclared;
             runQuery(
                 db, compiled, values,
-                [cb, maxRows](const orm::Result &res) {
+                [cb, maxRows, &resultCache, cacheKey, etag](const orm::Result &res) {
                     if (res.size() > maxRows) {
                         sendError(cb, k422UnprocessableEntity, "ROW_LIMIT",
                                   "результат " + std::to_string(res.size()) + " строк > лимита " +
@@ -1189,7 +1244,19 @@ int main() {
                     out["rows"] = rows;
                     out["rowCount"] = static_cast<Json::UInt64>(res.size());
                     out["truncated"] = false;
-                    cb(jsonResponse(out));
+
+                    Json::StreamWriterBuilder wb;
+                    wb["indentation"] = "";
+                    std::string payload = Json::writeString(wb, out);
+                    resultCache.put(cacheKey, payload, etag);
+
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setContentTypeCode(CT_APPLICATION_JSON);
+                    resp->setBody(payload);
+                    resp->addHeader("ETag", etag);
+                    resp->addHeader("X-Cache", "miss");
+                    resp->addHeader("Cache-Control", "no-store");
+                    cb(resp);
                 },
                 [cb](const std::exception_ptr &eptr) {
                     std::string msg = "query failed";

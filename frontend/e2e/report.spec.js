@@ -743,3 +743,32 @@ test('публикация: правка живёт в черновике и п�
 
   await request.delete(`/api/reports/${id}`)
 })
+
+test('кэш результатов: повтор идёт из кэша, ETag даёт 304, публикация сбрасывает', async ({ request }) => {
+  const data = { reportId: 'sales-summary', params: { from: '2026-03-01', to: '2026-03-08' } }
+
+  const first = await request.post('/api/report/data', { data })
+  expect(first.ok()).toBeTruthy()
+  expect(['miss', 'hit']).toContain(first.headers()['x-cache'])
+  const etag = first.headers()['etag']
+  expect(etag).toBeTruthy()
+
+  const second = await request.post('/api/report/data', { data })
+  expect(second.headers()['x-cache']).toBe('hit')
+  expect(await second.text()).toBe(await first.text()) // тело то же, что у холодного ответа
+
+  const notModified = await request.post('/api/report/data', {
+    data,
+    headers: { 'If-None-Match': etag }
+  })
+  expect(notModified.status()).toBe(304)
+
+  // публикация шаблона делает прежние результаты невалидными
+  const tpl = await (await request.get('/api/admin/reports/sales-summary')).json()
+  await request.put('/api/admin/reports/sales-summary/draft', { data: { body: tpl } })
+  await request.post('/api/admin/reports/sales-summary/publish')
+
+  const afterPublish = await request.post('/api/report/data', { data })
+  expect(afterPublish.headers()['x-cache']).toBe('miss')
+  expect(afterPublish.headers()['etag']).not.toBe(etag)
+})
