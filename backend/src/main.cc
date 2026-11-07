@@ -117,6 +117,44 @@ void notifyChange(const std::string &reportId) {
     for (const auto &stream : targets) sseWrite(stream, payload);
 }
 
+
+// --- Аудит действий (ADR-52) ---------------------------------------------
+// Пишем отдельным коротким соединением: событий немного (админские действия),
+// а блокирующая вставка не требует ни цикла событий, ни захвата колбэков.
+void auditEvent(const std::string &actor, const std::string &action, const std::string &objectType,
+                const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
+    PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+    if (PQstatus(conn) != CONNECTION_OK) {
+        LOG_WARN << "аудит: нет соединения с БД: " << PQerrorMessage(conn);
+        PQfinish(conn);
+        return;
+    }
+    const char *values[] = {actor.c_str(), action.c_str(), objectType.c_str(), objectId.c_str(),
+                            detailsJson.c_str(), ip.c_str()};
+    PGresult *res = PQexecParams(
+        conn,
+        "INSERT INTO audit_log (actor, action, object_type, object_id, details, ip)"
+        " VALUES ($1, $2, $3, $4, $5::jsonb, NULLIF($6, ''))",
+        6, nullptr, values, nullptr, nullptr, 0);
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) LOG_WARN << "аудит: " << PQerrorMessage(conn);
+    PQclear(res);
+    PQfinish(conn);
+}
+
+std::string requestActor(const HttpRequestPtr &req) {
+    if (!req) return "system";
+    if (const auto attrs = req->attributes()) {
+        const std::string login = attrs->get<std::string>("session_login");
+        if (!login.empty()) return login;
+    }
+    return "anonymous";
+}
+
+std::string requestIp(const HttpRequestPtr &req) {
+    if (!req) return "";
+    return req->peerAddr().toIp();
+}
+
 // Тип колонки для клиента: берём из метаданных запроса, иначе — по виду значения (ADR: см. 1.2).
 std::string columnType(const std::string &name,
                        const std::map<std::string, std::string> &declared,
@@ -535,7 +573,7 @@ int main() {
 
             runQuery(
                 db, "SELECT 1 FROM report_templates WHERE id = $1", {id},
-                [cb, db, id, raw, title, &applyTemplateInMemory](const orm::Result &res) {
+                [cb, db, id, raw, title, &applyTemplateInMemory, req](const orm::Result &res) {
                     if (!res.empty()) {
                         sendError(cb, k409Conflict, "REPORT_EXISTS", "отчёт '" + id + "' уже существует");
                         return;
@@ -543,11 +581,12 @@ int main() {
                     runQuery(
                         db, "INSERT INTO report_templates (id, title, body, updated_at) VALUES ($1, $2, $3::jsonb, now())",
                         {id, title, raw},
-                        [cb, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                        [cb, id, raw, title, &applyTemplateInMemory, req](const orm::Result &) {
                             if (!applyTemplateInMemory(id, raw, title)) {
                                 sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", "шаблон не разбирается");
                                 return;
                             }
+                            auditEvent(requestActor(req), "template.create", "report", id, "{}", requestIp(req));
                             Json::Value out;
                             out["id"] = id;
                             out["saved"] = true;
@@ -601,11 +640,11 @@ int main() {
                 "INSERT INTO report_templates_history (report_id, title, body) "
                 "SELECT id, title, body FROM report_templates WHERE id = $1",
                 {id},
-                [cb, db, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                [cb, db, id, raw, title, &applyTemplateInMemory, req](const orm::Result &) {
                     runQuery(
                         db, "UPDATE report_templates SET title = $2, body = $3::jsonb, updated_at = now() WHERE id = $1",
                         {id, title, raw},
-                        [cb, id, raw, title, &applyTemplateInMemory](const orm::Result &updated) {
+                        [cb, id, raw, title, &applyTemplateInMemory, req](const orm::Result &updated) {
                             if (updated.affectedRows() == 0) {
                                 sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
                                 return;
@@ -614,6 +653,7 @@ int main() {
                                 sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", "шаблон не разбирается");
                                 return;
                             }
+                            auditEvent(requestActor(req), "template.update", "report", id, "{}", requestIp(req));
                             Json::Value out;
                             out["id"] = id;
                             out["saved"] = true;
@@ -639,11 +679,12 @@ int main() {
                 "INSERT INTO report_templates_history (report_id, title, body) "
                 "SELECT id, title, body FROM report_templates WHERE id = $1",
                 {id},
-                [cb, db, id, &dropTemplateFromMemory](const orm::Result &) {
+                [cb, db, id, &dropTemplateFromMemory, req](const orm::Result &) {
                     runQuery(
                         db, "DELETE FROM report_templates WHERE id = $1", {id},
-                        [cb, id, &dropTemplateFromMemory](const orm::Result &del) {
+                        [cb, id, &dropTemplateFromMemory, req](const orm::Result &del) {
                             dropTemplateFromMemory(id);
+                            auditEvent(requestActor(req), "template.delete", "report", id, "{}", requestIp(req));
                             Json::Value out;
                             out["id"] = id;
                             out["deleted"] = del.affectedRows() > 0;
@@ -730,7 +771,8 @@ int main() {
 
     app().registerHandler(
         "/api/admin/reports/{id}/rollback/{snapshot}",
-        [db, adminEnabled, &applyTemplateInMemory](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+        [db, adminEnabled, &applyTemplateInMemory](const HttpRequestPtr &req,
+                                                   std::function<void(const HttpResponsePtr &)> &&cb,
                                                    const std::string &id, const std::string &snapshot) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
@@ -739,7 +781,7 @@ int main() {
             runQuery(
                 db, "SELECT title, body::text AS body FROM report_templates_history WHERE id = $1 AND report_id = $2",
                 {snapshot, id},
-                [cb, db, id, &applyTemplateInMemory](const orm::Result &res) {
+                [cb, db, id, &applyTemplateInMemory, req, snapshot](const orm::Result &res) {
                     if (res.empty()) {
                         sendError(cb, k404NotFound, "SNAPSHOT_NOT_FOUND", "версия не найдена");
                         return;
@@ -751,14 +793,16 @@ int main() {
                         "INSERT INTO report_templates_history (report_id, title, body) "
                         "SELECT id, title, body FROM report_templates WHERE id = $1",
                         {id},
-                        [cb, db, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                        [cb, db, id, raw, title, &applyTemplateInMemory, req, snapshot](const orm::Result &) {
                             runQuery(
                                 db, "UPDATE report_templates SET title = $2, body = $3::jsonb, updated_at = now() WHERE id = $1",
                                 {id, title, raw},
-                                [cb, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                                [cb, id, raw, title, &applyTemplateInMemory, req, snapshot](const orm::Result &) {
                                     applyTemplateInMemory(id, raw, title);
                                     Json::Value out;
                                     out["id"] = id;
+                                    auditEvent(requestActor(req), "template.rollback", "report", id,
+                                               "{\"snapshot\":\"" + snapshot + "\"}", requestIp(req));
                                     out["restored"] = true;
                                     cb(jsonResponse(out));
                                 },
@@ -871,14 +915,14 @@ int main() {
     app().registerHandler(
         "/api/admin/reports/{id}/publish",
         [db, adminEnabled, &applyTemplateInMemory, &prepareTemplate](
-            const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb, const std::string &id) {
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb, const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
             }
             runQuery(
                 db, "SELECT draft::text AS draft FROM report_templates WHERE id = $1", {id},
-                [cb, db, id, &applyTemplateInMemory, &prepareTemplate](const orm::Result &res) {
+                [cb, db, id, &applyTemplateInMemory, &prepareTemplate, req](const orm::Result &res) {
                     if (res.empty()) {
                         sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
                         return;
@@ -908,16 +952,17 @@ int main() {
                         "INSERT INTO report_templates_history (report_id, title, body) "
                         "SELECT id, title, body FROM report_templates WHERE id = $1",
                         {id},
-                        [cb, db, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                        [cb, db, id, raw, title, &applyTemplateInMemory, req](const orm::Result &) {
                             runQuery(
                                 db,
                                 "UPDATE report_templates SET title = $2, body = $3::jsonb, updated_at = now(), "
                                 "draft = NULL, draft_updated_at = NULL WHERE id = $1",
                                 {id, title, raw},
-                                [cb, id, raw, title, &applyTemplateInMemory](const orm::Result &) {
+                                [cb, id, raw, title, &applyTemplateInMemory, req](const orm::Result &) {
                                     applyTemplateInMemory(id, raw, title);
                                     Json::Value out;
                                     out["id"] = id;
+                                    auditEvent(requestActor(req), "template.publish", "report", id, "{}", requestIp(req));
                                     out["published"] = true;
                                     cb(jsonResponse(out));
                                 },
@@ -1019,10 +1064,11 @@ int main() {
             runQuery(
                 db, "SELECT id, login, password_salt, password_hash, role, enabled FROM users WHERE login = $1",
                 {login},
-                [db, cb, login, password, sessionTtlHours](const orm::Result &res) {
+                [db, cb, login, password, sessionTtlHours, req](const orm::Result &res) {
                     if (res.empty() ||
                         !rep::verifyPassword(password, res[0]["password_salt"].as<std::string>(),
                                              res[0]["password_hash"].as<std::string>())) {
+                        auditEvent(login, "auth.login_failed", "user", login, "{}", requestIp(req));
                         sendError(cb, k401Unauthorized, "BAD_CREDENTIALS", "неверный логин или пароль");
                         return;
                     }
@@ -1038,7 +1084,7 @@ int main() {
                         "INSERT INTO sessions (token, user_id, expires_at) "
                         "VALUES ($1, $2, now() + ($3 || ' hours')::interval)",
                         {token, std::to_string(userId), std::to_string(sessionTtlHours)},
-                        [cb, token, login, role, sessionTtlHours](const orm::Result &) {
+                        [cb, token, login, role, sessionTtlHours, req](const orm::Result &) {
                             Cookie cookie("rep_session", token);
                             cookie.setPath("/");
                             cookie.setHttpOnly(true);
@@ -1046,6 +1092,7 @@ int main() {
                             cookie.setMaxAge(sessionTtlHours * 3600);
                             cookie.setSecure(false); // стенд локальный, https не используется
 
+                            auditEvent(login, "auth.login", "user", login, "{}", requestIp(req));
                             Json::Value out;
                             out["login"] = login;
                             out["role"] = role;
@@ -1767,8 +1814,13 @@ int main() {
                           duplicate ? "логин «" + login + "» уже занят" : msg);
                 return;
             }
+            const std::string newId = PQgetvalue(res, 0, 0);
+            auditEvent(requestActor(req), "user.create", "user", newId,
+                       "{\"login\":\"" + login + "\",\"role\":\"" + role + "\",\"enabled\":" +
+                           (enabled == "true" ? "true" : "false") + "}",
+                       requestIp(req));
             Json::Value out;
-            out["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, 0, 0)));
+            out["id"] = static_cast<Json::Int64>(std::stoll(newId));
             PQclear(res);
             PQfinish(conn);
             cb(jsonResponse(out));
@@ -1836,6 +1888,8 @@ int main() {
                     sendError(cb, k500InternalServerError, "DELETE_FAILED", msg);
                     return;
                 }
+                auditEvent(requestActor(req), "user.delete", "user", id,
+                           "{\"login\":\"" + login + "\",\"role\":\"" + role + "\"}", requestIp(req));
                 Json::Value out;
                 out["deleted"] = true;
                 cb(jsonResponse(out));
@@ -1928,6 +1982,11 @@ int main() {
                     PQclear(sessions);
                 }
             }
+            auditEvent(requestActor(req), "user.update", "user", id,
+                       "{\"login\":\"" + login + "\",\"role\":\"" + role + "\",\"enabled\":" +
+                           (enabled ? "true" : "false") +
+                           ",\"passwordChanged\":" + (password.empty() ? "false" : "true") + "}",
+                       requestIp(req));
             PQfinish(conn);
             Json::Value out;
             out["updated"] = true;
@@ -2132,6 +2191,10 @@ int main() {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", msg);
                 return;
             }
+            auditEvent(requestActor(req), "subscription.create", "subscription", PQgetvalue(res, 0, 0),
+                       "{\"report\":\"" + (*body)["reportId"].asString() + "\",\"cron\":\"" + (*body)["cron"].asString() +
+                           "\",\"format\":\"" + format + "\"}",
+                       requestIp(req));
             Json::Value out;
             out["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, 0, 0)));
             out["nextRunAt"] = nextText;
@@ -2168,6 +2231,7 @@ int main() {
                     sendError(cb, k500InternalServerError, "DELETE_FAILED", msg);
                     return;
                 }
+                auditEvent(requestActor(req), "subscription.delete", "subscription", id, "{}", requestIp(req));
                 Json::Value out;
                 out["deleted"] = true;
                 cb(jsonResponse(out));
@@ -2218,12 +2282,84 @@ int main() {
                 sendError(cb, k404NotFound, "SUBSCRIPTION_NOT_FOUND", msg.empty() ? "подписка не найдена" : msg);
                 return;
             }
+            auditEvent(requestActor(req), "subscription.update", "subscription", id,
+                       "{\"report\":\"" + (*body)["reportId"].asString() + "\",\"cron\":\"" +
+                           (*body)["cron"].asString() + "\"}",
+                       requestIp(req));
             Json::Value out;
             out["updated"] = true;
             out["nextRunAt"] = nextText;
             cb(jsonResponse(out));
         },
         {Put, Delete});
+
+
+    // --- Журнал аудита (ADR-52) ---------------------------------------------
+    // Только чтение: записи создаются в местах действий, править их через API нельзя.
+    app().registerHandler(
+        "/api/admin/audit",
+        [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            const std::string limitText = req->getParameter("limit").empty() ? "50" : req->getParameter("limit");
+            const std::string offsetText = req->getParameter("offset").empty() ? "0" : req->getParameter("offset");
+            const std::string action = req->getParameter("action");
+            const std::string actor = req->getParameter("actor");
+
+            const char *values[] = {limitText.c_str(), offsetText.c_str(), action.c_str(), actor.c_str()};
+            PGresult *res = PQexecParams(
+                conn,
+                "SELECT id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), actor, action,"
+                " object_type, object_id, details::text, coalesce(ip, ''), count(*) OVER ()"
+                " FROM audit_log"
+                " WHERE ($3 = '' OR action = $3) AND ($4 = '' OR actor = $4)"
+                " ORDER BY at DESC, id DESC LIMIT LEAST($1::int, 200) OFFSET $2::int",
+                4, nullptr, values, nullptr, nullptr, 0);
+            if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                sendError(cb, k500InternalServerError, "QUERY_FAILED", msg);
+                return;
+            }
+            Json::Value items(Json::arrayValue);
+            long total = 0;
+            const int count = PQntuples(res);
+            for (int i = 0; i < count; ++i) {
+                Json::Value item;
+                item["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, i, 0)));
+                item["at"] = PQgetvalue(res, i, 1);
+                item["actor"] = PQgetvalue(res, i, 2);
+                item["action"] = PQgetvalue(res, i, 3);
+                item["objectType"] = PQgetvalue(res, i, 4);
+                item["objectId"] = PQgetvalue(res, i, 5);
+                Json::Value details;
+                Json::CharReaderBuilder reader;
+                std::string errs;
+                std::istringstream in(PQgetvalue(res, i, 6));
+                Json::parseFromStream(reader, in, &details, &errs);
+                item["details"] = details;
+                item["ip"] = PQgetvalue(res, i, 7);
+                total = std::stol(PQgetvalue(res, i, 8));
+                items.append(item);
+            }
+            PQclear(res);
+            PQfinish(conn);
+            Json::Value out;
+            out["items"] = items;
+            out["total"] = static_cast<Json::Int64>(total);
+            cb(jsonResponse(out));
+        },
+        {Get});
 
     // SSE: сервер сам сообщает об изменении шаблона (ADR-44).
     app().registerHandler(
@@ -2782,7 +2918,8 @@ int main() {
     // Одна подписка: собрать CSV через buildCsv (в цикле событий), отправить письма,
     // записать результат в журнал и пересчитать next_run_at. Ошибки не бросают
     // исключений — попадают в журнал и в lastError.
-    auto runSubscription = [buildCsv, buildXlsx, smtpConfig, parseTextArray](long long id, bool manual) {
+    auto runSubscription = [buildCsv, buildXlsx, smtpConfig, parseTextArray](
+                                long long id, bool manual, const std::string &actor) {
         PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
         if (PQstatus(conn) != CONNECTION_OK) {
             LOG_ERROR << "рассылка: нет соединения с БД: " << PQerrorMessage(conn);
@@ -2910,13 +3047,17 @@ int main() {
         LOG_INFO << "рассылка: подписка " << id << " («" << title << "», " << reportId << "), строк " << rows
                  << ", писем " << sent << "/" << recipients.size() << ", " << (ok ? "ок" : ("ошибка: " + error))
                  << (manual ? " (вручную)" : "");
+        auditEvent(actor, "subscription.run", "subscription", idText,
+                   std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"rows\":" + std::to_string(rows) +
+                       ",\"sent\":" + std::to_string(sent) + ",\"manual\":" + (manual ? "true" : "false") + "}",
+                   "");
     };
 
     // «Отправить сейчас»: не ждём тика планировщика
     app().registerHandler(
         "/api/admin/subscriptions/{id}/run",
-        [adminEnabled, runSubscription](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
-                                        const std::string &id) {
+        [adminEnabled, runSubscription](const HttpRequestPtr &req,
+                                        std::function<void(const HttpResponsePtr &)> &&cb, const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -2927,7 +3068,10 @@ int main() {
                 return;
             }
             const long long subscriptionId = std::stoll(id);
-            std::thread([runSubscription, subscriptionId]() { runSubscription(subscriptionId, true); }).detach();
+            std::string actor = requestActor(req);
+            std::thread([runSubscription, subscriptionId, actor]() {
+                runSubscription(subscriptionId, true, actor);
+            }).detach();
             Json::Value out;
             out["scheduled"] = true;
             cb(jsonResponse(out));
@@ -3011,7 +3155,7 @@ int main() {
                     std::vector<long long> ids;
                     for (int i = 0; i < count; ++i) ids.push_back(std::stoll(PQgetvalue(res, i, 0)));
                     PQclear(res);
-                    for (long long subscriptionId : ids) runSubscription(subscriptionId, false);
+                    for (long long subscriptionId : ids) runSubscription(subscriptionId, false, "system");
                 } else {
                     PQclear(res);
                 }

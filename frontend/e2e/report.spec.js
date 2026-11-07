@@ -962,6 +962,36 @@ test('drill-through с диаграммы: клик по столбцу откр
   await expect(page.locator('.meta')).toContainText('строк')
 })
 
+test('аудит: действия попадают в журнал и видны на странице', async ({ page, request }) => {
+  // действие: создание пользователя и его удаление
+  const login = 'e2e_audit'
+  const created = await request.post('/api/admin/users', {
+    data: { login, role: 'viewer', password: 'audit-pass-1' }
+  })
+  expect(created.ok()).toBeTruthy()
+  const { id } = await created.json()
+  expect((await request.delete(`/api/admin/users/${id}`)).ok()).toBeTruthy()
+
+  const feed = await (await request.get('/api/admin/audit?limit=20')).json()
+  expect(feed.total).toBeGreaterThan(0)
+  const actions = feed.items.map((r) => r.action)
+  expect(actions).toContain('user.create')
+  expect(actions).toContain('user.delete')
+  const row = feed.items.find((r) => r.action === 'user.create' && r.objectId === String(id))
+  expect(row.actor).toBe('admin')
+  expect(row.details.login).toBe(login)
+  expect(row.at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+
+  // фильтр по действию на сервере
+  const onlyDeletes = await (await request.get('/api/admin/audit?action=user.delete&limit=20')).json()
+  expect(onlyDeletes.items.every((r) => r.action === 'user.delete')).toBe(true)
+
+  // страница журнала
+  await page.goto('/audit.html')
+  await expect(page.locator('h1')).toHaveText('Журнал действий')
+  await expect(page.locator('tr[data-audit="user.create"]').first()).toContainText(login)
+})
+
 test('версия шаблона: старый мигрируется, слишком новый отклоняется', async ({ request }) => {
   const v1 = {
     version: 1,

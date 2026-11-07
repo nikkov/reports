@@ -89,6 +89,16 @@ export const api = {
   updateUser: (id, payload) =>
     request(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
+
+  // журнал действий (ADR-52)
+  audit: ({ action = '', actor = '', limit = 50, offset = 0 } = {}) => {
+    const qs = new URLSearchParams()
+    if (action) qs.set('action', action)
+    if (actor) qs.set('actor', actor)
+    qs.set('limit', String(limit))
+    qs.set('offset', String(offset))
+    return request(`/api/admin/audit?${qs.toString()}`)
+  },
   // сырой шаблон для редактора: с SQL справочников, в отличие от публичного /api/reports/{id}
   adminTemplate: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`),
   adminHistory: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}/history`),
