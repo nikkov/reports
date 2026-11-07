@@ -11,6 +11,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 . "$ROOT/scripts/env.sh"
 
+# Целевая база: REP_DB (стенд/CI) иначе PGDATABASE из backend/.env
+export PGDATABASE="${REP_DB:-${PGDATABASE:-reporting}}"
+
 ENV_FILE="$ROOT/backend/.env"
 rotate=false
 [ "${1:-}" = "--rotate" ] && rotate=true

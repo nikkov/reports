@@ -60,3 +60,72 @@ jobs:
       - name: Сборка
         working-directory: frontend
         run: npm run --silent build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CONAN_USER_HOME: ${{ github.workspace }}/.conan
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: reporting_ci
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Зависимости системы
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libpq-dev postgresql-client
+          python -m pip install --upgrade pip
+          pip install 'conan==1.66.0'
+      - name: Кэш Conan
+        uses: actions/cache@v4
+        with:
+          path: .conan
+          key: conan-e2e-${{ runner.os }}-${{ hashFiles('backend/conanfile.txt', 'backend/conanfile.py') }}
+      - name: Сборка бэкенда
+        working-directory: backend
+        run: |
+          conan install . -if build --build missing -s build_type=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build"
+          cmake --build build -j"$(nproc)"
+      - name: "Фронтенд: зависимости и сборка"
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npm run --silent build
+      - name: Стенд и Playwright
+        run: ./scripts/ci-e2e.sh
+      - name: Артефакты при падении
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+            tmp/ci-logs/
+          retention-days: 7

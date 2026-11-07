@@ -190,3 +190,16 @@ curl -b cookie -X POST localhost:8080/api/admin/subscriptions/1/run
 Настройки SMTP: `REP_SMTP_HOST`, `REP_SMTP_PORT`, `REP_SMTP_USER`, `REP_SMTP_PASSWORD`, `REP_SMTP_FROM`,
 `REP_SMTP_TLS`. На стенде `scripts/demo.sh` поднимает локальный приёмник (`scripts/smtp-sink.py`),
 письма складываются в `/tmp/rep-mail`. Страница — `subscriptions.html`.
+
+### E2E в CI и локально
+
+Сквозные тесты (47) гоняются на изолированном стенде: своя БД, порты и локальный SMTP-приёмник.
+
+```bash
+./scripts/ci-e2e.sh                  # локально: база reporting_ci, порты 8081/5174/1026
+REP_CI_DB=my_ci ./scripts/ci-e2e.sh  # другая база — если reporting_ci занята
+```
+
+В GitHub Actions это job `e2e` (сервис `postgres:16`, Conan-кэш, артефакты при падении).
+Требования: собранные `backend/build/rep` и `frontend/dist`, Playwright-браузеры
+(`npx playwright install --with-deps chromium`).
