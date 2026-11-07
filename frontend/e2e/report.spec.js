@@ -313,8 +313,13 @@ test('список отчётов: карточки, поиск, переход 
 
   await page.goto('/')
   await expect(page.locator('h1')).toHaveText('Сервер отчётов')
-  await expect(page.locator('.card')).toHaveCount(total)
-  await expect(page.locator('.count')).toHaveText(`${total} из ${total}`)
+  // каталог отдаёт страницы по 10 (ADR-41)
+  await expect(page.locator('.card')).toHaveCount(Math.min(10, total))
+  await expect(page.locator('.count')).toHaveText(`${Math.min(10, total)} из ${total}`)
+  if (total > 10) {
+    await page.getByRole('button', { name: /Показать ещё/ }).click()
+    await expect(page.locator('.card')).toHaveCount(total)
+  }
 
   // состав параметров виден на карточке
   const badges = await page.locator('[data-report=params-demo] .badge').allInnerTexts()
@@ -329,7 +334,11 @@ test('список отчётов: карточки, поиск, переход 
   await page.locator('.tools input').fill('неттакого')
   await expect(page.locator('.muted')).toContainText('не найдено')
   await page.locator('.tools input').fill('')
-  await expect(page.locator('.card')).toHaveCount(total)
+  await expect(page.locator('.card')).toHaveCount(Math.min(10, total))
+  if (total > 10) {
+    await page.getByRole('button', { name: /Показать ещё/ }).click()
+    await expect(page.locator('.card')).toHaveCount(total)
+  }
 
   // переход в отчёт
   await page.locator('[data-report=sales-summary] .open').click()
@@ -672,7 +681,12 @@ test('drill-through: подытог группы открывает деталь
 test('каталог: папки, теги и избранное', async ({ page, request }) => {
   const total = (await (await request.get('/api/reports')).json()).length
   await page.goto('/')
-  await expect(page.locator('.card')).toHaveCount(total)
+  // каталог отдаёт страницы по 10: сначала первая, остальное — по кнопке
+  await expect(page.locator('.card')).toHaveCount(Math.min(10, total))
+  if (total > 10) {
+    await page.getByRole('button', { name: /Показать ещё/ }).click()
+    await expect(page.locator('.card')).toHaveCount(total)
+  }
   await expect(page.locator('.folder', { hasText: 'Финансы' })).toBeVisible()
 
   // папка
@@ -898,6 +912,39 @@ test('серверный экспорт .xlsx: файл совпадает с э
     data: { reportId: 'sales-aggregate', dataset: 'nope', params: {} }
   })
   expect(bad.status()).toBe(422)
+})
+
+test('обновление по событию: публикация шаблона обновляет экран без опроса', async ({ page, request }) => {
+  const id = 'live-e2e'
+  const body = {
+    version: 1,
+    id,
+    title: 'По событию e2e',
+    live: true,
+    params: [],
+    datasets: { s: { sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }]
+  }
+  await request.delete(`/api/reports/${id}`)
+  expect((await request.post('/api/reports', { data: { id, body } })).ok()).toBeTruthy()
+
+  const calls = []
+  page.on('request', (req) => {
+    if (req.url().includes('/api/report/data')) calls.push(Date.now())
+  })
+
+  await page.goto(`/report.html?report=${id}`)
+  await expect(page.locator('.rt-table')).toBeVisible()
+  await expect(page.locator('.refresh')).toContainText('обновление по событию')
+  await page.waitForTimeout(1500)
+  expect(calls.length).toBe(1) // опроса по таймеру нет
+
+  // публикуем шаблон — сервер будит открытую страницу, она перезапрашивает данные
+  expect((await request.put(`/api/admin/reports/${id}/draft`, { data: { ...body, title: 'По событию e2e v2' } })).ok()).toBeTruthy()
+  expect((await request.post(`/api/admin/reports/${id}/publish`)).ok()).toBeTruthy()
+
+  await expect.poll(() => calls.length, { timeout: 5000 }).toBeGreaterThanOrEqual(2)
+  await expect(page.locator('h1')).toHaveText('По событию e2e v2')
 })
 
 test('автообновление: шаблон задаёт период, страница перезапрашивает данные', async ({ page, request }) => {

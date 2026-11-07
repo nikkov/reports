@@ -61,6 +61,17 @@ export const api = {
     }),
 
   // --- администрирование шаблонов (ADR-26) ---
+  // каталог с серверным поиском и пагинацией (ADR-41)
+  reportsPage: ({ q = '', folder = '', tag = '', limit = 10, offset = 0 } = {}) => {
+    const qs = new URLSearchParams()
+    if (q) qs.set('q', q)
+    if (folder) qs.set('folder', folder)
+    if (tag) qs.set('tag', tag)
+    qs.set('limit', String(limit))
+    qs.set('offset', String(offset))
+    return request(`/api/reports?${qs.toString()}`)
+  },
+
   adminReports: () => request('/api/admin/reports'),
   // сырой шаблон для редактора: с SQL справочников, в отличие от публичного /api/reports/{id}
   adminTemplate: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`),

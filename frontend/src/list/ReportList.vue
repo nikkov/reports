@@ -9,7 +9,7 @@
       </div>
       <div class="tools">
         <input v-model="query" type="search" placeholder="Поиск по названию, описанию, тегу" />
-        <span class="count">{{ filtered.length }} из {{ reports.length }}</span>
+        <span class="count">{{ pageItems.length }} из {{ total }}</span>
       </div>
     </header>
 
@@ -46,10 +46,10 @@
       <main>
         <p v-if="error" class="error">Не удалось получить список отчётов: {{ error }}</p>
         <p v-else-if="loading" class="muted">загрузка…</p>
-        <p v-else-if="!filtered.length" class="muted">Отчётов не найдено.</p>
+        <p v-else-if="!pageItems.length" class="muted">Отчётов не найдено.</p>
 
         <ul class="cards">
-          <li v-for="r in filtered" :key="r.id" class="card" :data-report="r.id" :data-folder="r.folder || ''">
+          <li v-for="r in pageItems" :key="r.id" class="card" :data-report="r.id" :data-folder="r.folder || ''">
             <div class="card-head">
               <button
                 type="button"
@@ -78,6 +78,12 @@
       </main>
     </div>
 
+        <div v-if="pageItems.length < total" class="more">
+          <button type="button" class="more-btn" :disabled="loadingMore" @click="loadMore">
+            {{ loadingMore ? 'Загрузка…' : `Показать ещё (${total - pageItems.length})` }}
+          </button>
+        </div>
+
     <footer class="foot">
       <a href="spike.html">Песочница рендерера</a> ·
       <a href="/api/reports">/api/reports</a> ·
@@ -89,7 +95,7 @@
 <script setup>
 // Каталог отчётов (ADR-30): папки, теги и избранное из шаблона + localStorage.
 // Данные — GET /api/reports (title, description, folder, tags, params).
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../api/client.js'
 
 const reports = ref([])
@@ -154,25 +160,58 @@ const tagList = computed(() => {
     .map(([key, count]) => ({ key, count }))
 })
 
-const filtered = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  return reports.value.filter((r) => {
-    if (activeFolder.value === '★' && !favorites.value.has(r.id)) return false
-    if (activeFolder.value === '__none' && r.folder) return false
-    if (activeFolder.value !== '*' && activeFolder.value !== '★' && activeFolder.value !== '__none') {
-      if (r.folder !== activeFolder.value) return false
-    }
-    if (activeTag.value && !(r.tags || []).includes(activeTag.value)) return false
-    if (!q) return true
-    const haystack = [r.title, r.description, r.id, ...(r.tags || [])].join(' ').toLowerCase()
-    return haystack.includes(q)
-  })
+// Каталог читается страницами с сервера (ADR-41): поиск, папка и тег — параметры запроса.
+const pageItems = ref([])
+const total = ref(0)
+const pageSize = 10
+const loadingMore = ref(false)
+
+async function loadPage({ reset = true } = {}) {
+  if (reset) {
+    pageItems.value = []
+    total.value = 0
+  }
+  // избранное — локальный список: фильтруем на клиенте
+  if (activeFolder.value === '★') {
+    pageItems.value = reports.value.filter((r) => favorites.value.has(r.id))
+    total.value = pageItems.value.length
+    return
+  }
+  loadingMore.value = !reset
+  try {
+    const folder = activeFolder.value === '*' ? '' : activeFolder.value === '__none' ? '__none__' : activeFolder.value
+    const page = await api.reportsPage({
+      q: query.value.trim(),
+      folder,
+      tag: activeTag.value,
+      limit: pageSize,
+      offset: reset ? 0 : pageItems.value.length
+    })
+    pageItems.value = reset ? page.items : [...pageItems.value, ...page.items]
+    total.value = page.total
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+function loadMore() {
+  loadPage({ reset: false })
+}
+
+let queryTimer
+watch(query, () => {
+  clearTimeout(queryTimer)
+  queryTimer = setTimeout(() => loadPage(), 250)
 })
+watch([activeFolder, activeTag], () => loadPage())
 
 onMounted(async () => {
   loadFavorites()
   try {
-    reports.value = await api.reports()
+    reports.value = await api.reports() // полный список: счётчики папок и избранное
+    await loadPage()
   } catch (e) {
     error.value = e.message
   } finally {

@@ -17,6 +17,7 @@ find_package(libxlsxwriter CONFIG REQUIRED)
 add_library(rep_core STATIC
   src/aggregate.cc
   src/auth.cc
+  src/csv_export.cc
   src/dataset.cc
   src/env.cc
   src/params.cc
@@ -32,6 +33,7 @@ enable_testing()
 add_executable(rep_tests
   src/xlsx_export.cc
   tests/aggregate_test.cc
+  tests/csv_test.cc
   tests/xlsx_test.cc
   tests/auth_test.cc
   tests/dataset_test.cc

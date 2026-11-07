@@ -6,9 +6,10 @@
         <span class="meta" v-if="status">
           строк: <b>{{ rowCount }}</b> · запрос: <b>{{ elapsedMs }} мс</b> · шаблон v{{ template?.version }}
         </span>
-        <div class="tools no-print" v-if="refreshSeconds > 0">
+        <div class="tools no-print" v-if="refreshSeconds > 0 || liveMode">
           <span class="refresh" :class="{ paused: refreshPaused }">
             <template v-if="refreshPaused">обновление на паузе</template>
+            <template v-else-if="liveMode">обновление по событию</template>
             <template v-else>обновление каждые {{ refreshSeconds }} с</template>
             <span v-if="lastLoadedAt" class="ref-time">· {{ lastLoadedLabel }}</span>
           </span>
@@ -242,6 +243,7 @@ watch(
 
 onBeforeUnmount(() => {
   clearTimeout(reloadTimer)
+  stopLive()
   stopRefresh()
   if (controller) controller.abort()
 })
@@ -265,6 +267,56 @@ const refreshSeconds = computed(() => {
 const lastLoadedLabel = computed(() =>
   lastLoadedAt.value ? lastLoadedAt.value.toLocaleTimeString('ru-RU') : ''
 )
+
+// Обновление по событию (ADR-42): сервер держит запрос до 20 с и отвечает сразу,
+// как только шаблон опубликован; таймер не нужен.
+const liveMode = computed(() => template.value?.live === true)
+let liveRunning = false
+let liveAbort = null
+
+async function watchChanges() {
+  liveRunning = true
+  while (liveRunning) {
+    if (refreshPaused.value) {
+      await new Promise((r) => setTimeout(r, 1000))
+      continue
+    }
+    liveAbort = new AbortController()
+    try {
+      const res = await fetch(`/api/report/changes?report=${encodeURIComponent(reportId)}`, {
+        credentials: 'include',
+        signal: liveAbort.signal
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (data.changed) {
+        // шаблон мог измениться целиком: подтягиваем его, затем данные
+        try {
+          template.value = await api.template(reportId)
+        } catch (e) {
+          /* заголовок обновим при следующем событии */
+        }
+        await load()
+      }
+    } catch (e) {
+      if (!liveRunning) return
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+  }
+}
+
+function startLive() {
+  stopLive()
+  if (liveMode.value) watchChanges()
+}
+
+function stopLive() {
+  liveRunning = false
+  if (liveAbort) liveAbort.abort()
+  liveAbort = null
+}
+
+watch(liveMode, () => startLive(), { immediate: true })
 
 // период приходит из шаблона: меняется — перезапускаем таймер
 watch(() => template.value?.refreshSeconds, () => startRefresh(), { immediate: true })

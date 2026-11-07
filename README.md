@@ -137,3 +137,22 @@ cd frontend && npm run e2e                 # 18 тестов Playwright
 REP_E2E=1 ./scripts/check.sh               # всё вместе
 ```
 | `db/init.sh` | создание БД и загрузка синтетики (идемпотентно) |
+
+## Серверный экспорт, каталог и обновление по событию
+
+- CSV: `POST /api/report/export.csv` — тот же расчёт, что у `.xlsx`; файл в UTF-8 с BOM и `;`,
+  поэтому Excel открывает его без мастера импорта (ADR-40);
+- каталог: `GET /api/reports?q=&folder=&tag=&limit=&offset=` — серверный поиск и страницы;
+  без `limit` отдаётся прежний массив (ADR-41);
+- обновление по событию: в шаблоне `"live": true`, страница ждёт `GET /api/report/changes?report=<id>`
+  и обновляется сразу после публикации (ADR-42).
+
+```bash
+# CSV за март
+curl -b cookie -X POST localhost:8080/api/report/export.csv \
+  -H 'Content-Type: application/json' \
+  -d '{"reportId":"sales-summary","params":{"from":"2026-03-01","to":"2026-03-31"}}' -o sales.csv
+
+# поиск по каталогу, вторая страница
+curl -b cookie 'localhost:8080/api/reports?q=продаж&limit=10&offset=10'
+```

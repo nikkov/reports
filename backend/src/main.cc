@@ -17,7 +17,7 @@
 #include "auth.h"
 #include "cache.h"
 #include "aggregate.h"
-#include "aggregate.h"
+#include "csv_export.h"
 #include "dataset.h"
 #include "xlsx_export.h"
 #include "env.h"
@@ -48,6 +48,39 @@ HttpResponsePtr jsonResponse(const Json::Value &body, HttpStatusCode status = k2
 void sendError(const std::function<void(const HttpResponsePtr &)> &cb, HttpStatusCode status,
                const std::string &code, const std::string &message) {
     cb(jsonResponse(errorBody(code, message), status));
+}
+
+// --- Обновление по событию (ADR-42) -------------------------------------
+// Клиент держит запрос /api/report/changes до 20 с; публикация или откат шаблона
+// будит ждущих и сразу отдаёт changed=true — экран обновляется без опроса по таймеру.
+namespace {
+
+struct ChangeWaiter {
+    std::function<void(const HttpResponsePtr &)> cb;
+    trantor::TimerId timer;
+};
+
+std::mutex changesMutex;
+std::map<std::string, std::vector<ChangeWaiter>> changeWaiters;
+
+} // namespace
+
+void notifyChange(const std::string &reportId) {
+    std::vector<ChangeWaiter> waiters;
+    {
+        std::lock_guard<std::mutex> lock(changesMutex);
+        const auto it = changeWaiters.find(reportId);
+        if (it == changeWaiters.end()) return;
+        waiters = std::move(it->second);
+        changeWaiters.erase(it);
+    }
+    for (auto &w : waiters) {
+        app().getLoop()->invalidateTimer(w.timer);
+        Json::Value out;
+        out["changed"] = true;
+        out["reportId"] = reportId;
+        w.cb(jsonResponse(out));
+    }
 }
 
 // Тип колонки для клиента: берём из метаданных запроса, иначе — по виду значения (ADR: см. 1.2).
@@ -381,6 +414,7 @@ int main() {
             templates[id] = info;
             templatesRaw[id] = raw;
         }
+        notifyChange(id); // экраны с включённым live узнают об изменении сразу
         // новый шаблон — новые данные: старые результаты больше не валидны
         templatesVersion.fetch_add(1);
         resultCache.clear();
@@ -1377,6 +1411,210 @@ int main() {
         },
         {Post});
 
+    // CSV-экспорт (ADR-40): тот же расчёт, что у .xlsx, но текстом; ';' и BOM — для Excel.
+    app().registerHandler(
+        "/api/report/export.csv",
+        [dataDb, &templates, &templatesRaw, &templatesMutex](const HttpRequestPtr &req,
+                                                             std::function<void(const HttpResponsePtr &)> &&cb) {
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string reportId = (*body).get("reportId", "").asString();
+            if (reportId.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
+                return;
+            }
+
+            std::string datasetSql;
+            std::map<std::string, std::string> datasetParams;
+            std::string datasetKey;
+            std::string raw;
+            {
+                std::lock_guard<std::mutex> lock(templatesMutex);
+                const auto it = templates.find(reportId);
+                if (it == templates.end()) {
+                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
+                    return;
+                }
+                const auto &all = it->second.datasets;
+                if (all.empty()) {
+                    datasetSql = it->second.datasetSql;
+                    datasetParams = it->second.datasetParams;
+                } else {
+                    const std::string key = (*body).get("dataset", "").asString();
+                    const auto ds = all.find(key.empty() ? all.begin()->first : key);
+                    if (ds == all.end()) {
+                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
+                                  "в шаблоне нет набора '" + key + "'");
+                        return;
+                    }
+                    datasetKey = ds->first;
+                    datasetSql = ds->second.sql;
+                    datasetParams = ds->second.params;
+                }
+                const auto rawIt = templatesRaw.find(reportId);
+                if (rawIt != templatesRaw.end()) raw = rawIt->second;
+            }
+
+            rep::ParamBag bag;
+            const Json::Value &rawParams = (*body)["params"];
+            if (rawParams.isObject()) {
+                for (auto it = rawParams.begin(); it != rawParams.end(); ++it) {
+                    if (it->isString() || it->isInt64() || it->isUInt64() || it->isDouble() || it->isBool()) {
+                        bag.set(it.name(), it->asString());
+                    }
+                }
+            }
+
+            rep::DatasetQuery query;
+            std::string err;
+            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+
+            Json::Value tpl;
+            if (!raw.empty()) {
+                Json::CharReaderBuilder builder;
+                std::string errs;
+                std::istringstream in(raw);
+                Json::parseFromStream(builder, in, &tpl, &errs);
+            }
+
+            Json::Value block;
+            for (const auto &b : tpl["blocks"]) {
+                if (b.get("type", "").asString() != "table") continue;
+                if (block.isNull() || (!datasetKey.empty() && b.get("dataKey", "").asString() == datasetKey)) {
+                    block = b;
+                }
+            }
+
+            struct Leaf {
+                std::string field;
+                std::string title;
+                bool numeric;
+            };
+            std::vector<Leaf> leaves;
+            std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
+                if (col["children"].isArray()) {
+                    for (const auto &child : col["children"]) walk(child);
+                    return;
+                }
+                const std::string fmt = col["format"].isString() ? col["format"].asString() : "";
+                leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(),
+                                  fmt == "number" || fmt == "integer" || fmt == "percent" ||
+                                      fmt == "currency" || col.isMember("aggregate")});
+            };
+            for (const auto &col : block["columns"]) walk(col);
+
+            // агрегация блока: CSV должен совпадать с тем, что видит пользователь
+            std::string finalSql = query.sql;
+            const Json::Value &agg = block["aggregate"];
+            if (agg.isObject()) {
+                std::vector<std::string> groupBy;
+                for (const auto &g : agg["groupBy"]) {
+                    if (g.isString()) groupBy.push_back(g.asString());
+                }
+                std::vector<std::pair<std::string, std::string>> measures;
+                for (const auto &m : agg["measures"]) {
+                    if (m.isObject() && m["field"].isString() && m["agg"].isString()) {
+                        measures.emplace_back(m["field"].asString(), m["agg"].asString());
+                    }
+                }
+                std::string aggErr;
+                if (!rep::buildAggregateSql(finalSql, groupBy, measures, finalSql, aggErr)) {
+                    sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", aggErr);
+                    return;
+                }
+            }
+
+            static const std::map<std::string, std::string> noDeclared;
+            runQuery(
+                dataDb, finalSql, query.values,
+                [cb, leaves, bag, noDeclared, reportId](const orm::Result &res) {
+                    const auto ncols = static_cast<size_t>(res.columns());
+                    std::vector<std::string> names;
+                    std::vector<std::string> types;
+                    for (size_t c = 0; c < ncols; ++c) {
+                        names.emplace_back(res.columnName(static_cast<unsigned long>(c)));
+                        types.push_back(columnType(names.back(), noDeclared, res));
+                    }
+                    rep::ExportSheet sheet;
+                    for (const auto &leaf : leaves) {
+                        sheet.columns.push_back({leaf.title, "", leaf.numeric});
+                    }
+                    for (const auto &kv : bag.values()) sheet.params.emplace_back(kv.first, kv.second);
+
+                    for (const auto &row : res) {
+                        std::vector<std::string> values;
+                        for (const auto &leaf : leaves) {
+                            const auto pos = std::find(names.begin(), names.end(), leaf.field);
+                            if (pos == names.end()) {
+                                values.emplace_back();
+                                continue;
+                            }
+                            const size_t idx = static_cast<size_t>(pos - names.begin());
+                            const orm::Field &f = row[idx];
+                            if (f.isNull()) values.emplace_back();
+                            else if (types[idx] == "int") values.push_back(std::to_string(f.as<long long>()));
+                            else if (types[idx] == "double") {
+                                std::ostringstream os;
+                                os << f.as<double>();
+                                values.push_back(os.str());
+                            } else values.push_back(f.as<std::string>());
+                        }
+                        sheet.rows.push_back(values);
+                    }
+
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setContentTypeString("text/csv; charset=utf-8");
+                    resp->addHeader("Content-Disposition", "attachment; filename=\"" +
+                                                               std::string(reportId) + ".csv\"");
+                    resp->setBody(rep::toCsv(sheet));
+                    cb(resp);
+                },
+                [cb](const std::exception_ptr &e) {
+                    sendError(cb, k500InternalServerError, "EXPORT_FAILED", describeError(e));
+                });
+        },
+        {Post});
+
+    // Long-poll: сервер сам сообщает об изменении шаблона (ADR-42).
+    app().registerHandler(
+        "/api/report/changes",
+        [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            const std::string reportId = req->getParameter("report");
+            if (reportId.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен параметр report");
+                return;
+            }
+            auto done = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(cb));
+            auto tid = std::make_shared<trantor::TimerId>(0);
+            *tid = app().getLoop()->runAfter(20.0, [reportId, done, tid]() {
+                {
+                    std::lock_guard<std::mutex> lock(changesMutex);
+                    const auto it = changeWaiters.find(reportId);
+                    if (it != changeWaiters.end()) {
+                        auto &list = it->second;
+                        list.erase(std::remove_if(list.begin(), list.end(),
+                                                  [&](const ChangeWaiter &w) { return w.timer == *tid; }),
+                                   list.end());
+                        if (list.empty()) changeWaiters.erase(it);
+                    }
+                }
+                Json::Value out;
+                out["changed"] = false;
+                (*done)(jsonResponse(out));
+            });
+            {
+                std::lock_guard<std::mutex> lock(changesMutex);
+                changeWaiters[reportId].push_back({*done, *tid});
+            }
+        },
+        {Get});
+
     app().registerHandler(
         "/api/health",
         [db, maxRows, &dbRo](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
@@ -1405,7 +1643,7 @@ int main() {
 
     app().registerHandler(
         "/api/reports",
-        [&templatesRaw, &templatesMutex](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [&templatesRaw, &templatesMutex](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             std::map<std::string, std::string> snapshot;
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
@@ -1447,7 +1685,61 @@ int main() {
                 }
                 list.append(item);
             }
-            cb(jsonResponse(list));
+
+            // Серверный поиск и пагинация (ADR-41): без limit отдаём массив, как раньше,
+            // с limit — {items, total}, чтобы клиент мог подгружать страницы.
+            const std::string q = req->getParameter("q");
+            const std::string folder = req->getParameter("folder");
+            const std::string tag = req->getParameter("tag");
+            std::string qLower = q;
+            std::transform(qLower.begin(), qLower.end(), qLower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+            Json::Value filtered(Json::arrayValue);
+            for (const auto &item : list) {
+                if (!folder.empty()) {
+                    const std::string itemFolder = item.get("folder", "").asString();
+                    if (folder == "__none__") {
+                        if (!itemFolder.empty()) continue;
+                    } else if (itemFolder != folder) {
+                        continue;
+                    }
+                }
+                if (!tag.empty()) {
+                    bool has = false;
+                    for (const auto &t : item["tags"]) {
+                        if (t.asString() == tag) has = true;
+                    }
+                    if (!has) continue;
+                }
+                if (!qLower.empty()) {
+                    std::string haystack = item.get("title", "").asString() + " " + item.get("id", "").asString() +
+                                           " " + item.get("description", "").asString();
+                    for (const auto &t : item["tags"]) haystack += " " + t.asString();
+                    std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (haystack.find(qLower) == std::string::npos) continue;
+                }
+                filtered.append(item);
+            }
+
+            const std::string limitParam = req->getParameter("limit");
+            if (limitParam.empty()) {
+                cb(jsonResponse(filtered));
+                return;
+            }
+
+            const size_t limit = std::min<size_t>(200, std::max(1, std::stoi(limitParam)));
+            const size_t offset = req->getParameter("offset").empty() ? 0 : std::stoul(req->getParameter("offset"));
+            Json::Value items(Json::arrayValue);
+            for (size_t i = offset; i < filtered.size() && items.size() < limit; ++i) items.append(filtered[static_cast<Json::ArrayIndex>(i)]);
+
+            Json::Value out;
+            out["items"] = items;
+            out["total"] = static_cast<Json::UInt64>(filtered.size());
+            out["limit"] = static_cast<Json::UInt64>(limit);
+            out["offset"] = static_cast<Json::UInt64>(offset);
+            cb(jsonResponse(out));
         },
         {Get});
 
