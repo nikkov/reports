@@ -2,6 +2,7 @@
 
 #include <xlsxwriter.h>
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace rep {
@@ -35,6 +36,49 @@ std::string sheetName(const std::string &title) {
     return out;
 }
 
+void applyGrouping(ExportSheet &sheet, const std::vector<std::size_t> &groupColumns) {
+    if (groupColumns.empty() || sheet.rows.size() < 2) return;
+
+    // Порядок строк не меняем: он пришёл из SQL и совпадает с экраном. Объединяем только
+    // подряд идущие одинаковые значения — так же, как это делает таблица в браузере;
+    // пересортировка по байтам разошлась бы с экранным порядком на кириллице.
+    const auto valueAt = [&](std::size_t row, std::size_t col) -> std::string {
+        return col < sheet.rows[row].size() ? sheet.rows[row][col] : std::string();
+    };
+
+    // 2) сколько ведущих групповых колонок совпадает с предыдущей строкой
+    std::vector<std::size_t> sameDepth(sheet.rows.size(), 0);
+    for (std::size_t r = 1; r < sheet.rows.size(); ++r) {
+        std::size_t depth = 0;
+        while (depth < groupColumns.size() && valueAt(r, groupColumns[depth]) == valueAt(r - 1, groupColumns[depth])) {
+            ++depth;
+        }
+        sameDepth[r] = depth;
+    }
+
+    // 3) объединения одинаковых значений по вертикали
+    for (std::size_t g = 0; g < groupColumns.size(); ++g) {
+        std::size_t start = 0;
+        for (std::size_t r = 1; r <= sheet.rows.size(); ++r) {
+            const bool same = r < sheet.rows.size() && sameDepth[r] > g;
+            if (same) continue;
+            if (r - 1 > start) {
+                sheet.merges.push_back({static_cast<int>(groupColumns[g]), static_cast<int>(start),
+                                        static_cast<int>(r - 1)});
+            }
+            start = r;
+        }
+    }
+
+    // 4) уровни: новая группа глубины d — «опора» уровня d, продолжение самой глубокой — d+1
+    sheet.rowLevels.assign(sheet.rows.size(), 0);
+    for (std::size_t r = 1; r < sheet.rows.size(); ++r) {
+        const std::size_t depth = sameDepth[r];
+        const std::size_t maxLevel = groupColumns.size();
+        sheet.rowLevels[r] = static_cast<int>(std::min(depth, maxLevel));
+    }
+}
+
 bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &err) {
     lxw_workbook *wb = workbook_new(path.c_str());
     if (!wb) {
@@ -57,11 +101,22 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
         worksheet_write_string(ws, 0, static_cast<lxw_col_t>(c), sheet.columns[c].title.c_str(), header);
     }
     worksheet_freeze_panes(ws, 1, 0);
-    if (!sheet.columns.empty()) {
+    // сводные строки (заголовки групп) стоят над деталями, как в браузерном экспорте
+    worksheet_outline_settings(ws, 0 /*сводные строки над деталями*/, 0, 0, 0);
+    for (const auto &merge : sheet.merges) {
+        if (merge.lastRow <= merge.firstRow) continue;
+        if (merge.col < 0 || merge.col >= static_cast<int>(sheet.columns.size())) continue;
+        worksheet_merge_range(ws, static_cast<lxw_row_t>(merge.firstRow + 1), static_cast<lxw_col_t>(merge.col),
+                              static_cast<lxw_row_t>(merge.lastRow + 1), static_cast<lxw_col_t>(merge.col), "",
+                              nullptr);
+    }
+
+    if (!sheet.params.empty()) {
         worksheet_autofilter(ws, 0, 0, static_cast<lxw_row_t>(sheet.rows.size()),
                              static_cast<lxw_col_t>(sheet.columns.size() - 1));
     }
 
+    // объединения рисуем после записи значений: текст нужен в первой ячейке диапазона
     std::vector<lxw_format *> formats(sheet.columns.size(), nullptr);
     for (size_t c = 0; c < sheet.columns.size(); ++c) {
         if (sheet.columns[c].numFmt.empty()) continue;
@@ -70,11 +125,29 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
         formats[c] = fmt;
     }
 
+    // какие ячейки объединены и должны заполняться только с первой строки диапазона
+    std::vector<std::vector<int>> mergeStart(sheet.rows.size());
+    for (const auto &merge : sheet.merges) {
+        if (merge.lastRow <= merge.firstRow) continue;
+        if (merge.lastRow < 0 || merge.firstRow >= static_cast<int>(sheet.rows.size())) continue;
+        for (int row = merge.firstRow; row <= merge.lastRow && row < static_cast<int>(sheet.rows.size()); ++row) {
+            if (row != merge.firstRow) mergeStart[static_cast<std::size_t>(row)].push_back(merge.col);
+        }
+    }
+
     for (size_t r = 0; r < sheet.rows.size(); ++r) {
         const auto &row = sheet.rows[r];
+        if (r < sheet.rowLevels.size() && sheet.rowLevels[r] > 0) {
+            lxw_row_col_options options = {.hidden = 0,
+                                           .level = static_cast<uint8_t>(std::min(sheet.rowLevels[r], 7)),
+                                           .collapsed = 0};
+            worksheet_set_row_opt(ws, static_cast<lxw_row_t>(r + 1), LXW_DEF_ROW_HEIGHT, nullptr, &options);
+        }
         for (size_t c = 0; c < sheet.columns.size() && c < row.size(); ++c) {
             const std::string &value = row[c];
             if (value.empty()) continue;
+            const auto &skip = mergeStart[r];
+            if (std::find(skip.begin(), skip.end(), static_cast<int>(c)) != skip.end()) continue;
             const auto rowIdx = static_cast<lxw_row_t>(r + 1);
             const auto colIdx = static_cast<lxw_col_t>(c);
             if (sheet.columns[c].numeric && looksNumeric(value)) {

@@ -39,6 +39,7 @@ add_executable(rep_tests
   tests/aggregate_test.cc
   tests/csv_test.cc
   tests/xlsx_test.cc
+  tests/xlsx_group_test.cc
   tests/auth_test.cc
   tests/dataset_test.cc
   tests/queries_test.cc

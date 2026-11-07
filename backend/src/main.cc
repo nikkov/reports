@@ -1280,6 +1280,7 @@ int main() {
                 bool numeric;
             };
             std::vector<Leaf> leaves;
+            std::vector<std::size_t> groupColumns;
             std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
                 if (col["children"].isArray()) {
                     for (const auto &child : col["children"]) walk(child);
@@ -1292,6 +1293,7 @@ int main() {
                 leaf.numeric = fmt == "number" || fmt == "integer" || fmt == "percent" ||
                                fmt == "currency" || col.isMember("aggregate");
                 leaf.numFmt = fmt == "percent" ? "0.00%" : leaf.numeric ? "# ##0" : "";
+                if (col["group"].asBool()) groupColumns.push_back(leaves.size());
                 leaves.push_back(leaf);
             };
             for (const auto &col : block["columns"]) walk(col);
@@ -1322,7 +1324,7 @@ int main() {
             static const std::map<std::string, std::string> noDeclared;
             runQuery(
                 dataDb, finalSql, query.values,
-                [cb, leaves, title, bag, noDeclared, reportId](const orm::Result &res) {
+                [cb, leaves, title, bag, noDeclared, reportId, groupColumns](const orm::Result &res) {
                     const auto ncols = static_cast<size_t>(res.columns());
                     std::vector<std::string> names;
                     std::vector<std::string> types;
@@ -1368,6 +1370,7 @@ int main() {
                                              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
                                              ".xlsx";
                     std::string werr;
+                    rep::applyGrouping(sheet, groupColumns);
                     if (!rep::writeXlsx(path, sheet, werr)) {
                         sendError(cb, k500InternalServerError, "EXPORT_FAILED", werr);
                         return;
@@ -1468,6 +1471,7 @@ int main() {
             std::string numFmt;
         };
         std::vector<Leaf> leaves;
+        std::vector<std::size_t> groupColumns;
         std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
             if (col["children"].isArray()) {
                 for (const auto &child : col["children"]) walk(child);
@@ -1477,6 +1481,7 @@ int main() {
             const bool numeric = fmt == "number" || fmt == "integer" || fmt == "percent" ||
                                  fmt == "currency" || col.isMember("aggregate");
             const std::string numFmt = fmt == "percent" ? "0.00%" : numeric ? "# ##0" : "";
+            if (col["group"].asBool()) groupColumns.push_back(leaves.size());
             leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(), numeric, numFmt});
         };
         for (const auto &col : block["columns"]) walk(col);
@@ -1505,7 +1510,7 @@ int main() {
         static const std::map<std::string, std::string> noDeclared;
         runQuery(
             dataDb, finalSql, query.values,
-            [done, leaves, bag, noDeclared, sheetTitle](const orm::Result &res) {
+            [done, leaves, bag, noDeclared, sheetTitle, groupColumns](const orm::Result &res) {
                 const auto ncols = static_cast<size_t>(res.columns());
                 std::vector<std::string> names;
                 std::vector<std::string> types;
@@ -1540,6 +1545,7 @@ int main() {
                     }
                     sheet.rows.push_back(values);
                 }
+                rep::applyGrouping(sheet, groupColumns);
                 done(200, "", sheet, "");
             },
             [done](const std::exception_ptr &e) { done(500, "EXPORT_FAILED", rep::ExportSheet{}, describeError(e)); });
