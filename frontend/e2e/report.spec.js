@@ -228,12 +228,10 @@ test('диаграмма получает агрегаты из того же д
   expect(['line', 'bar', 'pie']).toContain(info.type)
   expect(info.series).toBeGreaterThanOrEqual(1)
 
-  // подпись оси отформатирована по-русски (пробел как разделитель тысяч)
-  const labels = await page.evaluate(() => {
-    const canvas = document.querySelector('.chart canvas')
-    return canvas ? canvas.width > 0 : false
-  })
-  expect(labels).toBe(true)
+  // canvas получает реальный размер после раскладки: ждём, а не проверяем один раз
+  await expect
+    .poll(() => page.evaluate(() => (window.__chart?.instance?.getWidth?.() ?? 0) > 0), { timeout: 5000 })
+    .toBe(true)
 })
 
 test('диаграмма с seriesField показывает несколько серий', async ({ page }) => {
@@ -957,6 +955,50 @@ test('drill-through с диаграммы: клик по столбцу откр
   // целевой отчёт действительно открылся на этих данных
   await expect(page.locator('.rt-table')).toBeVisible()
   await expect(page.locator('.meta')).toContainText('строк')
+})
+
+test('рассылка: подписки CRUD, cron и адреса проверяются на сервере', async ({ page, request }) => {
+  const invalidCron = await request.post('/api/admin/subscriptions', {
+    data: { reportId: 'sales-aggregate', cron: '99 * * * *', recipients: ['po@example.test'], params: {} }
+  })
+  expect(invalidCron.status()).toBe(422)
+  expect((await invalidCron.json()).error.message).toContain('диапазона')
+
+  const invalidMail = await request.post('/api/admin/subscriptions', {
+    data: { reportId: 'sales-aggregate', cron: '0 9 * * *', recipients: ['не-адрес'], params: {} }
+  })
+  expect(invalidMail.status()).toBe(422)
+
+  const created = await request.post('/api/admin/subscriptions', {
+    data: {
+      reportId: 'sales-aggregate',
+      title: 'e2e рассылка',
+      cron: '0 9 * * 1-5',
+      params: { from: '2026-03-01', to: '2026-03-10' },
+      recipients: ['po@example.test'],
+      enabled: false
+    }
+  })
+  expect(created.ok()).toBeTruthy()
+  const { id } = await created.json()
+  expect(id).toBeGreaterThan(0)
+
+  const list = await (await request.get('/api/admin/subscriptions')).json()
+  const item = list.items.find((s) => s.id === id)
+  expect(item.title).toBe('e2e рассылка')
+  expect(item.enabled).toBe(false)
+  expect(item.nextRunAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+
+  // страница рассылки показывает подписку и форму
+  await page.goto('/subscriptions.html')
+  await expect(page.locator('h1')).toHaveText('Рассылка отчётов')
+  await expect(page.locator(`tr[data-sub="${id}"]`)).toContainText('e2e рассылка')
+  await expect(page.locator('form.form')).toBeVisible()
+
+  const removed = await request.delete(`/api/admin/subscriptions/${id}`)
+  expect(removed.ok()).toBeTruthy()
+  const after = await (await request.get('/api/admin/subscriptions')).json()
+  expect(after.items.find((s) => s.id === id)).toBeUndefined()
 })
 
 test('серверная валидация шаблона: список ошибок с путями, сохранение отклонено', async ({ request }) => {

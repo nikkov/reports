@@ -12,6 +12,7 @@ endif()
 find_package(Drogon CONFIG REQUIRED)
 find_package(Catch2 3 CONFIG REQUIRED)
 find_package(libxlsxwriter CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # Ядро без HTTP-слоя: тестируется Catch2 отдельно от сервера.
 add_library(rep_core STATIC
@@ -19,13 +20,15 @@ add_library(rep_core STATIC
   src/auth.cc
   src/csv_export.cc
   src/dataset.cc
+  src/smtp.cc
+  src/subscriptions.cc
   src/validate.cc
   src/env.cc
   src/params.cc
   src/queries.cc
 )
 target_include_directories(rep_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(rep_core PUBLIC Drogon::Drogon)
+target_link_libraries(rep_core PUBLIC Drogon::Drogon OpenSSL::SSL OpenSSL::Crypto)
 
 add_executable(rep src/main.cc src/xlsx_export.cc)
 target_link_libraries(rep PRIVATE rep_core libxlsxwriter::libxlsxwriter)
@@ -41,6 +44,7 @@ add_executable(rep_tests
   tests/queries_test.cc
   tests/params_test.cc
   tests/validate_test.cc
+  tests/smtp_cron_test.cc
 )
 target_link_libraries(rep_tests PRIVATE rep_core Catch2::Catch2WithMain libxlsxwriter::libxlsxwriter)
 # фикстуры parity лежат в репозитории: тест читает их по этому пути

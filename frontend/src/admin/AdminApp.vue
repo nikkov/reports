@@ -4,6 +4,7 @@
       <div class="brand">
         <div>
           <h1>Шаблоны отчётов</h1>
+      <a class="subs-link" href="subscriptions.html">Рассылка отчётов →</a>
           <p class="brand-sub">Администрирование · JSON + CodeMirror</p>
         </div>
         <button class="btn primary" @click="openCreate">Создать</button>
@@ -977,6 +978,16 @@ body {
 </style>
 
 <style scoped>
+.subs-link {
+  display: inline-block;
+  margin: 0 0 10px;
+  color: #1f6feb;
+  text-decoration: none;
+  font-size: 13px;
+}
+.subs-link:hover {
+  text-decoration: underline;
+}
 /* Параметры и SQL справочников: видимая часть админки, а не 「найди в JSON」 */
 .params {
   margin: 0 0 10px;

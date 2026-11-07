@@ -73,6 +73,14 @@ export const api = {
   },
 
   adminReports: () => request('/api/admin/reports'),
+
+  // рассылка по расписанию (ADR-46)
+  subscriptions: () => request('/api/admin/subscriptions'),
+  createSubscription: (payload) => request('/api/admin/subscriptions', { method: 'POST', body: JSON.stringify(payload) }),
+  updateSubscription: (id, payload) =>
+    request(`/api/admin/subscriptions/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteSubscription: (id) => request(`/api/admin/subscriptions/${id}`, { method: 'DELETE' }),
+  runSubscription: (id) => request(`/api/admin/subscriptions/${id}/run`, { method: 'POST' }),
   // сырой шаблон для редактора: с SQL справочников, в отличие от публичного /api/reports/{id}
   adminTemplate: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`),
   adminHistory: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}/history`),

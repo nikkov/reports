@@ -22,6 +22,13 @@ fi
 ${PSQL[@]} -d "$DB" -q -f "$ROOT/db/schema.sql"
 ${PSQL[@]} -d "$DB" -q -f "$ROOT/db/seed.sql"
 
+# миграции поверх схемы (ADR-46 и далее): идемпотентные скрипты из db/migrations
+for migration in "$ROOT"/db/migrations/*.sql; do
+  [ -e "$migration" ] || continue
+  "${PSQL[@]}" -d "$DB" -q -f "$migration"
+  echo "migration: $(basename "$migration")"
+done
+
 # шаблоны из файлов в БД (ADR-21)
 if command -v node >/dev/null 2>&1; then
   node "$ROOT/scripts/templates-push.mjs" "$ROOT"/backend/templates/*.json >/dev/null

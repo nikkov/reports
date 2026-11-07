@@ -18,6 +18,7 @@ PARAMS="${REP_PARAMS:-from=2026-01-01&to=2026-03-31}"
 cleanup() {
   echo
   echo "останавливаю…"
+  [ -n "${MAIL_PID:-}" ] && kill "$MAIL_PID" 2>/dev/null || true
   [ -n "${BACK_PID:-}" ] && kill "$BACK_PID" 2>/dev/null || true
   [ -n "${WEB_PID:-}" ] && kill "$WEB_PID" 2>/dev/null || true
 }
@@ -32,6 +33,21 @@ fi
 export REP_ADMIN="${REP_ADMIN:-1}"
 # Вход и роли (ADR-34). Пользователи создаются scripts/auth-init.sh.
 export REP_AUTH="${REP_AUTH:-1}"
+
+# Рассылка (ADR-46): на стенде — локальный приёмник писем, письма в /tmp/rep-mail.
+# Боевые настройки — REP_SMTP_HOST/REP_SMTP_PORT/REP_SMTP_USER/REP_SMTP_PASSWORD/REP_SMTP_TLS.
+if [ "${REP_SMTP_HOST:-}" = "" ]; then
+  MAIL_PORT="${REP_SMTP_PORT:-1025}"
+  if ! ss -ltn 2>/dev/null | grep -q ":$MAIL_PORT "; then
+    rm -rf /tmp/rep-mail
+    ( python3 "$ROOT/scripts/smtp-sink.py" --port "$MAIL_PORT" --dir /tmp/rep-mail > /tmp/rep-mail.log 2>&1 ) &
+    MAIL_PID=$!
+  fi
+  export REP_SMTP_HOST="127.0.0.1"
+  export REP_SMTP_PORT="$MAIL_PORT"
+  export REP_SMTP_TLS="0"
+  export REP_SMTP_FROM="reports@example.test"
+fi
 echo "== бэкенд =="
 ( cd "$ROOT" && REP_PORT="$PORT" ./backend/build/rep > /tmp/rep-backend.log 2>&1 ) &
 BACK_PID=$!
@@ -58,7 +74,8 @@ URL="http://127.0.0.1:$WEB_PORT/report.html?report=$REPORT&$PARAMS"
 echo
 echo "Список:  $URL"
 echo "Спайк:   http://127.0.0.1:$WEB_PORT/ (песочница рендерера)"
-echo "API:     http://127.0.0.1:$PORT/api/health"
+echo "API:     http://127.0.0.1:$PORT/api/health
+Почта:   ${REP_SMTP_HOST}:${REP_SMTP_PORT} (письма в /tmp/rep-mail, если приёмник локальный)"
 echo "Логи:    /tmp/rep-backend.log, /tmp/rep-web.log"
 echo "Ctrl+C — остановить."
 echo

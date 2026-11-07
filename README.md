@@ -170,3 +170,23 @@ curl -b cookie 'localhost:8080/api/reports?q=продаж&limit=10&offset=10'
 curl -b cookie -X POST localhost:8080/api/reports/sales-summary/validate \
   -H 'Content-Type: application/json' -d '{"body": '"$(cat backend/templates/sales-summary.json)"'}'
 ```
+
+## Рассылка по расписанию
+
+Подписка = отчёт + cron + параметры + получатели. Сервер раз в 30 с проверяет расписание, собирает CSV
+тем же кодом, что и `POST /api/report/export.csv`, и отправляет письмо с вложением (ADR-46).
+
+```bash
+# подписка: будни в 9:00, отчёт за март
+curl -b cookie -X POST localhost:8080/api/admin/subscriptions \
+  -H 'Content-Type: application/json' \
+  -d '{"reportId":"sales-aggregate","title":"Продажи за март","cron":"0 9 * * 1-5",
+       "params":{"from":"2026-03-01","to":"2026-03-31"},"recipients":["po@example.test"]}'
+
+# отправить сейчас (расписание не сдвигается)
+curl -b cookie -X POST localhost:8080/api/admin/subscriptions/1/run
+```
+
+Настройки SMTP: `REP_SMTP_HOST`, `REP_SMTP_PORT`, `REP_SMTP_USER`, `REP_SMTP_PASSWORD`, `REP_SMTP_FROM`,
+`REP_SMTP_TLS`. На стенде `scripts/demo.sh` поднимает локальный приёмник (`scripts/smtp-sink.py`),
+письма складываются в `/tmp/rep-mail`. Страница — `subscriptions.html`.

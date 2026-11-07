@@ -2,6 +2,8 @@
 #include <drogon/orm/DbClient.h>
 #include <drogon/orm/Result.h>
 
+#include <libpq-fe.h>
+
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
@@ -9,7 +11,9 @@
 #include <cctype>
 #include <chrono>
 #include <map>
+#include <future>
 #include <mutex>
+#include <thread>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,6 +23,8 @@
 #include "aggregate.h"
 #include "csv_export.h"
 #include "dataset.h"
+#include "smtp.h"
+#include "subscriptions.h"
 #include "validate.h"
 #include "xlsx_export.h"
 #include "env.h"
@@ -1382,10 +1388,154 @@ int main() {
         {Post});
 
     // CSV-экспорт (ADR-40): тот же расчёт, что у .xlsx, но текстом; ';' и BOM — для Excel.
+    // Сборка CSV по шаблону: используется HTTP-экспортом и рассылкой (ADR-46).
+    // status 200 — payload содержит файл; иначе в payload текст ошибки, code — машинный код.
+    auto buildCsv = [dataDb, &templates, &templatesRaw, &templatesMutex](
+                        const std::string &reportId, const std::string &requestedDataset,
+                        const Json::Value &rawParams,
+                        std::function<void(int status, const std::string &code, const std::string &payload, int rows)> done) {
+        std::string datasetSql;
+        std::map<std::string, std::string> datasetParams;
+        std::string datasetKey;
+        std::string raw;
+        {
+            std::lock_guard<std::mutex> lock(templatesMutex);
+            const auto it = templates.find(reportId);
+            if (it == templates.end()) {
+                done(404, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден", 0);
+                return;
+            }
+            const auto &all = it->second.datasets;
+            if (all.empty()) {
+                datasetSql = it->second.datasetSql;
+                datasetParams = it->second.datasetParams;
+            } else {
+                const auto ds = all.find(requestedDataset.empty() ? all.begin()->first : requestedDataset);
+                if (ds == all.end()) {
+                    done(422, "DATASET_NOT_FOUND", "в шаблоне нет набора '" + requestedDataset + "'", 0);
+                    return;
+                }
+                datasetKey = ds->first;
+                datasetSql = ds->second.sql;
+                datasetParams = ds->second.params;
+            }
+            const auto rawIt = templatesRaw.find(reportId);
+            if (rawIt != templatesRaw.end()) raw = rawIt->second;
+        }
+
+        rep::ParamBag bag;
+        if (rawParams.isObject()) {
+            for (auto it = rawParams.begin(); it != rawParams.end(); ++it) {
+                if (it->isString() || it->isInt64() || it->isUInt64() || it->isDouble() || it->isBool()) {
+                    bag.set(it.name(), it->asString());
+                }
+            }
+        }
+
+        rep::DatasetQuery query;
+        std::string err;
+        if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
+            done(422, "INVALID_PARAMS", err, 0);
+            return;
+        }
+
+        Json::Value tpl;
+        if (!raw.empty()) {
+            Json::CharReaderBuilder reader;
+            std::string errs;
+            std::istringstream in(raw);
+            Json::parseFromStream(reader, in, &tpl, &errs);
+        }
+
+        Json::Value block;
+        for (const auto &b : tpl["blocks"]) {
+            if (b.get("type", "").asString() != "table") continue;
+            if (block.isNull() || (!datasetKey.empty() && b.get("dataKey", "").asString() == datasetKey)) {
+                block = b;
+            }
+        }
+
+        struct Leaf {
+            std::string field;
+            std::string title;
+            bool numeric;
+        };
+        std::vector<Leaf> leaves;
+        std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
+            if (col["children"].isArray()) {
+                for (const auto &child : col["children"]) walk(child);
+                return;
+            }
+            const std::string fmt = col["format"].isString() ? col["format"].asString() : "";
+            leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(),
+                              fmt == "number" || fmt == "integer" || fmt == "percent" ||
+                                  fmt == "currency" || col.isMember("aggregate")});
+        };
+        for (const auto &col : block["columns"]) walk(col);
+
+        std::string finalSql = query.sql;
+        const Json::Value &agg = block["aggregate"];
+        if (agg.isObject()) {
+            std::vector<std::string> groupBy;
+            for (const auto &g : agg["groupBy"]) {
+                if (g.isString()) groupBy.push_back(g.asString());
+            }
+            std::vector<std::pair<std::string, std::string>> measures;
+            for (const auto &m : agg["measures"]) {
+                if (m.isObject() && m["field"].isString() && m["agg"].isString()) {
+                    measures.emplace_back(m["field"].asString(), m["agg"].asString());
+                }
+            }
+            std::string aggErr;
+            if (!rep::buildAggregateSql(finalSql, groupBy, measures, finalSql, aggErr)) {
+                done(422, "INVALID_PARAMS", aggErr, 0);
+                return;
+            }
+        }
+
+        static const std::map<std::string, std::string> noDeclared;
+        runQuery(
+            dataDb, finalSql, query.values,
+            [done, leaves, bag, noDeclared](const orm::Result &res) {
+                const auto ncols = static_cast<size_t>(res.columns());
+                std::vector<std::string> names;
+                std::vector<std::string> types;
+                for (size_t c = 0; c < ncols; ++c) {
+                    names.emplace_back(res.columnName(static_cast<unsigned long>(c)));
+                    types.push_back(columnType(names.back(), noDeclared, res));
+                }
+                rep::ExportSheet sheet;
+                for (const auto &leaf : leaves) sheet.columns.push_back({leaf.title, "", leaf.numeric});
+                for (const auto &kv : bag.values()) sheet.params.emplace_back(kv.first, kv.second);
+
+                for (const auto &row : res) {
+                    std::vector<std::string> values;
+                    for (const auto &leaf : leaves) {
+                        const auto pos = std::find(names.begin(), names.end(), leaf.field);
+                        if (pos == names.end()) {
+                            values.emplace_back();
+                            continue;
+                        }
+                        const size_t idx = static_cast<size_t>(pos - names.begin());
+                        const orm::Field &f = row[idx];
+                        if (f.isNull()) values.emplace_back();
+                        else if (types[idx] == "int") values.push_back(std::to_string(f.as<long long>()));
+                        else if (types[idx] == "double") {
+                            std::ostringstream os;
+                            os << f.as<double>();
+                            values.push_back(os.str());
+                        } else values.push_back(f.as<std::string>());
+                    }
+                    sheet.rows.push_back(values);
+                }
+                done(200, "", rep::toCsv(sheet), static_cast<int>(sheet.rows.size()));
+            },
+            [done](const std::exception_ptr &e) { done(500, "EXPORT_FAILED", describeError(e), 0); });
+    };
+
     app().registerHandler(
         "/api/report/export.csv",
-        [dataDb, &templates, &templatesRaw, &templatesMutex](const HttpRequestPtr &req,
-                                                             std::function<void(const HttpResponsePtr &)> &&cb) {
+        [&buildCsv](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -1396,160 +1546,306 @@ int main() {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
                 return;
             }
+            buildCsv(reportId, (*body).get("dataset", "").asString(), (*body)["params"],
+                     [cb, reportId](int status, const std::string &code, const std::string &payload, int) {
+                         if (status != 200) {
+                             sendError(cb, static_cast<HttpStatusCode>(status), code, payload);
+                             return;
+                         }
+                         auto resp = HttpResponse::newHttpResponse();
+                         resp->setContentTypeString("text/csv; charset=utf-8");
+                         resp->addHeader("Content-Disposition", "attachment; filename=\"" + reportId + ".csv\"");
+                         resp->setBody(payload);
+                         cb(resp);
+                     });
+        },
+        {Post});
 
-            std::string datasetSql;
-            std::map<std::string, std::string> datasetParams;
-            std::string datasetKey;
-            std::string raw;
-            {
-                std::lock_guard<std::mutex> lock(templatesMutex);
-                const auto it = templates.find(reportId);
-                if (it == templates.end()) {
-                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
+
+    // --- Рассылка отчётов (ADR-46) ------------------------------------------
+    // Подписки хранятся в report_subscriptions; планировщик раз в 30 с выбирает
+    // просроченные и отправляет CSV письмом. Соединение с БД — своё (libpq),
+    // потому что отправка блокирующая и не должна занимать цикл событий.
+    const std::string smtpHost = rep::envOr("REP_SMTP_HOST", "");
+    const int smtpPort = std::stoi(rep::envOr("REP_SMTP_PORT", "25"));
+    const std::string smtpFrom = rep::envOr("REP_SMTP_FROM", "reports@localhost");
+    const bool smtpStartTls = rep::envOr("REP_SMTP_TLS", "1") == "1";
+    const bool schedulerEnabled = rep::envOr("REP_SCHEDULER", "1") == "1";
+
+    auto smtpConfig = [smtpHost, smtpPort, smtpFrom, smtpStartTls]() {
+        rep::MailConfig config;
+        config.host = smtpHost;
+        config.port = smtpPort;
+        config.from = smtpFrom;
+        config.user = rep::envOr("REP_SMTP_USER", "");
+        config.password = rep::envOr("REP_SMTP_PASSWORD", "");
+        config.starttls = smtpStartTls;
+        return config;
+    };
+
+    // «{a@b,c@d}» → список адресов
+    auto parseTextArray = [](const std::string &value) {
+        std::vector<std::string> out;
+        if (value.size() < 2) return out;
+        std::string current;
+        bool quoted = false;
+        for (std::size_t i = 1; i + 1 < value.size(); ++i) {
+            const char c = value[i];
+            if (c == '"') {
+                quoted = !quoted;
+                continue;
+            }
+            if (c == ',' && !quoted) {
+                if (!current.empty()) out.push_back(current);
+                current.clear();
+                continue;
+            }
+            if (c == '\\' && quoted && i + 2 < value.size()) {
+                current.push_back(value[++i]);
+                continue;
+            }
+            current.push_back(c);
+        }
+        if (!current.empty()) out.push_back(current);
+        return out;
+    };
+
+    auto jsonSubscriptions = [parseTextArray](PGresult *res) {
+        Json::Value list(Json::arrayValue);
+        const int rows = PQntuples(res);
+        for (int i = 0; i < rows; ++i) {
+            Json::Value item;
+            item["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, i, 0)));
+            item["reportId"] = PQgetvalue(res, i, 1);
+            item["title"] = PQgetvalue(res, i, 2);
+            item["cron"] = PQgetvalue(res, i, 3);
+            Json::Value params;
+            Json::CharReaderBuilder reader;
+            std::string errs;
+            std::istringstream in(PQgetvalue(res, i, 4));
+            Json::parseFromStream(reader, in, &params, &errs);
+            item["params"] = params;
+            item["format"] = PQgetvalue(res, i, 5);
+            Json::Value recipients(Json::arrayValue);
+            for (const auto &mail : parseTextArray(PQgetvalue(res, i, 6))) recipients.append(mail);
+            item["recipients"] = recipients;
+            item["enabled"] = std::string(PQgetvalue(res, i, 7)) == "t";
+            item["nextRunAt"] = PQgetisnull(res, i, 8) ? "" : PQgetvalue(res, i, 8);
+            item["lastRunAt"] = PQgetisnull(res, i, 9) ? "" : PQgetvalue(res, i, 9);
+            item["lastOk"] = PQgetisnull(res, i, 10) ? Json::Value() : Json::Value(std::string(PQgetvalue(res, i, 10)) == "t");
+            item["lastError"] = PQgetisnull(res, i, 11) ? "" : PQgetvalue(res, i, 11);
+            list.append(item);
+        }
+        return list;
+    };
+
+    const std::string subscriptionSelect =
+        "SELECT s.id, s.report_id, s.title, s.cron, s.params::text, s.format, s.recipients::text, s.enabled,"
+        " to_char(s.next_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
+        " to_char(s.last_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
+        " r.ok, r.error"
+        " FROM report_subscriptions s"
+        " LEFT JOIN LATERAL (SELECT ok, error FROM subscription_runs WHERE subscription_id = s.id"
+        "                    ORDER BY started_at DESC LIMIT 1) r ON true";
+
+    // проверка полей подписки: cron, получатели, существование отчёта
+    auto validateSubscription = [&templates, &templatesMutex](const Json::Value &body, std::string &err,
+                                                              rep::Cron &cron) {
+        const std::string cronExpr = body.get("cron", "").asString();
+        if (!rep::parseCron(cronExpr, cron, err)) return false;
+        const Json::Value &recipients = body["recipients"];
+        if (!recipients.isArray() || recipients.empty()) {
+            err = "нужен непустой список recipients";
+            return false;
+        }
+        for (const auto &mail : recipients) {
+            const std::string address = mail.asString();
+            const auto at = address.find('@');
+            if (!mail.isString() || at == std::string::npos || at == 0 || at + 1 >= address.size() ||
+                address.find(' ') != std::string::npos) {
+                err = "некорректный адрес получателя: «" + address + "»";
+                return false;
+            }
+        }
+        const std::string reportId = body.get("reportId", "").asString();
+        if (reportId.empty()) {
+            err = "нужен reportId";
+            return false;
+        }
+        std::lock_guard<std::mutex> lock(templatesMutex);
+        if (!templates.count(reportId)) {
+            err = "отчёт '" + reportId + "' не найден";
+            return false;
+        }
+        return true;
+    };
+
+    app().registerHandler(
+        "/api/admin/subscriptions",
+        [adminEnabled, &templates, &templatesMutex, subscriptionSelect, jsonSubscriptions,
+         validateSubscription](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            if (req->method() == Get) {
+                PGresult *res = PQexec(conn, (subscriptionSelect + " ORDER BY s.id").c_str());
+                if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                    const std::string msg = PQerrorMessage(conn);
+                    PQclear(res);
+                    PQfinish(conn);
+                    sendError(cb, k500InternalServerError, "QUERY_FAILED", msg);
                     return;
                 }
-                const auto &all = it->second.datasets;
-                if (all.empty()) {
-                    datasetSql = it->second.datasetSql;
-                    datasetParams = it->second.datasetParams;
-                } else {
-                    const std::string key = (*body).get("dataset", "").asString();
-                    const auto ds = all.find(key.empty() ? all.begin()->first : key);
-                    if (ds == all.end()) {
-                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
-                                  "в шаблоне нет набора '" + key + "'");
-                        return;
-                    }
-                    datasetKey = ds->first;
-                    datasetSql = ds->second.sql;
-                    datasetParams = ds->second.params;
-                }
-                const auto rawIt = templatesRaw.find(reportId);
-                if (rawIt != templatesRaw.end()) raw = rawIt->second;
-            }
-
-            rep::ParamBag bag;
-            const Json::Value &rawParams = (*body)["params"];
-            if (rawParams.isObject()) {
-                for (auto it = rawParams.begin(); it != rawParams.end(); ++it) {
-                    if (it->isString() || it->isInt64() || it->isUInt64() || it->isDouble() || it->isBool()) {
-                        bag.set(it.name(), it->asString());
-                    }
-                }
-            }
-
-            rep::DatasetQuery query;
-            std::string err;
-            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
-                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                Json::Value out;
+                out["items"] = jsonSubscriptions(res);
+                PQclear(res);
+                PQfinish(conn);
+                cb(jsonResponse(out));
                 return;
             }
 
-            Json::Value tpl;
-            if (!raw.empty()) {
-                Json::CharReaderBuilder builder;
-                std::string errs;
-                std::istringstream in(raw);
-                Json::parseFromStream(builder, in, &tpl, &errs);
+            // создание: POST /api/admin/subscriptions
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                PQfinish(conn);
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
             }
-
-            Json::Value block;
-            for (const auto &b : tpl["blocks"]) {
-                if (b.get("type", "").asString() != "table") continue;
-                if (block.isNull() || (!datasetKey.empty() && b.get("dataKey", "").asString() == datasetKey)) {
-                    block = b;
-                }
+            std::string err;
+            rep::Cron cron;
+            if (!validateSubscription(*body, err, cron)) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
             }
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            const std::string paramsJson = Json::writeString(wb, (*body)["params"]);
+            Json::StreamWriterBuilder rb;
+            const std::string recipientsJson = Json::writeString(rb, (*body)["recipients"]);
+            const std::time_t next = rep::nextRun(cron, std::time(nullptr));
+            const std::string nextText = std::to_string(next);
+            const std::string format = (*body).get("format", "csv").asString();
+            const bool enabled = (*body).get("enabled", true).asBool();
 
-            struct Leaf {
-                std::string field;
-                std::string title;
-                bool numeric;
-            };
-            std::vector<Leaf> leaves;
-            std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
-                if (col["children"].isArray()) {
-                    for (const auto &child : col["children"]) walk(child);
-                    return;
-                }
-                const std::string fmt = col["format"].isString() ? col["format"].asString() : "";
-                leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(),
-                                  fmt == "number" || fmt == "integer" || fmt == "percent" ||
-                                      fmt == "currency" || col.isMember("aggregate")});
-            };
-            for (const auto &col : block["columns"]) walk(col);
-
-            // агрегация блока: CSV должен совпадать с тем, что видит пользователь
-            std::string finalSql = query.sql;
-            const Json::Value &agg = block["aggregate"];
-            if (agg.isObject()) {
-                std::vector<std::string> groupBy;
-                for (const auto &g : agg["groupBy"]) {
-                    if (g.isString()) groupBy.push_back(g.asString());
-                }
-                std::vector<std::pair<std::string, std::string>> measures;
-                for (const auto &m : agg["measures"]) {
-                    if (m.isObject() && m["field"].isString() && m["agg"].isString()) {
-                        measures.emplace_back(m["field"].asString(), m["agg"].asString());
-                    }
-                }
-                std::string aggErr;
-                if (!rep::buildAggregateSql(finalSql, groupBy, measures, finalSql, aggErr)) {
-                    sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", aggErr);
-                    return;
-                }
+            const char *sql =
+                "INSERT INTO report_subscriptions (report_id, title, cron, params, format, recipients, enabled, next_run_at)"
+                " VALUES ($1, $2, $3, $4::jsonb, $5, (SELECT array_agg(value::text) FROM json_array_elements_text($6::json)),"
+                "         $7, to_timestamp($8)) RETURNING id";
+            const std::string values[] = {(*body).get("reportId", "").asString(),
+                                          (*body).get("title", (*body).get("reportId", "")).asString(),
+                                          (*body).get("cron", "").asString(), paramsJson, format,
+                                          recipientsJson, enabled ? "true" : "false", nextText};
+            const char *params[8];
+            for (int i = 0; i < 8; ++i) params[i] = values[i].c_str();
+            PGresult *res = PQexecParams(conn, sql, 8, nullptr, params, nullptr, nullptr, 0);
+            if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", msg);
+                return;
             }
-
-            static const std::map<std::string, std::string> noDeclared;
-            runQuery(
-                dataDb, finalSql, query.values,
-                [cb, leaves, bag, noDeclared, reportId](const orm::Result &res) {
-                    const auto ncols = static_cast<size_t>(res.columns());
-                    std::vector<std::string> names;
-                    std::vector<std::string> types;
-                    for (size_t c = 0; c < ncols; ++c) {
-                        names.emplace_back(res.columnName(static_cast<unsigned long>(c)));
-                        types.push_back(columnType(names.back(), noDeclared, res));
-                    }
-                    rep::ExportSheet sheet;
-                    for (const auto &leaf : leaves) {
-                        sheet.columns.push_back({leaf.title, "", leaf.numeric});
-                    }
-                    for (const auto &kv : bag.values()) sheet.params.emplace_back(kv.first, kv.second);
-
-                    for (const auto &row : res) {
-                        std::vector<std::string> values;
-                        for (const auto &leaf : leaves) {
-                            const auto pos = std::find(names.begin(), names.end(), leaf.field);
-                            if (pos == names.end()) {
-                                values.emplace_back();
-                                continue;
-                            }
-                            const size_t idx = static_cast<size_t>(pos - names.begin());
-                            const orm::Field &f = row[idx];
-                            if (f.isNull()) values.emplace_back();
-                            else if (types[idx] == "int") values.push_back(std::to_string(f.as<long long>()));
-                            else if (types[idx] == "double") {
-                                std::ostringstream os;
-                                os << f.as<double>();
-                                values.push_back(os.str());
-                            } else values.push_back(f.as<std::string>());
-                        }
-                        sheet.rows.push_back(values);
-                    }
-
-                    auto resp = HttpResponse::newHttpResponse();
-                    resp->setContentTypeString("text/csv; charset=utf-8");
-                    resp->addHeader("Content-Disposition", "attachment; filename=\"" +
-                                                               std::string(reportId) + ".csv\"");
-                    resp->setBody(rep::toCsv(sheet));
-                    cb(resp);
-                },
-                [cb](const std::exception_ptr &e) {
-                    sendError(cb, k500InternalServerError, "EXPORT_FAILED", describeError(e));
-                });
+            Json::Value out;
+            out["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, 0, 0)));
+            out["nextRunAt"] = nextText;
+            PQclear(res);
+            PQfinish(conn);
+            cb(jsonResponse(out));
         },
-        {Post});
+        {Get, Post});
+
+    app().registerHandler(
+        "/api/admin/subscriptions/{id}",
+        [adminEnabled, &templates, &templatesMutex, validateSubscription](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb, const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            if (req->method() == Delete) {
+                const char *values[] = {id.c_str()};
+                PGresult *res = PQexecParams(conn, "DELETE FROM report_subscriptions WHERE id = $1", 1, nullptr,
+                                             values, nullptr, nullptr, 0);
+                const bool ok = PQresultStatus(res) == PGRES_COMMAND_OK;
+                const std::string msg = ok ? "" : PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                if (!ok) {
+                    sendError(cb, k500InternalServerError, "DELETE_FAILED", msg);
+                    return;
+                }
+                Json::Value out;
+                out["deleted"] = true;
+                cb(jsonResponse(out));
+                return;
+            }
+
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                PQfinish(conn);
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            std::string err;
+            rep::Cron cron;
+            if (!validateSubscription(*body, err, cron)) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            const std::string paramsJson = Json::writeString(wb, (*body)["params"]);
+            const std::string recipientsJson = Json::writeString(wb, (*body)["recipients"]);
+            const std::time_t next = rep::nextRun(cron, std::time(nullptr));
+            const std::string nextText = std::to_string(next);
+            const std::string values[] = {id,
+                                          (*body).get("reportId", "").asString(),
+                                          (*body).get("title", (*body).get("reportId", "")).asString(),
+                                          (*body).get("cron", "").asString(),
+                                          paramsJson,
+                                          (*body).get("format", "csv").asString(),
+                                          recipientsJson,
+                                          (*body).get("enabled", true).asBool() ? "true" : "false",
+                                          nextText};
+            const char *params[9];
+            for (int i = 0; i < 9; ++i) params[i] = values[i].c_str();
+            const char *sql =
+                "UPDATE report_subscriptions SET report_id = $2, title = $3, cron = $4, params = $5::jsonb,"
+                " format = $6, recipients = (SELECT array_agg(value::text) FROM json_array_elements_text($7::json)),"
+                " enabled = $8::boolean, next_run_at = to_timestamp($9), updated_at = now()"
+                " WHERE id = $1 RETURNING id";
+            PGresult *res = PQexecParams(conn, sql, 9, nullptr, params, nullptr, nullptr, 0);
+            const bool ok = PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1;
+            const std::string msg = ok ? "" : PQerrorMessage(conn);
+            PQclear(res);
+            PQfinish(conn);
+            if (!ok) {
+                sendError(cb, k404NotFound, "SUBSCRIPTION_NOT_FOUND", msg.empty() ? "подписка не найдена" : msg);
+                return;
+            }
+            Json::Value out;
+            out["updated"] = true;
+            out["nextRunAt"] = nextText;
+            cb(jsonResponse(out));
+        },
+        {Put, Delete});
 
     // SSE: сервер сам сообщает об изменении шаблона (ADR-44).
     app().registerHandler(
@@ -2102,6 +2398,187 @@ int main() {
                 });
         },
         {Post});
+
+
+    // --- Планировщик и отправка рассылки (ADR-46) ----------------------------
+    // Одна подписка: собрать CSV через buildCsv (в цикле событий), отправить письма,
+    // записать результат в журнал и пересчитать next_run_at. Ошибки не бросают
+    // исключений — попадают в журнал и в lastError.
+    auto runSubscription = [buildCsv, smtpConfig, parseTextArray](long long id, bool manual) {
+        PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            LOG_ERROR << "рассылка: нет соединения с БД: " << PQerrorMessage(conn);
+            PQfinish(conn);
+            return;
+        }
+        const std::string idText = std::to_string(id);
+        const char *values[] = {idText.c_str()};
+        PGresult *res = PQexecParams(
+            conn,
+            "SELECT report_id, title, cron, params::text, recipients::text FROM report_subscriptions WHERE id = $1",
+            1, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
+            PQclear(res);
+            PQfinish(conn);
+            LOG_WARN << "рассылка: подписка " << id << " не найдена";
+            return;
+        }
+        const std::string reportId = PQgetvalue(res, 0, 0);
+        const std::string title = PQgetvalue(res, 0, 1);
+        const std::string cronExpr = PQgetvalue(res, 0, 2);
+        const std::string paramsText = PQgetvalue(res, 0, 3);
+        const auto recipients = parseTextArray(PQgetvalue(res, 0, 4));
+        PQclear(res);
+
+        Json::Value params;
+        {
+            Json::CharReaderBuilder reader;
+            std::string errs;
+            std::istringstream in(paramsText);
+            Json::parseFromStream(reader, in, &params, &errs);
+        }
+
+        const auto started = std::chrono::steady_clock::now();
+        bool ok = false;
+        std::string error;
+        int rows = 0;
+        int sent = 0;
+
+        // сборка файла идёт в цикле событий: buildCsv работает с пулом данных
+        auto promise = std::make_shared<std::promise<std::tuple<int, std::string, std::string, int>>>();
+        auto future = promise->get_future();
+        app().getLoop()->queueInLoop([buildCsv, reportId, params, promise]() {
+            buildCsv(reportId, "", params,
+                     [promise](int status, const std::string &code, const std::string &payload, int count) {
+                         promise->set_value({status, code, payload, count});
+                     });
+        });
+
+        if (future.wait_for(std::chrono::seconds(120)) != std::future_status::ready) {
+            error = "сборка файла не завершилась за 120 с";
+        } else {
+            auto [status, code, payload, count] = future.get();
+            if (status != 200) {
+                error = code + ": " + payload;
+            } else {
+                rows = count;
+                rep::MailConfig config = smtpConfig();
+                const std::string attachmentName = reportId + ".csv";
+                std::string failures;
+                for (const auto &address : recipients) {
+                    rep::MailMessage message;
+                    message.to = address;
+                    message.subject = "Отчёт: " + title;
+                    message.text = "Отчёт «" + title + "» во вложении.\nСформирован автоматически сервером отчётов.";
+                    message.attachmentName = attachmentName;
+                    message.attachmentType = "text/csv";
+                    message.attachmentData = payload;
+                    std::string mailErr;
+                    if (rep::sendMail(config, message, mailErr)) {
+                        ++sent;
+                    } else {
+                        failures += (failures.empty() ? "" : "; ") + address + ": " + mailErr;
+                    }
+                }
+                ok = failures.empty();
+                error = failures;
+            }
+        }
+
+        const auto elapsed = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count());
+
+        // журнал отправки
+        const std::string okText = ok ? "true" : "false";
+        const std::string rowsText = std::to_string(rows);
+        const std::string sentText = std::to_string(sent);
+        const std::string msText = std::to_string(elapsed);
+        const char *runValues[] = {idText.c_str(), okText.c_str(), error.c_str(), rowsText.c_str(),
+                                   sentText.c_str(), msText.c_str()};
+        PGresult *run = PQexecParams(
+            conn,
+            "INSERT INTO subscription_runs (subscription_id, finished_at, ok, error, rows, recipients, duration_ms)"
+            " VALUES ($1, now(), $2::boolean, NULLIF($3, ''), $4::int, $5::int, $6::int)",
+            6, nullptr, runValues, nullptr, nullptr, 0);
+        PQclear(run);
+
+        // следующий запуск: для ручного «отправить сейчас» расписание не сдвигаем раньше срока
+        rep::Cron cron;
+        std::string cronErr;
+        std::string nextText = "NULL";
+        std::time_t next = 0;
+        if (rep::parseCron(cronExpr, cron, cronErr)) next = rep::nextRun(cron, std::time(nullptr));
+        const std::string nextEpoch = std::to_string(next);
+        const char *markValues[] = {idText.c_str(), nextEpoch.c_str()};
+        PGresult *mark = PQexecParams(
+            conn,
+            "UPDATE report_subscriptions SET last_run_at = now(),"
+            " next_run_at = CASE WHEN $2::bigint > 0 THEN to_timestamp($2::bigint) ELSE next_run_at END"
+            " WHERE id = $1",
+            2, nullptr, markValues, nullptr, nullptr, 0);
+        PQclear(mark);
+        PQfinish(conn);
+
+        LOG_INFO << "рассылка: подписка " << id << " («" << title << "», " << reportId << "), строк " << rows
+                 << ", писем " << sent << "/" << recipients.size() << ", " << (ok ? "ок" : ("ошибка: " + error))
+                 << (manual ? " (вручную)" : "");
+    };
+
+    // «Отправить сейчас»: не ждём тика планировщика
+    app().registerHandler(
+        "/api/admin/subscriptions/{id}/run",
+        [adminEnabled, runSubscription](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+                                        const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            const auto numeric = std::all_of(id.begin(), id.end(), [](unsigned char c) { return std::isdigit(c); });
+            if (id.empty() || !numeric) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "некорректный id подписки");
+                return;
+            }
+            const long long subscriptionId = std::stoll(id);
+            std::thread([runSubscription, subscriptionId]() { runSubscription(subscriptionId, true); }).detach();
+            Json::Value out;
+            out["scheduled"] = true;
+            cb(jsonResponse(out));
+        },
+        {Post});
+
+    if (schedulerEnabled) {
+        std::thread([runSubscription]() {
+            PGconn *conn = nullptr;
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::seconds(30));
+                if (!conn || PQstatus(conn) != CONNECTION_OK) {
+                    if (conn) PQfinish(conn);
+                    conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+                    if (PQstatus(conn) != CONNECTION_OK) continue;
+                }
+                // атомарно «забираем» просроченные подписки: SKIP LOCKED не даёт
+                // двум процессам отправить одно и то же письмо дважды
+                PGresult *res = PQexec(
+                    conn,
+                    "UPDATE report_subscriptions SET last_run_at = now() WHERE id IN ("
+                    "  SELECT id FROM report_subscriptions"
+                    "   WHERE enabled AND (next_run_at IS NULL OR next_run_at <= now())"
+                    "   ORDER BY next_run_at NULLS FIRST LIMIT 10 FOR UPDATE SKIP LOCKED"
+                    ") RETURNING id");
+                if (PQresultStatus(res) == PGRES_TUPLES_OK) {
+                    const int count = PQntuples(res);
+                    std::vector<long long> ids;
+                    for (int i = 0; i < count; ++i) ids.push_back(std::stoll(PQgetvalue(res, i, 0)));
+                    PQclear(res);
+                    for (long long subscriptionId : ids) runSubscription(subscriptionId, false);
+                } else {
+                    PQclear(res);
+                }
+            }
+        }).detach();
+        LOG_INFO << "планировщик рассылки запущен (тик 30 с, SMTP "
+                 << (smtpHost.empty() ? std::string("не настроен") : smtpHost + ":" + std::to_string(smtpPort)) << ")";
+    }
 
     LOG_INFO << "listening on " << host << ":" << port;
     app().addListener(host, port).setThreadNum(threads).run();
