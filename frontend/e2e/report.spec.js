@@ -75,9 +75,9 @@ test('битый параметр показывает типизированн�
 
 test('диаграммы отрисованы на canvas', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-01-01&to=2026-03-31`)
-  // число блоков диаграмм задаётся шаблоном — проверяем наличие, а не магическое число
-  const charts = await page.locator('.chart canvas').count()
-  expect(charts).toBeGreaterThanOrEqual(2)
+  // число блоков диаграмм задаётся шаблоном — проверяем наличие, а не магическое число.
+  // Ждём отрисовку: canvas появляется после загрузки данных и инициализации ECharts.
+  await expect(page.locator('.chart canvas').nth(1)).toBeVisible()
 })
 
 test('сгруппированный отчёт: подписи групп и объединённые ячейки', async ({ page }) => {
@@ -859,4 +859,43 @@ test('серверная агрегация: GROUP BY в базе, на экра
   await page.goto('/report.html?report=sales-aggregate&from=2026-03-01&to=2026-03-10')
   await expect(page.locator('.meta')).toContainText('строк')
   await expect(page.locator('.rt-table tbody tr')).toHaveCount(6)
+})
+
+test('серверный экспорт .xlsx: файл совпадает с экраном и содержит параметры', async ({ request }) => {
+  const res = await request.post('/api/report/export.xlsx', {
+    data: { reportId: 'sales-aggregate', params: { from: '2026-03-01', to: '2026-03-10' } }
+  })
+  expect(res.ok()).toBeTruthy()
+  expect(res.headers()['content-type']).toContain('spreadsheetml.sheet')
+
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(await res.body())
+
+  // лист с данными и лист параметров
+  expect(wb.worksheets.length).toBe(2)
+  const ws = wb.worksheets[0]
+  expect(String(ws.getRow(1).getCell(1).value)).toBe('Категория')
+
+  // экспорт учитывает агрегацию блока: 5 групп + шапка, а не 2 746 детальных строк
+  expect(ws.rowCount).toBe(6)
+  const amounts = []
+  ws.eachRow((row, n) => {
+    if (n > 1 && typeof row.getCell(2).value === 'number') amounts.push(row.getCell(2).value)
+  })
+  expect(amounts.length).toBeGreaterThanOrEqual(4)
+  expect(amounts.reduce((a, b) => a + b, 0)).toBe(150977000) // сумма совпадает с экраном и golden
+
+  const params = wb.getWorksheet('Параметры')
+  expect(params).toBeTruthy()
+  const names = []
+  params.eachRow((row) => names.push(String(row.getCell(1).value || '')))
+  expect(names).toContain('from')
+  expect(names).toContain('to')
+
+  // неизвестный набор — 422
+  const bad = await request.post('/api/report/export.xlsx', {
+    data: { reportId: 'sales-aggregate', dataset: 'nope', params: {} }
+  })
+  expect(bad.status()).toBe(422)
 })

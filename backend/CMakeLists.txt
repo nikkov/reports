@@ -11,6 +11,7 @@ endif()
 
 find_package(Drogon CONFIG REQUIRED)
 find_package(Catch2 3 CONFIG REQUIRED)
+find_package(libxlsxwriter CONFIG REQUIRED)
 
 # Ядро без HTTP-слоя: тестируется Catch2 отдельно от сервера.
 add_library(rep_core STATIC
@@ -24,16 +25,18 @@ add_library(rep_core STATIC
 target_include_directories(rep_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(rep_core PUBLIC Drogon::Drogon)
 
-add_executable(rep src/main.cc)
-target_link_libraries(rep PRIVATE rep_core)
+add_executable(rep src/main.cc src/xlsx_export.cc)
+target_link_libraries(rep PRIVATE rep_core libxlsxwriter::libxlsxwriter)
 
 enable_testing()
 add_executable(rep_tests
+  src/xlsx_export.cc
   tests/aggregate_test.cc
+  tests/xlsx_test.cc
   tests/auth_test.cc
   tests/dataset_test.cc
   tests/queries_test.cc
   tests/params_test.cc
 )
-target_link_libraries(rep_tests PRIVATE rep_core Catch2::Catch2WithMain)
+target_link_libraries(rep_tests PRIVATE rep_core Catch2::Catch2WithMain libxlsxwriter::libxlsxwriter)
 add_test(NAME rep_tests COMMAND rep_tests)

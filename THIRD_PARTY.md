@@ -84,3 +84,4 @@ node scripts/licenses.mjs --json   # то же в JSON
 3. `REP_E2E=1 ./scripts/check.sh` — полная проверка.
 
 | `exceljs` | 4.4.0 | MIT | сборка .xlsx на клиенте |
+| `libxlsxwriter` | 1.1.8 | BSD-2-Clause | серверный экспорт .xlsx (ADR-38) |
