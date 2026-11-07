@@ -62,6 +62,17 @@ cmake --build backend/build -j"$(nproc)"
 | `scripts/conan` | обёртка Conan v1 с жёсткой проверкой версии |
 | `scripts/check.sh` | полная проверка: версия Conan, запрещённые компоненты, сборка+тесты, валидация шаблонов, фронтенд-тесты |
 
+## Проверки
+
+```bash
+./scripts/ci.sh              # сборка, ctest, валидация шаблонов, vitest, сборка фронтенда
+REP_E2E=1 ./scripts/ci.sh    # то же + Playwright (нужны backend и preview: ./scripts/demo.sh)
+```
+
+В репозитории есть `.github/workflows/check.yml`: бэкенд (Conan v1, cmake, ctest) и фронтенд
+(валидация, vitest, сборка) на push и pull request. e2e в CI не запускаются — им нужны живые
+сервисы и БД.
+
 ## Роль БД только-чтения
 
 Данные отчётов и справочники читаются под ролью `reporting_ro`, запись шаблонов — под основной.
