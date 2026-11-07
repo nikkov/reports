@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "id": "sales-aggregate",
   "title": "Продажи: агрегация на сервере",
   "description": "GROUP BY по категориям выполняется в PostgreSQL: 2 746 детальных строк превращаются в 5.",

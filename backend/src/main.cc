@@ -30,6 +30,7 @@
 #include "dataset.h"
 #include "smtp.h"
 #include "subscriptions.h"
+#include "template_migrate.h"
 #include "validate.h"
 #include "xlsx_export.h"
 #include "env.h"
@@ -336,8 +337,10 @@ int main() {
     // Полная проверка шаблона на сервере (ADR-45): те же правила, что в клиентском
     // validate.js, плюс SQL-гард — админский API не принимает шаблон, который
     // клиент просто не отправил на проверку.
-    auto validateTemplateFull = [maxTemplateBytes](const std::string &raw,
-                                                   const std::string &urlId) {
+    // Миграция до текущей версии + полная проверка (ADR-45, ADR-51).
+    // normalized (если передан) получает шаблон в актуальной версии — его и сохраняем.
+    auto prepareTemplate = [maxTemplateBytes](const std::string &raw, const std::string &urlId,
+                                              std::string *normalized, std::vector<std::string> *steps) {
         rep::ValidationResult result;
         if (raw.size() > maxTemplateBytes) {
             result.errors.push_back({"(корень)", "шаблон больше " + std::to_string(maxTemplateBytes) + " байт"});
@@ -351,7 +354,22 @@ int main() {
             result.errors.push_back({"(корень)", "шаблон не является JSON: " + parseErr});
             return result;
         }
+        const auto migration = rep::migrateTemplate(root);
+        if (!migration.ok) {
+            result.errors.push_back({"version", migration.error});
+            return result;
+        }
+        if (steps) *steps = migration.steps;
+        if (normalized) {
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "  ";
+            *normalized = Json::writeString(wb, root);
+        }
         return rep::validateTemplateJson(root, urlId);
+    };
+
+    auto validateTemplateFull = [&prepareTemplate](const std::string &raw, const std::string &urlId) {
+        return prepareTemplate(raw, urlId, nullptr, nullptr);
     };
 
     auto validateTemplate = [&validateTemplateFull](const std::string &raw, const std::string &urlId,
@@ -367,14 +385,32 @@ int main() {
     auto applyTemplateInMemory = [&templates, &templatesRaw, &templatesMutex, &templatesVersion,
                                   &resultCache](const std::string &id, const std::string &raw,
                                                 const std::string &title) {
+        // тело могло быть сохранено в старой версии формата (файл, старый ряд в БД):
+        // в память кладём уже мигрированное, чтобы клиент видел актуальный формат
+        std::string body = raw;
+        {
+            Json::CharReaderBuilder rb;
+            Json::Value doc;
+            std::string parseErr;
+            std::istringstream in(raw);
+            if (Json::parseFromStream(rb, in, &doc, &parseErr)) {
+                const auto migration = rep::migrateTemplate(doc);
+                if (!migration.ok) return false;
+                if (!migration.steps.empty()) {
+                    Json::StreamWriterBuilder wb;
+                    wb["indentation"] = "  ";
+                    body = Json::writeString(wb, doc);
+                }
+            }
+        }
         TemplateInfo info;
-        if (!parseTemplate(raw, id, info)) return false;
+        if (!parseTemplate(body, id, info)) return false;
         info.id = id;
         info.title = title;
         {
             std::lock_guard<std::mutex> lock(templatesMutex);
             templates[id] = info;
-            templatesRaw[id] = raw;
+            templatesRaw[id] = body;
         }
         notifyChange(id); // экраны с включённым live узнают об изменении сразу
         // новый шаблон — новые данные: старые результаты больше не валидны
@@ -457,7 +493,7 @@ int main() {
 
     app().registerHandler(
         "/api/reports",
-        [db, adminEnabled, maxTemplateBytes, &validateTemplate, &applyTemplateInMemory](
+        [db, adminEnabled, maxTemplateBytes, &validateTemplate, &prepareTemplate, &applyTemplateInMemory](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена: запустите сервис с REP_ADMIN=1");
@@ -484,12 +520,17 @@ int main() {
             if (!tpl.isMember("title") && body->isMember("title")) tpl["title"] = (*body)["title"];
             Json::StreamWriterBuilder wb;
             wb["indentation"] = "";
-            const std::string raw = Json::writeString(wb, tpl);
-            std::string err;
-            if (!validateTemplate(raw, id, err)) {
-                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", err);
+            std::string raw = Json::writeString(wb, tpl);
+            std::string normalized;
+            std::vector<std::string> steps;
+            const auto prepared = prepareTemplate(raw, id, &normalized, &steps);
+            if (!prepared.ok()) {
+                const auto &first = prepared.errors.front();
+                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
+                          first.path == "(корень)" ? first.message : first.path + ": " + first.message);
                 return;
             }
+            raw = normalized; // сохраняем в актуальной версии формата
             const std::string title = tpl.get("title", id).asString();
 
             runQuery(
@@ -520,9 +561,8 @@ int main() {
 
     app().registerHandler(
         "/api/reports/{id}",
-        [db, adminEnabled, &validateTemplate, &applyTemplateInMemory](const HttpRequestPtr &req,
-                                                                      std::function<void(const HttpResponsePtr &)> &&cb,
-                                                                      const std::string &id) {
+        [db, adminEnabled, &validateTemplate, &prepareTemplate, &applyTemplateInMemory](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb, const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -537,12 +577,16 @@ int main() {
             if (!tpl.isMember("title") && body->isMember("title")) tpl["title"] = (*body)["title"];
             Json::StreamWriterBuilder wb;
             wb["indentation"] = "";
-            const std::string raw = Json::writeString(wb, tpl);
-            std::string err;
-            if (!validateTemplate(raw, id, err)) {
-                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", err);
+            std::string normalized;
+            std::vector<std::string> steps;
+            const auto prepared = prepareTemplate(Json::writeString(wb, tpl), id, &normalized, &steps);
+            if (!prepared.ok()) {
+                const auto &first = prepared.errors.front();
+                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
+                          first.path == "(корень)" ? first.message : first.path + ": " + first.message);
                 return;
             }
+            const std::string raw = normalized;
             const std::string title = tpl.get("title", id).asString();
 
             const std::string tag = "$h" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "$";
@@ -826,15 +870,15 @@ int main() {
     // тело = draft, draft очищается, память обновляется (hot-reload без рестарта)
     app().registerHandler(
         "/api/admin/reports/{id}/publish",
-        [db, adminEnabled, &applyTemplateInMemory, &validateTemplate](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
-                                                   const std::string &id) {
+        [db, adminEnabled, &applyTemplateInMemory, &prepareTemplate](
+            const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb, const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
             }
             runQuery(
                 db, "SELECT draft::text AS draft FROM report_templates WHERE id = $1", {id},
-                [cb, db, id, &applyTemplateInMemory, &validateTemplate](const orm::Result &res) {
+                [cb, db, id, &applyTemplateInMemory, &prepareTemplate](const orm::Result &res) {
                     if (res.empty()) {
                         sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
                         return;
@@ -843,12 +887,16 @@ int main() {
                         sendError(cb, k409Conflict, "NO_DRAFT", "у отчёта нет черновика");
                         return;
                     }
-                    const std::string raw = res[0]["draft"].as<std::string>();
-                    std::string err;
-                    if (!validateTemplate(raw, id, err)) {
-                        sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", err);
+                    std::string normalized;
+                    std::vector<std::string> steps;
+                    const auto prepared = prepareTemplate(res[0]["draft"].as<std::string>(), id, &normalized, &steps);
+                    if (!prepared.ok()) {
+                        const auto &first = prepared.errors.front();
+                        sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
+                                  first.path == "(корень)" ? first.message : first.path + ": " + first.message);
                         return;
                     }
+                    const std::string raw = normalized;
                     Json::CharReaderBuilder builder;
                     Json::Value parsed;
                     std::string errs;

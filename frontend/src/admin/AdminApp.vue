@@ -249,6 +249,7 @@ import { json, jsonParseLinter } from '@codemirror/lang-json'
 import { lintGutter, linter } from '@codemirror/lint'
 import { api } from '../api/client.js'
 import validateTemplate from '../template/validate.js'
+import migrateTemplate from '../template/migrate.js'
 
 const ID_RE = /^[a-z][a-z0-9-]*$/
 
@@ -417,8 +418,10 @@ async function showTemplate(id, tpl) {
     draftAt.value = row.draftAt || ''
     try {
       const draft = await api.adminDraft(id)
-      setDoc(JSON.stringify(draft, null, 2)) // редактор синхронизируем через CodeMirror
-      rememberBody(id, draft)
+      const migratedDraft = migrateTemplate(draft)
+      const body = migratedDraft.ok ? migratedDraft.doc : draft
+      setDoc(JSON.stringify(body, null, 2)) // редактор синхронизируем через CodeMirror
+      rememberBody(id, body)
     } catch {
       /* черновик мог быть опубликован другим пользователем — остаёмся на опубликованной версии */
     }
@@ -431,13 +434,23 @@ async function loadTemplate(id, force = false) {
   }
   clearProblems()
   setStatus('')
+  // версия формата (ADR-51): старый шаблон показываем уже мигрированным,
+  // сохранится он тоже в актуальной версии
+  const migrated = (value) => {
+    const result = migrateTemplate(value)
+    if (!result.ok) throw Object.assign(new Error(result.error), { code: 'VERSION' })
+    if (result.steps.length) {
+      setStatus(`Шаблон переведён в версию ${result.toVersion}: ${result.steps.join('; ')}`, 'warn')
+    }
+    return result.doc
+  }
   try {
     let tpl = bodyCache.get(id)
     if (!tpl) {
       tpl = await api.adminTemplate(id)
       rememberBody(id, tpl)
     }
-    showTemplate(id, tpl)
+    showTemplate(id, migrated(tpl))
   } catch (e) {
     // Если сервер не отдаёт тело (устаревший in-memory снимок после создания/правки),
     // показываем последнюю версию, сохранённую этой админкой.

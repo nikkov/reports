@@ -962,6 +962,35 @@ test('drill-through с диаграммы: клик по столбцу откр
   await expect(page.locator('.meta')).toContainText('строк')
 })
 
+test('версия шаблона: старый мигрируется, слишком новый отклоняется', async ({ request }) => {
+  const v1 = {
+    version: 1,
+    id: 'migrate-e2e',
+    title: 'Миграция v1',
+    params: [],
+    datasets: { s: { sql: 'SELECT 1 AS x, 2 AS y' } },
+    blocks: [{ type: 'chart', dataKey: 's', xField: 'x', yField: 'y' }]
+  }
+  await request.delete('/api/reports/migrate-e2e')
+  expect((await request.post('/api/reports', { data: { id: 'migrate-e2e', body: v1 } })).ok()).toBeTruthy()
+
+  // сервер сохранил шаблон уже в версии 2 и дозаполнил chartType
+  const saved = await (await request.get('/api/reports/migrate-e2e')).json()
+  expect(saved.version).toBe(2)
+  expect(saved.blocks[0].chartType).toBe('bar')
+
+  // шаблон новее сервера не принимается, в сообщении — обе версии
+  const tooNew = await request.post('/api/reports', {
+    data: { id: 'migrate-v99', body: { ...v1, version: 99 } }
+  })
+  expect(tooNew.status()).toBe(422)
+  const error = await tooNew.json()
+  expect(error.error.message).toContain('99')
+  expect(error.error.message).toContain('до 2')
+
+  await request.delete('/api/reports/migrate-e2e')
+})
+
 test('пользователи: создание, вход, отключение, защита последнего админа', async ({ page, request, baseURL }) => {
   const login = 'e2e_analyst'
   const password = 'e2e-pass-123'

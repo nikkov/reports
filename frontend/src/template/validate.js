@@ -193,6 +193,11 @@ export function validateTemplate(template) {
     if (!Array.isArray(template?.blocks)) return { errors, warnings }
   }
 
+  // версия формата (ADR-51): старую поднимет сервер, новую он не поймёт
+  if (Number.isInteger(template.version) && template.version < 2) {
+    warnings.push({ path: 'version', message: `шаблон версии ${template.version}: при сохранении будет переведён в версию 2` })
+  }
+
   const params = template.params || []
 
   // Способы получения значений параметров (ADR-22): дата/время, статический набор, справочник из БД.

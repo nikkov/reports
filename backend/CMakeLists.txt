@@ -22,6 +22,7 @@ add_library(rep_core STATIC
   src/dataset.cc
   src/smtp.cc
   src/subscriptions.cc
+  src/template_migrate.cc
   src/validate.cc
   src/env.cc
   src/params.cc
@@ -40,6 +41,7 @@ add_executable(rep_tests
   tests/csv_test.cc
   tests/xlsx_test.cc
   tests/xlsx_group_test.cc
+  tests/template_migrate_test.cc
   tests/auth_test.cc
   tests/dataset_test.cc
   tests/queries_test.cc

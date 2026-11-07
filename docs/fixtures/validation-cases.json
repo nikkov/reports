@@ -42,9 +42,9 @@
       "errors": []
     },
     {
-      "name": "версия не 1",
+      "name": "версия новее сервера",
       "template": {
-        "version": 2,
+        "version": 99,
         "id": "parity-v",
         "title": "Т",
         "blocks": [
@@ -402,6 +402,33 @@
       "errors": [
         "blocks.0.drill.report"
       ]
+    },
+    {
+      "name": "версия 1 допустима (будет мигрирована)",
+      "template": {
+        "version": 1,
+        "id": "parity-v1",
+        "title": "T",
+        "params": [],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
     }
   ]
 }

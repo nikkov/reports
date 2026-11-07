@@ -1,5 +1,7 @@
 #include "validate.h"
 
+#include "template_migrate.h"
+
 #include <algorithm>
 #include <cctype>
 #include <map>
@@ -20,7 +22,10 @@ bool isParamName(const std::string &s) {
 }
 
 bool isIdName(const std::string &s) {
-    if (s.empty() || !std::islower(static_cast<unsigned char>(s[0]))) return false;
+    if (s.empty()) return false;
+    if (!std::islower(static_cast<unsigned char>(s[0])) && !std::isdigit(static_cast<unsigned char>(s[0]))) {
+        return false;
+    }
     for (char c : s) {
         if (!(std::islower(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) ||
               c == '_' || c == '-')) {
@@ -301,8 +306,10 @@ ValidationResult validateTemplateJson(const Json::Value &root,
 
     if (root["version"].isNull()) {
         addError(r, "version", "version обязателен");
-    } else if (!root["version"].isInt() || root["version"].asInt() != 1) {
-        addError(r, "version", "version должен быть 1");
+    } else if (!root["version"].isInt() || root["version"].asInt() < 1 ||
+               root["version"].asInt() > kCurrentTemplateVersion) {
+        addError(r, "version", "version должен быть от 1 до " +
+                                   std::to_string(kCurrentTemplateVersion) + " (старые версии мигрируются)");
     }
 
     const std::string id = asString(root["id"]);
@@ -310,7 +317,7 @@ ValidationResult validateTemplateJson(const Json::Value &root,
         addError(r, "id", "id обязателен");
     } else if (!isIdName(id)) {
         // id — ключ в URL и в БД: строчные буквы, цифры, '_' и '-'
-        addError(r, "id", "id должен соответствовать ^[a-z][a-z0-9_-]*$");
+        addError(r, "id", "id должен соответствовать ^[a-z0-9][a-z0-9_-]*$");
     } else if (!urlId.empty() && id != urlId) {
         addError(r, "id", "id в шаблоне не совпадает с URL");
     }
