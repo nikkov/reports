@@ -1,4 +1,4 @@
-# Report Server — версия 1.7.0
+# Report Server — версия 1.8.0
 
 Принята постановщиком 2026-11-05. Шаблон самодостаточен: оформление, форматы, правила подсветки,
 SQL наборов данных и SQL справочников живут в нём. Есть админка `/admin.html`, экспорт в Excel (числа с форматами, объединения, подытоги), печать
@@ -88,6 +88,10 @@ REP_E2E=1 ./scripts/ci.sh    # то же + Playwright (нужны backend и pre
 роли и пишет предупреждение в лог.
 
 ## Запуск демонстрации
+
+> Чистая сборка на пустом Conan-кэше требует `-s compiler.libcxx=libstdc++11`: без этого Conan v1
+> собирает jsoncpp/drogon со старым ABI `_GLIBCXX_USE_CXX11_ABI=0`, и линковка падает на
+> `Json::ValueIteratorBase::name`. `scripts/build.sh` и `scripts/ci.sh` передают этот флаг сами.
 
 ```bash
 ./scripts/build.sh     # conan install + cmake + ctest + npm ci + build (идемпотентно)

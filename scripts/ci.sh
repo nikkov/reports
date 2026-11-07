@@ -14,7 +14,7 @@ step() { echo; echo "=== $* ==="; }
 step "Бэкенд: зависимости"
 cd "$ROOT/backend"
 if [ ! -f build/DrogonConfig.cmake ]; then
-  ../scripts/conan install . -if build --build missing -s build_type=Release
+  ../scripts/conan install . -if build --build missing -s build_type=Release -s compiler.libcxx=libstdc++11
 else
   echo "зависимости уже установлены"
 fi

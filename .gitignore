@@ -27,3 +27,6 @@ fixtures/*.json
 .idea/
 .vscode/
 .DS_Store
+
+# артефакты чистой сборки (проверка воспроизводимости)
+backend/build-clean/
