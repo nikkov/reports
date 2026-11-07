@@ -111,7 +111,16 @@
       "xField": "category",
       "yField": "amount",
       "aggregate": "sum",
-      "width": "half"
+      "width": "half",
+      "drill": {
+        "report": "sales-drill",
+        "label": "Детали по категории",
+        "params": {
+          "category": "x",
+          "from": "param.from",
+          "to": "param.to"
+        }
+      }
     },
     {
       "type": "chart",
@@ -122,7 +131,17 @@
       "seriesField": "region",
       "yField": "amount",
       "aggregate": "sum",
-      "width": "full"
+      "width": "full",
+      "drill": {
+        "report": "sales-drill",
+        "label": "Детали по региону и категории",
+        "params": {
+          "category": "x",
+          "region": "series",
+          "from": "param.from",
+          "to": "param.to"
+        }
+      }
     }
   ],
   "folder": "Продажи",

@@ -914,6 +914,51 @@ test('серверный экспорт .xlsx: файл совпадает с э
   expect(bad.status()).toBe(422)
 })
 
+test('drill-through с диаграммы: клик по столбцу открывает детали с параметрами', async ({ page }) => {
+  await page.goto('/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.rt-table')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => !!window.__chart?.instance)).toBe(true)
+  await page.waitForTimeout(600)
+
+  // кликаем по центру первого столбца первой серии — настоящий клик мышью по canvas
+  const point = await page.evaluate(() => {
+    const ch = window.__chart.instance
+    const dom = ch.getDom()
+    dom.scrollIntoView({ block: 'center' })
+    const box = dom.getBoundingClientRect()
+    const zr = ch.getZr()
+    const opt = ch.getOption()
+    // ищем точку, где под курсором действительно столбец (а не ось или подпись)
+    for (let x = 60; x < ch.getWidth(); x += 6) {
+      for (let y = 24; y < ch.getHeight() - 40; y += 6) {
+        const el = zr.handler.findHover(x, y).target
+        if (el && el.type === 'rect') {
+          return {
+            x: box.left + x,
+            y: box.top + y,
+            categories: opt.xAxis[0].data,
+            seriesNames: opt.series.map((s) => s.name)
+          }
+        }
+      }
+    }
+    return null
+  })
+  expect(point, 'столбец должен быть кликабелен').toBeTruthy()
+
+  await page.mouse.click(point.x, point.y)
+  await expect(page).toHaveURL(/report=sales-drill/)
+  const url = new URL(page.url())
+  expect(point.categories).toContain(url.searchParams.get('category'))
+  expect(point.seriesNames).toContain(url.searchParams.get('region'))
+  expect(url.searchParams.get('from')).toBe('2026-03-01')
+  expect(url.searchParams.get('to')).toBe('2026-03-10')
+
+  // целевой отчёт действительно открылся на этих данных
+  await expect(page.locator('.rt-table')).toBeVisible()
+  await expect(page.locator('.meta')).toContainText('строк')
+})
+
 test('обновление по событию: публикация шаблона обновляет экран без опроса', async ({ page, request }) => {
   const id = 'live-e2e'
   const body = {

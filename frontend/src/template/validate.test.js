@@ -348,3 +348,41 @@ describe('автообновление (ADR-39)', () => {
     expect(res.warnings.map((w) => w.path)).not.toContain('refreshSeconds')
   })
 })
+
+describe('drill-through с диаграммы (ADR-43)', () => {
+  const withChart = (drill) => {
+    const t = base()
+    t.blocks = [
+      ...t.blocks,
+      {
+        type: 'chart',
+        dataKey: 'sales',
+        chartType: 'bar',
+        xField: 'region',
+        yField: 'amount',
+        drill
+      }
+    ]
+    return t
+  }
+
+  it('принимает x, series и param.<name>', () => {
+    const res = validateTemplate(withChart({ report: 'sales-drill', params: { region: 'x', category: 'series', from: 'param.from' } }))
+    expect(res.errors).toEqual([])
+  })
+
+  it('литерал допустим', () => {
+    expect(validateTemplate(withChart({ report: 'sales-drill', params: { region: 'Восток' } })).errors).toEqual([])
+  })
+
+  it('group.<field> в диаграмме — ошибка', () => {
+    const res = validateTemplate(withChart({ report: 'sales-drill', params: { region: 'group.region' } }))
+    expect(res.errors.map((e) => e.path)).toContain('blocks.3.drill.params.region')
+  })
+
+  it('без report — ошибка', () => {
+    const res = validateTemplate(withChart({ params: {} }))
+    expect(res.errors.map((e) => e.path)).toContain('blocks.3.drill.report')
+  })
+})
+

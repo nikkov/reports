@@ -61,7 +61,14 @@
           @drill="onDrill"
         />
 
-        <ChartBlock v-else-if="block.type === 'chart'" :block="block" :rows="rows" :styles="stylesFor(block)" />
+        <ChartBlock
+          v-else-if="block.type === 'chart'"
+          :block="block"
+          :rows="rows"
+          :styles="stylesFor(block)"
+          :drill="block.drill || null"
+          @drill="onChartDrill"
+        />
       </section>
     </template>
   </div>
@@ -394,6 +401,22 @@ function onDrill({ row, spec }) {
     } else {
       query.set(name, ref)
     }
+  }
+  window.location.href = 'report.html?' + query.toString()
+}
+
+// Drill-through с диаграммы (ADR-43): ссылки в params — категория точки (`x`),
+// имя серии (`series`), текущий параметр (`param.<name>`) или литерал.
+function onChartDrill({ spec, x, series }) {
+  if (!spec?.report) return
+  const query = new URLSearchParams()
+  query.set('report', spec.report)
+  for (const [name, ref] of Object.entries(spec.params || {})) {
+    if (typeof ref !== 'string') continue
+    if (ref === 'x') query.set(name, x ?? '')
+    else if (ref === 'series') query.set(name, series ?? '')
+    else if (ref.startsWith('param.')) query.set(name, paramValues[ref.slice(6)] ?? '')
+    else query.set(name, ref)
   }
   window.location.href = 'report.html?' + query.toString()
 }

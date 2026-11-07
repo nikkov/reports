@@ -282,19 +282,32 @@ export function validateTemplate(template) {
     errors.push({ path: 'tags', message: 'tags должен быть массивом строк' })
   }
 
-  // drill-through: переход в другой отчёт из подытога группы
+  // drill-through: из подытога таблицы (ADR-29) или из точки диаграммы (ADR-43)
   ;(template.blocks || []).forEach((block, i) => {
     if (!block.drill) return
-    if (block.type !== 'table') {
-      errors.push({ path: `blocks.${i}.drill`, message: 'drill допустим только в табличном блоке' })
+    const isTable = block.type === 'table'
+    const isChart = block.type === 'chart'
+    if (!isTable && !isChart) {
+      errors.push({ path: `blocks.${i}.drill`, message: 'drill допустим только в табличном блоке или диаграмме' })
       return
     }
     if (!block.drill.report) {
       errors.push({ path: `blocks.${i}.drill.report`, message: 'drill.report обязателен' })
     }
+    const allowed = isChart ? ['x', 'series'] : []
     for (const [name, ref] of Object.entries(block.drill.params || {})) {
-      if (typeof ref !== 'string' || !/^(group\.|param\.|[^$])/.test(ref)) {
-        errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'значение должно быть group.<field>, param.<name> или строкой' })
+      if (typeof ref !== 'string' || !ref) {
+        errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'значение должно быть строкой' })
+        continue
+      }
+      if (ref.startsWith('$')) {
+        errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'неизвестная ссылка: используйте ' + (isChart ? 'x, series, ' : '') + 'param.<name> или строку' })
+        continue
+      }
+      const known =
+        ref.startsWith('param.') || allowed.includes(ref) || (isTable && ref.startsWith('group.'))
+      if (!known && /^(group\.|x$|series$)/.test(ref)) {
+        errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'в диаграмме допустимы только x, series, param.<name> или литерал' })
       }
     }
   })

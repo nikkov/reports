@@ -404,6 +404,9 @@ export default {
             "countDistinct"
           ]
         },
+        "drill": {
+          "$ref": "#/$defs/drill"
+        },
         "title": {
           "type": "string"
         },

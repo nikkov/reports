@@ -1,7 +1,7 @@
 <template>
   <div class="chart-box">
     <h2 v-if="block.title">{{ block.title }}</h2>
-    <div ref="el" class="chart" :style="{ height: height + 'px' }"></div>
+    <div ref="el" class="chart" :class="{ drillable: !!drill }" :style="{ height: height + 'px' }"></div>
   </div>
 </template>
 
@@ -18,6 +18,8 @@ const props = defineProps({
   block: { type: Object, required: true },
   rows: { type: Array, required: true },
   height: { type: Number, default: 320 },
+  // drill-through (ADR-43): клик по точке ведёт в другой отчёт с параметрами из категории/серии
+  drill: { type: Object, default: null },
   // стили шаблона (ADR-23): из них берём цвет и шрифт подписей, осей и легенды
   styles: { type: Object, default: null }
 })
@@ -29,6 +31,7 @@ const textStyle = () => {
   return { color: colors.text, fontFamily: font.family, fontSize: font.size }
 }
 
+const emit = defineEmits(['drill'])
 const el = ref(null)
 let chart = null
 const nf = new Intl.NumberFormat('ru-RU')
@@ -85,14 +88,30 @@ function buildOption() {
   }
 }
 
+// ECharts не отдаёт «какой это ряд и категория» в событии: имя серии есть у bar/line,
+// у круговой — только подпись сектора.
+function onPointClick(event) {
+  if (!props.drill?.report) return
+  emit('drill', {
+    spec: props.drill,
+    x: event.name ?? null,
+    series: event.seriesName ?? null
+  })
+}
+
 function render() {
   if (!chart) return
   chart.setOption(buildOption(), true)
-  window.__chart = { type: props.block.chartType, series: chart.getOption().series?.length ?? 0 }
+  window.__chart = {
+    type: props.block.chartType,
+    series: chart.getOption().series?.length ?? 0,
+    instance: chart
+  }
 }
 
 onMounted(async () => {
   chart = echarts.init(el.value, null, { locale: 'RU' })
+  chart.on('click', onPointClick)
   render()
   await nextTick()
   chart.resize()
@@ -117,5 +136,8 @@ onBeforeUnmount(() => {
   font-size: 13px;
   margin: 0 0 6px;
   font-weight: 600;
+}
+.chart.drillable {
+  cursor: pointer;
 }
 </style>
