@@ -2,6 +2,11 @@
 #include <drogon/orm/DbClient.h>
 #include <drogon/orm/Result.h>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <libpq-fe.h>
 
 #include <algorithm>
@@ -2600,7 +2605,8 @@ int main() {
         },
         {Get});
 
-    if (schedulerEnabled) {
+    auto startScheduler = [schedulerEnabled, runSubscription, smtpHost, smtpPort, smtpFrom]() {
+        if (!schedulerEnabled) return;
         std::thread([runSubscription]() {
             PGconn *conn = nullptr;
             while (true) {
@@ -2610,8 +2616,6 @@ int main() {
                     conn = PQconnectdb(rep::connInfoFromEnv().c_str());
                     if (PQstatus(conn) != CONNECTION_OK) continue;
                 }
-                // атомарно «забираем» просроченные подписки: SKIP LOCKED не даёт
-                // двум процессам отправить одно и то же письмо дважды
                 PGresult *res = PQexec(
                     conn,
                     "UPDATE report_subscriptions SET last_run_at = now() WHERE id IN ("
@@ -2632,9 +2636,39 @@ int main() {
         }).detach();
         LOG_INFO << "планировщик рассылки запущен (тик 30 с, SMTP "
                  << (smtpHost.empty() ? std::string("не настроен") : smtpHost + ":" + std::to_string(smtpPort)) << ")";
-    }
+    };
 
     LOG_INFO << "listening on " << host << ":" << port;
-    app().addListener(host, port).setThreadNum(threads).run();
+    // Порт проверяем сами: drogon при занятом порте уходит в abort(), а на аварийном
+    // выходе с работающими потоками (планировщик) память уже рушилась — вместо
+    // понятного сообщения получали SIGABRT и «corrupted double-linked list».
+    {
+        const int probe = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (probe >= 0) {
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(static_cast<uint16_t>(port));
+            addr.sin_addr.s_addr = INADDR_ANY;
+            const bool busy = ::bind(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0;
+            ::close(probe);
+            if (busy) {
+                // _Exit: разрушать статику drogon на фатальном выходе нельзя — падало в SIGSEGV
+                LOG_ERROR << "порт " << port << " уже занят — сервер не запущен";
+                std::_Exit(1);
+            }
+        }
+    }
+
+    startScheduler();
+
+    try {
+        app().addListener(host, port).setThreadNum(threads).run();
+    } catch (const std::exception &e) {
+        // Планировщик и SMTP-поток живут отдельно от drogon: при фатальной ошибке
+        // (например, порт занят) разрушать статику под работающими потоками нельзя —
+        // это уже приводило к «corrupted double-linked list» вместо внятного выхода.
+        LOG_ERROR << "сервер остановлен: " << e.what();
+        std::_Exit(1);
+    }
     return 0;
 }
