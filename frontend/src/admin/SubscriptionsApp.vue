@@ -21,7 +21,8 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="s in items" :key="s.id" :class="{ off: !s.enabled }" :data-sub="s.id">
+        <template v-for="s in items" :key="s.id">
+        <tr :class="{ off: !s.enabled }" :data-sub="s.id">
           <td>
             <b>{{ s.title }}</b>
             <div class="muted small">{{ s.reportId }} · {{ s.format }}</div>
@@ -36,12 +37,46 @@
           </td>
           <td class="actions">
             <button type="button" class="tool" :disabled="busy === s.id" @click="run(s)">Отправить сейчас</button>
+            <button type="button" class="tool" @click="openJournal(s)">
+              {{ journalId === s.id ? 'Скрыть журнал' : 'Журнал' }}
+            </button>
             <button type="button" class="tool" :disabled="busy === s.id" @click="toggle(s)">
               {{ s.enabled ? 'Выключить' : 'Включить' }}
             </button>
             <button type="button" class="tool danger" :disabled="busy === s.id" @click="remove(s)">Удалить</button>
           </td>
         </tr>
+        <tr v-if="journalId === s.id" class="journal-row">
+          <td colspan="6">
+            <div class="journal">
+              <div v-if="journalLoading" class="muted small">загружаю журнал…</div>
+              <table v-else-if="journal.length" class="runs">
+                <thead>
+                  <tr>
+                    <th>Когда</th>
+                    <th>Результат</th>
+                    <th>Строк</th>
+                    <th>Писем</th>
+                    <th>Длительность</th>
+                    <th>Ошибка</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(r, i) in journal" :key="i" :class="{ bad: !r.ok }">
+                    <td class="small">{{ formatDate(r.startedAt) }}</td>
+                    <td class="small">{{ r.ok ? 'отправлено' : 'ошибка' }}</td>
+                    <td class="small">{{ r.rows }}</td>
+                    <td class="small">{{ r.recipients }}</td>
+                    <td class="small">{{ r.durationMs }} мс</td>
+                    <td class="small err">{{ r.error || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-else class="muted small">Отправок ещё не было.</p>
+            </div>
+          </td>
+        </tr>
+        </template>
       </tbody>
     </table>
     <p v-else class="muted">Подписок пока нет — добавьте первую ниже.</p>
@@ -96,6 +131,9 @@ const error = ref(null)
 const notice = ref(null)
 const busy = ref(null)
 const saving = ref(false)
+const journalId = ref(null)
+const journal = ref([])
+const journalLoading = ref(false)
 
 const emptyForm = () => ({ id: null, reportId: '', title: '', cron: '0 9 * * 1-5', recipients: '', params: '{}', enabled: true })
 const form = reactive(emptyForm())
@@ -165,18 +203,57 @@ async function save() {
   }
 }
 
+async function loadJournal(id) {
+  journalLoading.value = true
+  try {
+    journal.value = (await api.subscriptionRuns(id)).items || []
+  } catch (e) {
+    error.value = e.message
+    journal.value = []
+  } finally {
+    journalLoading.value = false
+  }
+}
+
+async function openJournal(s) {
+  if (journalId.value === s.id) {
+    journalId.value = null
+    journal.value = []
+    return
+  }
+  journalId.value = s.id
+  await loadJournal(s.id)
+}
+
 async function run(s) {
   busy.value = s.id
   error.value = null
   notice.value = null
   try {
+    const before = journalId.value === s.id ? journal.value.length : 0
+    if (journalId.value !== s.id) {
+      journalId.value = s.id
+      await loadJournal(s.id)
+    }
     await api.runSubscription(s.id)
-    notice.value = 'Отправка запущена — статус появится в журнале через несколько секунд'
-    setTimeout(load, 3000)
+    notice.value = 'Отправка запущена — жду результат в журнале…'
+    // сервер отправляет в отдельном потоке: опрашиваем журнал, пока не появится новая запись
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise((r) => setTimeout(r, 1200))
+      await loadJournal(s.id)
+      if (journal.value.length > before) {
+        const latest = journal.value[0]
+        notice.value = latest.ok
+          ? `Отправлено: строк ${latest.rows}, писем ${latest.recipients}, ${latest.durationMs} мс`
+          : `Отправка не удалась: ${latest.error}`
+        break
+      }
+    }
+    await load()
   } catch (e) {
     error.value = e.message
   } finally {
-    busy.value = null
+    busy.value = false
   }
 }
 
@@ -291,6 +368,23 @@ h2 {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+.journal-row td {
+  background: #f7f9fb;
+}
+.runs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.runs th,
+.runs td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid #e6ebf0;
+}
+.runs tr.bad td {
+  color: #b3261e;
 }
 .tool {
   padding: 5px 10px;

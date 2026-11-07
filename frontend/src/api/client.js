@@ -81,6 +81,7 @@ export const api = {
     request(`/api/admin/subscriptions/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteSubscription: (id) => request(`/api/admin/subscriptions/${id}`, { method: 'DELETE' }),
   runSubscription: (id) => request(`/api/admin/subscriptions/${id}/run`, { method: 'POST' }),
+  subscriptionRuns: (id, limit = 20) => request(`/api/admin/subscriptions/${id}/runs?limit=${limit}`),
   // сырой шаблон для редактора: с SQL справочников, в отличие от публичного /api/reports/{id}
   adminTemplate: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`),
   adminHistory: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}/history`),

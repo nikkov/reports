@@ -2546,6 +2546,60 @@ int main() {
         },
         {Post});
 
+    // Журнал отправок подписки: что именно ушло, сколько строк и писем, когда и с какой ошибкой.
+    app().registerHandler(
+        "/api/admin/subscriptions/{id}/runs",
+        [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
+                       const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            const std::string limitText = req->getParameter("limit").empty() ? "20" : req->getParameter("limit");
+            const char *values[] = {id.c_str(), limitText.c_str()};
+            PGresult *res = PQexecParams(
+                conn,
+                "SELECT to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
+                " to_char(finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
+                " ok, coalesce(error, ''), coalesce(rows, 0), coalesce(recipients, 0), coalesce(duration_ms, 0)"
+                " FROM subscription_runs WHERE subscription_id = $1::bigint"
+                " ORDER BY started_at DESC LIMIT LEAST($2::int, 100)",
+                2, nullptr, values, nullptr, nullptr, 0);
+            if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                sendError(cb, k500InternalServerError, "QUERY_FAILED", msg);
+                return;
+            }
+            Json::Value items(Json::arrayValue);
+            const int count = PQntuples(res);
+            for (int i = 0; i < count; ++i) {
+                Json::Value run;
+                run["startedAt"] = PQgetvalue(res, i, 0);
+                run["finishedAt"] = PQgetisnull(res, i, 1) ? "" : PQgetvalue(res, i, 1);
+                run["ok"] = std::string(PQgetvalue(res, i, 2)) == "t";
+                run["error"] = PQgetvalue(res, i, 3);
+                run["rows"] = std::stoi(PQgetvalue(res, i, 4));
+                run["recipients"] = std::stoi(PQgetvalue(res, i, 5));
+                run["durationMs"] = std::stoi(PQgetvalue(res, i, 6));
+                items.append(run);
+            }
+            PQclear(res);
+            PQfinish(conn);
+            Json::Value out;
+            out["items"] = items;
+            cb(jsonResponse(out));
+        },
+        {Get});
+
     if (schedulerEnabled) {
         std::thread([runSubscription]() {
             PGconn *conn = nullptr;

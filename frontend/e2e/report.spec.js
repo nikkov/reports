@@ -224,9 +224,14 @@ test('диаграмма получает агрегаты из того же д
   // ждём именно второй canvas: диаграммы рисуются после загрузки данных
   await expect(page.locator('.chart canvas').nth(1)).toBeVisible()
 
+  // данные приходят асинхронно: ждём, пока у диаграммы появятся серии, а не читаем один раз
   const info = await page.evaluate(() => window.__chart)
   expect(['line', 'bar', 'pie']).toContain(info.type)
-  expect(info.series).toBeGreaterThanOrEqual(1)
+  await expect
+    .poll(() => page.evaluate(() => window.__chart?.instance?.getOption?.().series?.length ?? 0), {
+      timeout: 5000
+    })
+    .toBeGreaterThanOrEqual(1)
 
   // canvas получает реальный размер после раскладки: ждём, а не проверяем один раз
   await expect
@@ -989,11 +994,17 @@ test('рассылка: подписки CRUD, cron и адреса провер
   expect(item.enabled).toBe(false)
   expect(item.nextRunAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
 
-  // страница рассылки показывает подписку и форму
+  // журнал отправок доступен и пуст, пока не было запусков
+  const runs = await (await request.get(`/api/admin/subscriptions/${id}/runs`)).json()
+  expect(Array.isArray(runs.items)).toBe(true)
+
+  // страница рассылки показывает подписку, форму и журнал
   await page.goto('/subscriptions.html')
   await expect(page.locator('h1')).toHaveText('Рассылка отчётов')
   await expect(page.locator(`tr[data-sub="${id}"]`)).toContainText('e2e рассылка')
   await expect(page.locator('form.form')).toBeVisible()
+  await page.locator(`tr[data-sub="${id}"]`).getByRole('button', { name: 'Журнал' }).click()
+  await expect(page.locator('table.runs, .journal')).toBeVisible()
 
   const removed = await request.delete(`/api/admin/subscriptions/${id}`)
   expect(removed.ok()).toBeTruthy()
