@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "auth.h"
 #include "cache.h"
 #include "env.h"
 #include "params.h"
@@ -230,6 +231,9 @@ int main() {
     // --- Администрирование отчётов (ADR-26) ---
     // Включается только REP_ADMIN=1; иначе маршруты записи отвечают 404.
     const bool adminEnabled = rep::envOr("REP_ADMIN", "0") == "1";
+    // Аутентификация (ADR-34): по умолчанию выключена, включает REP_AUTH=1
+    const bool authEnabled = rep::envOr("REP_AUTH", "0") == "1";
+    const int sessionTtlHours = std::stoi(rep::envOr("REP_SESSION_TTL_HOURS", "12"));
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
     std::mutex templatesMutex;
     // Версия шаблонов: входит в ключ кэша, поэтому публикация/удаление отчёта
@@ -844,6 +848,189 @@ int main() {
                 [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "PUBLISH_FAILED", describeError(e)); });
         },
         {Post});
+
+
+    // --- Аутентификация и роли (ADR-34) -------------------------------------
+    auto unauthorized = [](const std::string &msg) {
+        auto resp = HttpResponse::newHttpResponse();
+        Json::Value body;
+        body["error"]["code"] = "UNAUTHORIZED";
+        body["error"]["message"] = msg;
+        Json::StreamWriterBuilder wb;
+        wb["indentation"] = "";
+        resp->setStatusCode(k401Unauthorized);
+        resp->setContentTypeCode(CT_APPLICATION_JSON);
+        resp->setBody(Json::writeString(wb, body));
+        return resp;
+    };
+    auto forbidden = [](const std::string &msg) {
+        auto resp = HttpResponse::newHttpResponse();
+        Json::Value body;
+        body["error"]["code"] = "FORBIDDEN";
+        body["error"]["message"] = msg;
+        Json::StreamWriterBuilder wb;
+        wb["indentation"] = "";
+        resp->setStatusCode(k403Forbidden);
+        resp->setContentTypeCode(CT_APPLICATION_JSON);
+        resp->setBody(Json::writeString(wb, body));
+        return resp;
+    };
+
+    // Проверка сессии до маршрутизации: один раз на запрос, роль зависит от метода и пути.
+    if (authEnabled) {
+        app().registerPreRoutingAdvice(
+            [db, &unauthorized, &forbidden](const HttpRequestPtr &req, AdviceCallback &&respond,
+                                            AdviceChainCallback &&next) {
+                const rep::Role need = rep::requiredRole(std::string(req->methodString()), req->path());
+                if (need == rep::Role::Public) {
+                    next();
+                    return;
+                }
+                const std::string token = req->getCookie("rep_session");
+                if (token.empty()) {
+                    respond(unauthorized("нужна авторизация"));
+                    return;
+                }
+                // callbacks копируем, а не перемещаем: они нужны обеим веткам (успех и ошибка)
+                runQuery(
+                    db,
+                    "SELECT u.id, u.login, u.role FROM sessions s JOIN users u ON u.id = s.user_id "
+                    "WHERE s.token = $1 AND s.expires_at > now()",
+                    {token},
+                    [req, need, &unauthorized, &forbidden, respond, next](const orm::Result &res) {
+                        if (res.empty()) {
+                            respond(unauthorized("сессия истекла или не найдена"));
+                            return;
+                        }
+                        const std::string role = res[0]["role"].as<std::string>();
+                        if (!rep::roleAtLeast(role, need)) {
+                            respond(forbidden("недостаточно прав: нужна роль выше"));
+                            return;
+                        }
+                        req->attributes()->insert("session_role", role);
+                        req->attributes()->insert("session_login", res[0]["login"].as<std::string>());
+                        next();
+                    },
+                    [&unauthorized, respond](const std::exception_ptr &) {
+                        respond(unauthorized("не удалось проверить сессию"));
+                    });
+            });
+    }
+
+    app().registerHandler(
+        "/api/auth/login",
+        [db, authEnabled, sessionTtlHours](const HttpRequestPtr &req,
+                                           std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!authEnabled) {
+                sendError(cb, k404NotFound, "AUTH_DISABLED", "аутентификация выключена (REP_AUTH=0)");
+                return;
+            }
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON {login, password}");
+                return;
+            }
+            const std::string login = (*body).get("login", "").asString();
+            const std::string password = (*body).get("password", "").asString();
+            if (login.empty() || password.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужны login и password");
+                return;
+            }
+            runQuery(
+                db, "SELECT id, login, password_salt, password_hash, role FROM users WHERE login = $1", {login},
+                [db, cb, login, password, sessionTtlHours](const orm::Result &res) {
+                    if (res.empty() ||
+                        !rep::verifyPassword(password, res[0]["password_salt"].as<std::string>(),
+                                             res[0]["password_hash"].as<std::string>())) {
+                        sendError(cb, k401Unauthorized, "BAD_CREDENTIALS", "неверный логин или пароль");
+                        return;
+                    }
+                    const long userId = res[0]["id"].as<long long>();
+                    const std::string role = res[0]["role"].as<std::string>();
+                    const std::string token = rep::randomHex(32);
+                    runQuery(
+                        db,
+                        "INSERT INTO sessions (token, user_id, expires_at) "
+                        "VALUES ($1, $2, now() + ($3 || ' hours')::interval)",
+                        {token, std::to_string(userId), std::to_string(sessionTtlHours)},
+                        [cb, token, login, role, sessionTtlHours](const orm::Result &) {
+                            Cookie cookie("rep_session", token);
+                            cookie.setPath("/");
+                            cookie.setHttpOnly(true);
+                            cookie.setSameSite(Cookie::SameSite::kLax);
+                            cookie.setMaxAge(sessionTtlHours * 3600);
+                            cookie.setSecure(false); // стенд локальный, https не используется
+
+                            Json::Value out;
+                            out["login"] = login;
+                            out["role"] = role;
+                            auto resp = jsonResponse(out);
+                            resp->addCookie(cookie);
+                            cb(resp);
+                        },
+                        [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "LOGIN_FAILED", describeError(e)); });
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "LOGIN_FAILED", describeError(e)); });
+        },
+        {Post});
+
+    app().registerHandler(
+        "/api/auth/logout",
+        [db, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            const std::string token = req->getCookie("rep_session");
+            auto finish = [cb]() {
+                Cookie cookie("rep_session", "");
+                cookie.setPath("/");
+                cookie.setMaxAge(0);
+                Json::Value out;
+                out["logout"] = true;
+                auto resp = jsonResponse(out);
+                resp->addCookie(cookie);
+                cb(resp);
+            };
+            if (!authEnabled || token.empty()) {
+                finish();
+                return;
+            }
+            runQuery(db, "DELETE FROM sessions WHERE token = $1", {token},
+                     [finish](const orm::Result &) { finish(); },
+                     [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "LOGOUT_FAILED", describeError(e)); });
+        },
+        {Post});
+
+    app().registerHandler(
+        "/api/auth/me",
+        [db, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!authEnabled) {
+                Json::Value out;
+                out["auth"] = false;
+                cb(jsonResponse(out));
+                return;
+            }
+            const std::string token = req->getCookie("rep_session");
+            if (token.empty()) {
+                sendError(cb, k401Unauthorized, "UNAUTHORIZED", "нужна авторизация");
+                return;
+            }
+            runQuery(
+                db,
+                "SELECT u.login, u.role FROM sessions s JOIN users u ON u.id = s.user_id "
+                "WHERE s.token = $1 AND s.expires_at > now()",
+                {token},
+                [cb](const orm::Result &res) {
+                    if (res.empty()) {
+                        sendError(cb, k401Unauthorized, "UNAUTHORIZED", "сессия истекла");
+                        return;
+                    }
+                    Json::Value out;
+                    out["auth"] = true;
+                    out["login"] = res[0]["login"].as<std::string>();
+                    out["role"] = res[0]["role"].as<std::string>();
+                    cb(jsonResponse(out));
+                },
+                [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "ME_FAILED", describeError(e)); });
+        },
+        {Get});
 
     app().registerHandler(
         "/api/health",

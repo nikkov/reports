@@ -35,7 +35,8 @@ export default defineConfig({
         list: resolve(__dirname, 'index.html'),
         spike: resolve(__dirname, 'spike.html'),
         report: resolve(__dirname, 'report.html'),
-        admin: resolve(__dirname, 'admin.html')
+        admin: resolve(__dirname, 'admin.html'),
+        login: resolve(__dirname, 'login.html')
       }
     }
   }

@@ -1,4 +1,9 @@
 import { createApp } from 'vue'
 import ReportViewer from './ReportViewer.vue'
+import { ensureSession } from '../auth/session.js'
 
-createApp(ReportViewer).mount('#app')
+async function boot() {
+  const session = await ensureSession()
+  if (session) createApp(ReportViewer, { session }).mount('#app')
+}
+boot()

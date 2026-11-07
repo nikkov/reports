@@ -30,6 +30,8 @@ fi
 
 # Админка отчётов (ADR-26) включена на локальном стенде; наружу не выставлять.
 export REP_ADMIN="${REP_ADMIN:-1}"
+# Вход и роли (ADR-34). Пользователи создаются scripts/auth-init.sh.
+export REP_AUTH="${REP_AUTH:-1}"
 echo "== бэкенд =="
 ( cd "$ROOT" && REP_PORT="$PORT" ./backend/build/rep > /tmp/rep-backend.log 2>&1 ) &
 BACK_PID=$!

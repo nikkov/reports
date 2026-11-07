@@ -30,3 +30,6 @@ fixtures/*.json
 
 # артефакты чистой сборки (проверка воспроизводимости)
 backend/build-clean/
+
+# состояния входа для e2e
+frontend/.auth/

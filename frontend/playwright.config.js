@@ -4,6 +4,8 @@ import { defineConfig } from '@playwright/test'
 // локально Playwright переиспользует уже запущенный Vite.
 export default defineConfig({
   testDir: './e2e',
+  // вход выполняется один раз за прогон; cookie admin подставляется всем тестам
+  globalSetup: './e2e/global-setup.js',
   timeout: 30_000,
   retries: 0,
   workers: 1,
@@ -14,6 +16,7 @@ export default defineConfig({
   },
   use: {
     baseURL: process.env.REP_E2E_BASE || 'http://127.0.0.1:5173',
+    storageState: '.auth/admin.json',
     trace: 'off'
   }
 })

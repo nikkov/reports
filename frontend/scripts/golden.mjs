@@ -20,14 +20,30 @@ const psql = (sql) =>
     .split('\n')
     .filter(Boolean)
 
+// Вход (ADR-34): golden ходит в API как админ; при REP_AUTH=0 вход не нужен.
+async function authHeaders() {
+  const password = process.env.REP_ADMIN_PASSWORD || ''
+  if (!password) return {}
+  const res = await fetch(`${API}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: process.env.REP_ADMIN_LOGIN || 'admin', password })
+  })
+  if (res.status === 404) return {}
+  if (!res.ok) throw new Error(`вход для golden: ${res.status}`)
+  const cookie = (res.headers.get('set-cookie') || '').split(';')[0]
+  return cookie ? { Cookie: cookie } : {}
+}
+
 async function main() {
   console.log(`отчёт ${REPORT}, период ${FROM}..${TO}`)
 
-  const template = await (await fetch(`${API}/api/reports/${REPORT}`)).json()
+  const auth = await authHeaders()
+  const template = await (await fetch(`${API}/api/reports/${REPORT}`, { headers: auth })).json()
   const data = await (
     await fetch(`${API}/api/report/data`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({ reportId: REPORT, params: { from: FROM, to: TO } })
     })
   ).json()

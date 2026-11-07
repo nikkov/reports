@@ -75,3 +75,21 @@ CREATE TABLE report_templates (
     draft            jsonb,                       -- черновик правки (ADR-31)
     draft_updated_at timestamptz
 );
+-- Пользователи и сессии (ADR-34). Пароль хранится как PBKDF2-HMAC-SHA256 с солью.
+CREATE TABLE IF NOT EXISTS users (
+    id            serial      PRIMARY KEY,
+    login         text        NOT NULL UNIQUE,
+    password_salt text        NOT NULL,
+    password_hash text        NOT NULL,
+    role          text        NOT NULL CHECK (role IN ('admin', 'author', 'viewer')),
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token      text        PRIMARY KEY,
+    user_id    integer     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions (expires_at);
