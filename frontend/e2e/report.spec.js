@@ -974,13 +974,21 @@ test('обновление по событию: публикация шабло�
   expect((await request.post('/api/reports', { data: { id, body } })).ok()).toBeTruthy()
 
   const calls = []
+  const streams = []
   page.on('request', (req) => {
     if (req.url().includes('/api/report/data')) calls.push(Date.now())
+    if (req.url().includes('/api/report/changes')) streams.push('long-poll')
+  })
+  page.on('response', (res) => {
+    if (res.url().includes('/api/report/events')) streams.push(res.headers()['content-type'])
   })
 
   await page.goto(`/report.html?report=${id}`)
   await expect(page.locator('.rt-table')).toBeVisible()
   await expect(page.locator('.refresh')).toContainText('обновление по событию')
+  // транспорт — SSE, а не удержание запроса
+  await expect.poll(() => streams.some((s) => s.includes('text/event-stream'))).toBe(true)
+  expect(streams).not.toContain('long-poll')
   await page.waitForTimeout(1500)
   expect(calls.length).toBe(1) // опроса по таймеру нет
 

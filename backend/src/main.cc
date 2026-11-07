@@ -50,37 +50,58 @@ void sendError(const std::function<void(const HttpResponsePtr &)> &cb, HttpStatu
     cb(jsonResponse(errorBody(code, message), status));
 }
 
-// --- Обновление по событию (ADR-42) -------------------------------------
-// Клиент держит запрос /api/report/changes до 20 с; публикация или откат шаблона
-// будит ждущих и сразу отдаёт changed=true — экран обновляется без опроса по таймеру.
+// --- Обновление по событию (ADR-44) -------------------------------------
+// Одно SSE-соединение на зрителя: сервер сам пишет в потоке, когда шаблон
+// опубликован или откатан, и раз в 15 с шлёт комментарий-пульс, чтобы прокси
+// не закрывали простой. Клиент переподключается сам (EventSource).
 namespace {
 
-struct ChangeWaiter {
-    std::function<void(const HttpResponsePtr &)> cb;
-    trantor::TimerId timer;
+struct SseClient {
+    std::shared_ptr<drogon::ResponseStream> stream;
 };
 
-std::mutex changesMutex;
-std::map<std::string, std::vector<ChangeWaiter>> changeWaiters;
+std::mutex sseMutex;
+std::map<std::string, std::map<uint64_t, std::shared_ptr<drogon::ResponseStream>>> sseClients;
+std::atomic<uint64_t> sseNextId{1};
+std::atomic<bool> sseHeartbeatStarted{false};
+
+void sseWrite(const std::shared_ptr<drogon::ResponseStream> &stream, const std::string &payload) {
+    if (!stream) return;
+    stream->send(payload);
+}
+
+// пульс: держит соединение живым и заодно убирает отвалившихся клиентов
+void sseHeartbeat() {
+    std::lock_guard<std::mutex> lock(sseMutex);
+    for (auto report = sseClients.begin(); report != sseClients.end();) {
+        for (auto client = report->second.begin(); client != report->second.end();) {
+            if (!client->second->send(": ping\n\n")) {
+                client = report->second.erase(client);
+            } else {
+                ++client;
+            }
+        }
+        if (report->second.empty()) {
+            report = sseClients.erase(report);
+        } else {
+            ++report;
+        }
+    }
+}
 
 } // namespace
 
 void notifyChange(const std::string &reportId) {
-    std::vector<ChangeWaiter> waiters;
+    std::vector<std::shared_ptr<drogon::ResponseStream>> targets;
     {
-        std::lock_guard<std::mutex> lock(changesMutex);
-        const auto it = changeWaiters.find(reportId);
-        if (it == changeWaiters.end()) return;
-        waiters = std::move(it->second);
-        changeWaiters.erase(it);
+        std::lock_guard<std::mutex> lock(sseMutex);
+        const auto it = sseClients.find(reportId);
+        if (it == sseClients.end()) return;
+        for (const auto &kv : it->second) targets.push_back(kv.second);
     }
-    for (auto &w : waiters) {
-        app().getLoop()->invalidateTimer(w.timer);
-        Json::Value out;
-        out["changed"] = true;
-        out["reportId"] = reportId;
-        w.cb(jsonResponse(out));
-    }
+    const std::string payload =
+        "event: change\ndata: {\"reportId\":\"" + reportId + "\"}\n\n";
+    for (const auto &stream : targets) sseWrite(stream, payload);
 }
 
 // Тип колонки для клиента: берём из метаданных запроса, иначе — по виду значения (ADR: см. 1.2).
@@ -1581,37 +1602,35 @@ int main() {
         },
         {Post});
 
-    // Long-poll: сервер сам сообщает об изменении шаблона (ADR-42).
+    // SSE: сервер сам сообщает об изменении шаблона (ADR-44).
     app().registerHandler(
-        "/api/report/changes",
+        "/api/report/events",
         [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const std::string reportId = req->getParameter("report");
             if (reportId.empty()) {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен параметр report");
                 return;
             }
-            auto done = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(cb));
-            auto tid = std::make_shared<trantor::TimerId>(0);
-            *tid = app().getLoop()->runAfter(20.0, [reportId, done, tid]() {
-                {
-                    std::lock_guard<std::mutex> lock(changesMutex);
-                    const auto it = changeWaiters.find(reportId);
-                    if (it != changeWaiters.end()) {
-                        auto &list = it->second;
-                        list.erase(std::remove_if(list.begin(), list.end(),
-                                                  [&](const ChangeWaiter &w) { return w.timer == *tid; }),
-                                   list.end());
-                        if (list.empty()) changeWaiters.erase(it);
+
+            const uint64_t clientId = sseNextId++;
+            auto resp = HttpResponse::newAsyncStreamResponse(
+                [reportId, clientId](ResponseStreamPtr stream) {
+                    auto shared = std::shared_ptr<drogon::ResponseStream>(std::move(stream));
+                    sseWrite(shared, ": connected\n\n");
+                    {
+                        std::lock_guard<std::mutex> lock(sseMutex);
+                        sseClients[reportId][clientId] = shared;
                     }
-                }
-                Json::Value out;
-                out["changed"] = false;
-                (*done)(jsonResponse(out));
-            });
-            {
-                std::lock_guard<std::mutex> lock(changesMutex);
-                changeWaiters[reportId].push_back({*done, *tid});
-            }
+                    if (!sseHeartbeatStarted.exchange(true)) {
+                        app().getLoop()->runEvery(15.0, sseHeartbeat);
+                    }
+                },
+                true);
+            resp->setContentTypeString("text/event-stream; charset=utf-8");
+            resp->addHeader("Cache-Control", "no-cache");
+            resp->addHeader("Connection", "keep-alive");
+            resp->addHeader("X-Accel-Buffering", "no");
+            cb(resp);
         },
         {Get});
 

@@ -275,55 +275,35 @@ const lastLoadedLabel = computed(() =>
   lastLoadedAt.value ? lastLoadedAt.value.toLocaleTimeString('ru-RU') : ''
 )
 
-// Обновление по событию (ADR-42): сервер держит запрос до 20 с и отвечает сразу,
-// как только шаблон опубликован; таймер не нужен.
+// Обновление по событию (ADR-44): одно SSE-соединение на страницу, сервер сам
+// присылает событие после публикации шаблона; переподключение — штатное у EventSource.
 const liveMode = computed(() => template.value?.live === true)
-let liveRunning = false
-let liveAbort = null
-
-async function watchChanges() {
-  liveRunning = true
-  while (liveRunning) {
-    if (refreshPaused.value) {
-      await new Promise((r) => setTimeout(r, 1000))
-      continue
-    }
-    liveAbort = new AbortController()
-    try {
-      const res = await fetch(`/api/report/changes?report=${encodeURIComponent(reportId)}`, {
-        credentials: 'include',
-        signal: liveAbort.signal
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      if (data.changed) {
-        // шаблон мог измениться целиком: подтягиваем его, затем данные
-        try {
-          template.value = await api.template(reportId)
-        } catch (e) {
-          /* заголовок обновим при следующем событии */
-        }
-        await load()
-      }
-    } catch (e) {
-      if (!liveRunning) return
-      await new Promise((r) => setTimeout(r, 3000))
-    }
-  }
-}
+let liveSource = null
 
 function startLive() {
   stopLive()
-  if (liveMode.value) watchChanges()
+  if (!liveMode.value || refreshPaused.value) return
+  liveSource = new EventSource(`/api/report/events?report=${encodeURIComponent(reportId)}`)
+  liveSource.addEventListener('change', async () => {
+    // шаблон мог измениться целиком: подтягиваем его, затем данные
+    try {
+      template.value = await api.template(reportId)
+    } catch (e) {
+      /* заголовок обновим при следующем событии */
+    }
+    await load()
+  })
 }
 
 function stopLive() {
-  liveRunning = false
-  if (liveAbort) liveAbort.abort()
-  liveAbort = null
+  if (liveSource) {
+    liveSource.close()
+    liveSource = null
+  }
 }
 
-watch(liveMode, () => startLive(), { immediate: true })
+// первый старт, смена режима и пауза переключают поток
+watch([liveMode, refreshPaused], () => startLive(), { immediate: true })
 
 // период приходит из шаблона: меняется — перезапускаем таймер
 watch(() => template.value?.refreshSeconds, () => startRefresh(), { immediate: true })

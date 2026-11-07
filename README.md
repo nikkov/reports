@@ -144,8 +144,10 @@ REP_E2E=1 ./scripts/check.sh               # всё вместе
   поэтому Excel открывает его без мастера импорта (ADR-40);
 - каталог: `GET /api/reports?q=&folder=&tag=&limit=&offset=` — серверный поиск и страницы;
   без `limit` отдаётся прежний массив (ADR-41);
-- обновление по событию: в шаблоне `"live": true`, страница ждёт `GET /api/report/changes?report=<id>`
-  и обновляется сразу после публикации (ADR-42).
+- обновление по событию: в шаблоне `"live": true`, страница держит SSE-поток
+  `GET /api/report/events?report=<id>` и обновляется сразу после публикации (ADR-44).
+  За nginx нужен `proxy_buffering off` для этого пути; прокси стенда (`frontend/sse-proxy.js`)
+  уже пробрасывает поток без буферизации.
 
 ```bash
 # CSV за март

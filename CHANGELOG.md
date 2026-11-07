@@ -1,5 +1,31 @@
 # История версий
 
+## v1.16.0 — 2026-11-07
+
+SSE вместо long-poll для обновления по событию (ADR-44).
+
+### Что изменилось
+
+- `GET /api/report/changes` (long-poll до 20 с) удалён; вместо него — поток
+  `GET /api/report/events?report=<id>` (`text/event-stream`, `HttpResponse::newAsyncStreamResponse`);
+- сервер пишет `event: change` с `{"reportId": ...}` сразу после публикации или отката шаблона
+  и `: ping` раз в 15 с; отвалившиеся клиенты убираются на пульсе (по результату `send()`);
+- клиент — `EventSource`: переподключение штатное, пауза закрывает поток и открывает заново;
+- на каждое событие теперь **ноль** дополнительных запросов — событие приходит по уже открытому потоку
+  (было: событие → ответ long-poll → новый long-poll).
+
+### Стенд
+
+Vite-прокси отдавал потоковый ответ как `Content-Length: 0` — SSE через `:5173` не работал.
+`frontend/sse-proxy.js` пробрасывает `/api/report/events` вручную (fetch + поток в ответ) и подключён
+в `vite.config.js` для dev и preview. Для nginx в документации указан `proxy_buffering off`.
+
+### Проверки
+
+- e2e: поток приходит с `text/event-stream`, запросов к `/api/report/changes` нет, публикация
+  обновляет экран (второй `/api/report/data` сразу после неё);
+- проверено вручную: `curl -N` показывает `: connected`, `event: change`, затем `: ping`.
+
 ## v1.15.0 — 2026-11-07
 
 Drill-through с диаграмм (ADR-43).
