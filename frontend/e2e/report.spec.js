@@ -808,6 +808,15 @@ test('мультинаборность: блоки читают разные н�
   expect(tables[1].head).toContain('Категория')
   expect(tables[0].first).not.toBe(tables[1].first)
 
+  // короткий отчёт не оставляет пустого поля под последней строкой
+  const boxes = await page.locator('.rt-table').evaluateAll((els) =>
+    els.map((t) => ({
+      container: Math.round(t.closest('.rt').getBoundingClientRect().height),
+      content: Math.round(t.getBoundingClientRect().height)
+    }))
+  )
+  for (const box of boxes) expect(box.container - box.content).toBeLessThan(60)
+
   // набор можно запросить явно, неизвестный — 422
   const one = await request.post('/api/report/data', { data: { reportId: 'sales-two-sets', dataset: 'byRegion', params: { from: '2026-03-01', to: '2026-03-10' } } })
   expect(one.ok()).toBeTruthy()

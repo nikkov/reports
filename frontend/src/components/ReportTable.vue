@@ -165,10 +165,16 @@ const scrollTop = ref(0)
 
 const layout = computed(() => props.styles.layout)
 
+// Короткий отчёт не должен оставлять пустое поле под последней строкой:
+// контейнер сжимается по содержимому, длинный — остаётся окном фиксированной высоты.
+const containerHeight = computed(() =>
+  Math.min(props.height, Math.max(layout.value.rowHeight, totalHeight.value + headerHeight.value))
+)
+
 const rootStyle = computed(() => {
   const { layout, header, body, subtotal, grandtotal } = props.styles
   return {
-    height: props.height + 'px',
+    height: containerHeight.value + 'px',
     '--rt-border': body.colors.border,
     '--rt-stripe': layout.stripeColor,
     '--rt-row-height': layout.rowHeight + 'px',
