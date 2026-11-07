@@ -221,7 +221,8 @@ test('«свернуть всё» оставляет только итоги р�
 
 test('диаграмма получает агрегаты из того же движка', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
-  expect(await page.locator('.chart canvas').count()).toBeGreaterThanOrEqual(2)
+  // ждём именно второй canvas: диаграммы рисуются после загрузки данных
+  await expect(page.locator('.chart canvas').nth(1)).toBeVisible()
 
   const info = await page.evaluate(() => window.__chart)
   expect(['line', 'bar', 'pie']).toContain(info.type)
@@ -825,4 +826,37 @@ test('мультинаборность: блоки читают разные н�
   const bad = await request.post('/api/report/data', { data: { reportId: 'sales-two-sets', dataset: 'nope', params: { from: '2026-03-01', to: '2026-03-10' } } })
   expect(bad.status()).toBe(422)
   expect((await bad.json()).error.code).toBe('DATASET_NOT_FOUND')
+})
+
+test('серверная агрегация: GROUP BY в базе, на экране 6 строк вместо 2 746', async ({ page, request }) => {
+  const params = { from: '2026-03-01', to: '2026-03-10' }
+  const spec = {
+    reportId: 'sales-aggregate',
+    dataset: 'sales',
+    params,
+    groupBy: ['category'],
+    measures: [{ field: 'amount', agg: 'sum' }, { field: 'profit', agg: 'sum' }]
+  }
+
+  const api = await request.post('/api/report/aggregate', { data: spec })
+  expect(api.ok()).toBeTruthy()
+  const payload = await api.json()
+  expect(payload.rowCount).toBe(5) // 4 категории + пустая
+  const amount = payload.rows.reduce((sum, r) => sum + Number(r.amount), 0)
+  const profit = payload.rows.reduce((sum, r) => sum + Number(r.profit), 0)
+  // сверка с эталоном golden: суммы по всей выборке
+  expect(amount).toBe(150977000)
+  expect(profit).toBe(31013250)
+
+  // инъекция в именах колонок отклоняется до SQL
+  const bad = await request.post('/api/report/aggregate', {
+    data: { ...spec, groupBy: ['category; DROP TABLE sales'] }
+  })
+  expect(bad.status()).toBe(422)
+  expect((await bad.json()).error.code).toBe('INVALID_PARAMS')
+
+  // страница показывает 5 групп + ИТОГО
+  await page.goto('/report.html?report=sales-aggregate&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк')
+  await expect(page.locator('.rt-table tbody tr')).toHaveCount(6)
 })

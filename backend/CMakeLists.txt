@@ -14,7 +14,9 @@ find_package(Catch2 3 CONFIG REQUIRED)
 
 # Ядро без HTTP-слоя: тестируется Catch2 отдельно от сервера.
 add_library(rep_core STATIC
+  src/aggregate.cc
   src/auth.cc
+  src/dataset.cc
   src/env.cc
   src/params.cc
   src/queries.cc
@@ -27,7 +29,9 @@ target_link_libraries(rep PRIVATE rep_core)
 
 enable_testing()
 add_executable(rep_tests
+  tests/aggregate_test.cc
   tests/auth_test.cc
+  tests/dataset_test.cc
   tests/queries_test.cc
   tests/params_test.cc
 )

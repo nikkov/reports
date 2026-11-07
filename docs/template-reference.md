@@ -114,6 +114,23 @@
 `{{name}}` — значение параметра (для справочников — подпись). Необъявленный параметр — ошибка валидации.
 `width`: `full` (по умолчанию) или `half`.
 
+### Агрегация на сервере (ADR-37)
+
+```json
+"block": {
+  "type": "table",
+  "dataKey": "sales",
+  "aggregate": {
+    "groupBy": ["category"],
+    "measures": [{ "field": "amount", "agg": "sum" }, { "field": "profit", "agg": "sum" }]
+  }
+}
+```
+
+`groupBy` — колонки набора, которые остаются в результате; `measures` — колонки с агрегатом
+(`sum`, `avg`, `min`, `max`, `count`). Сервер выполняет `GROUP BY` в PostgreSQL и отдаёт уже
+сгруппированные строки — клиент не получает детализацию.
+
 ### Drill-through в табличном блоке (ADR-29)
 
 ```json

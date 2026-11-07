@@ -126,11 +126,17 @@ async function load() {
   error.value = null
   const started = performance.now()
   try {
-    const blocks = (template.value?.blocks || []).filter((b) => b.type === 'table')
+    // набор нужен и таблицам, и диаграммам: диаграмма берёт строки своего dataKey
+    const blocks = (template.value?.blocks || []).filter((b) => b.type === 'table' || b.type === 'chart')
     const keys = [...new Set(blocks.map((b) => b.dataKey || ''))]
+    if (!keys.length) keys.push('') // шаблон без блоков данных — запросим первый набор
     const loaded = {}
     for (const key of keys) {
-      loaded[key] = (await api.data(reportId, { ...paramValues }, controller.signal, key)).rows
+      const block = blocks.find((b) => (b.dataKey || '') === key)
+      // блок с aggregate считает GROUP BY на сервере, остальные получают строки как есть
+      loaded[key] = block?.aggregate
+        ? (await api.aggregate(reportId, { ...paramValues }, block.aggregate, controller.signal, key)).rows
+        : (await api.data(reportId, { ...paramValues }, controller.signal, key)).rows
     }
     dataByKey.value = loaded
     const data = { rows: loaded[keys[0]] || [] }

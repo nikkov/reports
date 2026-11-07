@@ -38,6 +38,20 @@ export const api = {
       { signal }
     )
   },
+  // серверная агрегация (ADR-37): GROUP BY по groupBy, агрегаты по measures
+  aggregate: (reportId, params, spec, signal, dataset) =>
+    request('/api/report/aggregate', {
+      method: 'POST',
+      body: JSON.stringify({
+        reportId,
+        params,
+        ...(dataset ? { dataset } : {}),
+        groupBy: spec.groupBy || [],
+        measures: spec.measures || []
+      }),
+      signal
+    }),
+
   // dataset — ключ из datasets шаблона (ADR-36); без него сервер отдаёт первый набор
   data: (reportId, params, signal, dataset) =>
     request('/api/report/data', {

@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "id": "sales-aggregate",
+  "title": "Продажи: агрегация на сервере",
+  "description": "GROUP BY по категориям выполняется в PostgreSQL: 2 746 детальных строк превращаются в 5.",
+  "folder": "Продажи",
+  "tags": [
+    "агрегация",
+    "пример"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "sql": "SELECT s.category, s.amount, s.profit FROM sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Детальных строк 2 746, но GROUP BY выполняется в базе — клиент получает 5 строк."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "title": "Итоги по категориям (GROUP BY на сервере)",
+      "width": "full",
+      "grandTotal": true,
+      "aggregate": {
+        "groupBy": [
+          "category"
+        ],
+        "measures": [
+          {
+            "field": "amount",
+            "agg": "sum"
+          },
+          {
+            "field": "profit",
+            "agg": "sum"
+          }
+        ]
+      },
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true,
+          "width": 220
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": "integer",
+          "align": "right",
+          "aggregate": "sum",
+          "width": 150
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "format": "integer",
+          "align": "right",
+          "aggregate": "sum",
+          "width": 150
+        }
+      ]
+    }
+  ]
+}

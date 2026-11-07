@@ -16,6 +16,8 @@
 
 #include "auth.h"
 #include "cache.h"
+#include "aggregate.h"
+#include "dataset.h"
 #include "env.h"
 #include "params.h"
 #include "queries.h"
@@ -1045,6 +1047,132 @@ int main() {
         },
         {Get});
 
+
+    // Серверная агрегация (ADR-37): GROUP BY поверх выбранного набора данных.
+    // Клиент получает уже сгруппированные строки — на 2 746 строках это 5 вместо тысяч.
+    app().registerHandler(
+        "/api/report/aggregate",
+        [dataDb, &templates, &templatesMutex, maxRows](const HttpRequestPtr &req,
+                                                       std::function<void(const HttpResponsePtr &)> &&cb) {
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string reportId = (*body).get("reportId", "").asString();
+            if (reportId.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
+                return;
+            }
+
+            std::string datasetSql;
+            std::map<std::string, std::string> datasetParams;
+            {
+                std::lock_guard<std::mutex> lock(templatesMutex);
+                const auto it = templates.find(reportId);
+                if (it == templates.end()) {
+                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
+                    return;
+                }
+                const auto &all = it->second.datasets;
+                if (all.empty()) {
+                    datasetSql = it->second.datasetSql;
+                    datasetParams = it->second.datasetParams;
+                } else {
+                    const std::string key = (*body).get("dataset", "").asString();
+                    const auto ds = all.find(key.empty() ? all.begin()->first : key);
+                    if (ds == all.end()) {
+                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
+                                  "в шаблоне нет набора '" + key + "'");
+                        return;
+                    }
+                    datasetSql = ds->second.sql;
+                    datasetParams = ds->second.params;
+                }
+            }
+
+            rep::ParamBag bag;
+            const Json::Value &rawParams = (*body)["params"];
+            if (rawParams.isObject()) {
+                for (auto it = rawParams.begin(); it != rawParams.end(); ++it) {
+                    if (it->isString() || it->isInt64() || it->isUInt64() || it->isDouble() || it->isBool()) {
+                        bag.set(it.name(), it->asString());
+                    }
+                }
+            }
+
+            std::vector<std::string> groupBy;
+            for (const auto &g : (*body)["groupBy"]) {
+                if (g.isString()) groupBy.push_back(g.asString());
+            }
+            std::vector<std::pair<std::string, std::string>> measures;
+            for (const auto &m : (*body)["measures"]) {
+                if (m.isObject() && m["field"].isString() && m["agg"].isString()) {
+                    measures.emplace_back(m["field"].asString(), m["agg"].asString());
+                }
+            }
+
+            rep::DatasetQuery query;
+            std::string err;
+            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+            std::string aggSql;
+            if (!rep::buildAggregateSql(query.sql, groupBy, measures, aggSql, err)) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+
+            static const std::map<std::string, std::string> noDeclared;
+            runQuery(
+                dataDb, aggSql, query.values,
+                [cb, maxRows, groupBy](const orm::Result &res) {
+                    if (res.size() > maxRows) {
+                        sendError(cb, k422UnprocessableEntity, "ROW_LIMIT", "результат больше лимита строк");
+                        return;
+                    }
+                    Json::Value columns(Json::arrayValue);
+                    const auto ncols = static_cast<size_t>(res.columns());
+                    std::vector<std::string> names;
+                    for (size_t c = 0; c < ncols; ++c) {
+                        names.emplace_back(res.columnName(static_cast<unsigned long>(c)));
+                        Json::Value col;
+                        col["name"] = names.back();
+                        col["type"] = columnType(names.back(), noDeclared, res);
+                        columns.append(col);
+                    }
+                    Json::Value rows(Json::arrayValue);
+                    for (const auto &row : res) {
+                        Json::Value obj(Json::objectValue);
+                        for (size_t c = 0; c < ncols; ++c) {
+                            obj[names[c]] = fieldToJson(row[c], columnType(names[c], noDeclared, res));
+                        }
+                        rows.append(obj);
+                    }
+                    Json::Value out;
+                    out["columns"] = columns;
+                    out["rows"] = rows;
+                    out["rowCount"] = static_cast<Json::UInt64>(res.size());
+                    out["groupBy"] = Json::Value(Json::arrayValue);
+                    for (const auto &g : groupBy) out["groupBy"].append(g);
+                    cb(jsonResponse(out));
+                },
+                [cb](const std::exception_ptr &e) {
+                    std::string msg = "aggregate failed";
+                    try {
+                        if (e) std::rethrow_exception(e);
+                    } catch (const std::exception &ex) {
+                        msg = ex.what();
+                    }
+                    // неизвестная колонка — ошибка запроса, а не сервера
+                    sendError(cb, msg.find("does not exist") != std::string::npos ? k422UnprocessableEntity
+                                                                                 : k500InternalServerError,
+                              "AGGREGATE_FAILED", msg);
+                });
+        },
+        {Post});
+
     app().registerHandler(
         "/api/health",
         [db, maxRows, &dbRo](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
@@ -1327,17 +1455,11 @@ int main() {
                 }
             }
 
-            // Значения приходят по имени шаблона ("$from"), уходят в SQL как значения параметра.
-            if (!datasetParams.empty()) {
-                rep::ParamBag mapped;
-                for (const auto &kv : datasetParams) {
-                    const std::string &src = kv.second;
-                    const std::string name = (!src.empty() && src[0] == '$') ? src.substr(1) : src;
-                    if (const auto *v = bag.find(name)) mapped.set(kv.first, *v);
-                }
-                for (const auto &kv : bag.values())
-                    if (!mapped.has(kv.first)) mapped.set(kv.first, kv.second);
-                bag = mapped;
+            rep::DatasetQuery query;
+            std::string compileErr;
+            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, compileErr)) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", compileErr);
+                return;
             }
 
             // Ключ кэша: отчёт + версия шаблонов + значения параметров (map уже отсортирован).
@@ -1439,7 +1561,7 @@ int main() {
 
             static const std::map<std::string, std::string> noDeclared;
             runQuery(
-                dataDb, compiled, values,
+                dataDb, query.sql, query.values,
                 [cb, maxRows, &resultCache, cacheKey, etag](const orm::Result &res) {
                     if (res.size() > maxRows) {
                         sendError(cb, k422UnprocessableEntity, "ROW_LIMIT",
