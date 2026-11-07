@@ -38,6 +38,7 @@ export default defineConfig({
         report: resolve(__dirname, 'report.html'),
         admin: resolve(__dirname, 'admin.html'),
         subscriptions: resolve(__dirname, 'subscriptions.html'),
+        users: resolve(__dirname, 'users.html'),
         login: resolve(__dirname, 'login.html')
       }
     }

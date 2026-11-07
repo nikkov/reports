@@ -104,4 +104,32 @@ Role requiredRole(const std::string &method, const std::string &path) {
     return Role::Admin;
 }
 
+bool validateUserInput(const std::string &login, const std::string &role, const std::string &password,
+                       bool creating, std::string &err) {
+    if (login.size() < 3 || login.size() > 32) {
+        err = "логин: нужно от 3 до 32 символов";
+        return false;
+    }
+    for (char ch : login) {
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' || ch == '-';
+        if (!ok) {
+            err = "логин: допустимы строчные латинские буквы, цифры, '_', '.', '-'";
+            return false;
+        }
+    }
+    if (role != "admin" && role != "author" && role != "viewer") {
+        err = "роль должна быть admin, author или viewer";
+        return false;
+    }
+    if (creating && password.empty()) {
+        err = "пароль обязателен при создании";
+        return false;
+    }
+    if (!password.empty() && password.size() < 8) {
+        err = "пароль: не короче 8 символов";
+        return false;
+    }
+    return true;
+}
+
 } // namespace rep

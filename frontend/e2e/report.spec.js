@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, request as apiRequest, test } from '@playwright/test'
 
 const BASE = '/report.html?report=sales-summary'
 
@@ -960,6 +960,50 @@ test('drill-through с диаграммы: клик по столбцу откр
   // целевой отчёт действительно открылся на этих данных
   await expect(page.locator('.rt-table')).toBeVisible()
   await expect(page.locator('.meta')).toContainText('строк')
+})
+
+test('пользователи: создание, вход, отключение, защита последнего админа', async ({ page, request, baseURL }) => {
+  const login = 'e2e_analyst'
+  const password = 'e2e-pass-123'
+
+  // чистим возможный след прошлого прогона
+  const existing = await (await request.get('/api/admin/users')).json()
+  const stale = existing.items.find((u) => u.login === login)
+  if (stale) await request.delete(`/api/admin/users/${stale.id}`)
+
+  const created = await request.post('/api/admin/users', { data: { login, role: 'viewer', password } })
+  expect(created.ok()).toBeTruthy()
+  const { id } = await created.json()
+
+  // пароль короче 8 и дубль логина отклоняются
+  expect((await request.post('/api/admin/users', { data: { login: 'e2e_short', role: 'viewer', password: '123' } })).status()).toBe(422)
+  expect((await request.post('/api/admin/users', { data: { login, role: 'viewer', password } })).status()).toBe(409)
+
+  // вход новым пользователем — в отдельном контексте, чтобы не сбить admin-cookie
+  const ctx = await apiRequest.newContext({ baseURL })
+  expect((await ctx.post('/api/auth/login', { data: { login, password } })).ok()).toBeTruthy()
+  expect((await ctx.get('/api/reports')).ok()).toBeTruthy()
+
+  // отключение: вход запрещён, старая сессия не действует
+  expect((await request.put(`/api/admin/users/${id}`, { data: { role: 'viewer', enabled: false } })).ok()).toBeTruthy()
+  expect((await ctx.post('/api/auth/login', { data: { login, password } })).status()).toBe(403)
+  expect((await ctx.get('/api/reports')).status()).toBe(401)
+  await ctx.dispose()
+
+  // себя удалить нельзя
+  const me = (await (await request.get('/api/admin/users')).json()).items.find((u) => u.login === 'admin')
+  const selfDelete = await request.delete(`/api/admin/users/${me.id}`)
+  expect(selfDelete.status()).toBe(409)
+  expect((await selfDelete.json()).error.code).toBe('SELF_PROTECTED')
+
+  // страница пользователей
+  await page.goto('/users.html')
+  await expect(page.locator('h1')).toHaveText('Пользователи')
+  await expect(page.locator('tr[data-user="admin"]')).toContainText('это вы')
+  await expect(page.locator(`tr[data-user="${login}"]`)).toContainText('отключён')
+
+  // уборка
+  expect((await request.delete(`/api/admin/users/${id}`)).ok()).toBeTruthy()
 })
 
 test('рассылка: подписки CRUD, cron и адреса проверяются на сервере', async ({ page, request }) => {

@@ -50,3 +50,25 @@ TEST_CASE("сравнение ролей") {
     REQUIRE_FALSE(rep::roleAtLeast("author", rep::Role::Admin));
     REQUIRE(rep::roleAtLeast("viewer", rep::Role::Public));
 }
+
+TEST_CASE("данные пользователя из админки проверяются") {
+    std::string err;
+
+    // корректное создание
+    REQUIRE(rep::validateUserInput("analyst_1", "viewer", "s3cret-pass", true, err));
+
+    // логин: шаблон и длина
+    REQUIRE_FALSE(rep::validateUserInput("ab", "viewer", "s3cret-pass", true, err));
+    REQUIRE_FALSE(rep::validateUserInput("Аналитик", "viewer", "s3cret-pass", true, err));
+    REQUIRE_FALSE(rep::validateUserInput("with space", "viewer", "s3cret-pass", true, err));
+
+    // роль — только из списка
+    REQUIRE_FALSE(rep::validateUserInput("analyst_1", "owner", "s3cret-pass", true, err));
+    REQUIRE(err.find("роль") != std::string::npos);
+
+    // пароль: обязателен при создании, не короче 8 при смене
+    REQUIRE_FALSE(rep::validateUserInput("analyst_1", "viewer", "", true, err));
+    REQUIRE_FALSE(rep::validateUserInput("analyst_1", "viewer", "short", false, err));
+    REQUIRE(rep::validateUserInput("analyst_1", "viewer", "", false, err)); // «не менять»
+}
+

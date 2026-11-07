@@ -206,3 +206,10 @@ REP_CI_DB=my_ci ./scripts/ci-e2e.sh  # другая база — если report
 В GitHub Actions это job `e2e` (сервис `postgres:16`, Conan-кэш, артефакты при падении).
 Требования: собранные `backend/build/rep` и `frontend/dist`, Playwright-браузеры
 (`npx playwright install --with-deps chromium`).
+
+### Управление пользователями
+
+Страница `users.html` (ссылка из админки, роль admin): создание пользователя, смена роли,
+отключение без удаления, сброс пароля, удаление. API: `GET/POST /api/admin/users`,
+`PUT/DELETE /api/admin/users/{id}`. Отключение и смена пароля завершают активные сессии;
+сервер не даст удалить себя или остаться без единого администратора (ADR-50).

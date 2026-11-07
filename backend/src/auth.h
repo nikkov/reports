@@ -28,4 +28,9 @@ std::string randomHex(std::size_t bytes);
 // Минимальная роль для запроса. Неизвестные пути требуют admin: безопасное умолчание.
 Role requiredRole(const std::string &method, const std::string &path);
 
+// Проверка данных пользователя из админки: логин, роль, пароль (при создании обязателен).
+// Пустой пароль при обновлении означает «не менять».
+bool validateUserInput(const std::string &login, const std::string &role, const std::string &password,
+                       bool creating, std::string &err);
+
 } // namespace rep

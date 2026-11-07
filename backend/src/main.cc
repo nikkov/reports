@@ -927,7 +927,7 @@ int main() {
                 runQuery(
                     db,
                     "SELECT u.id, u.login, u.role FROM sessions s JOIN users u ON u.id = s.user_id "
-                    "WHERE s.token = $1 AND s.expires_at > now()",
+                    "WHERE s.token = $1 AND s.expires_at > now() AND u.enabled",
                     {token},
                     [req, need, &unauthorized, &forbidden, respond, next](const orm::Result &res) {
                         if (res.empty()) {
@@ -969,12 +969,17 @@ int main() {
                 return;
             }
             runQuery(
-                db, "SELECT id, login, password_salt, password_hash, role FROM users WHERE login = $1", {login},
+                db, "SELECT id, login, password_salt, password_hash, role, enabled FROM users WHERE login = $1",
+                {login},
                 [db, cb, login, password, sessionTtlHours](const orm::Result &res) {
                     if (res.empty() ||
                         !rep::verifyPassword(password, res[0]["password_salt"].as<std::string>(),
                                              res[0]["password_hash"].as<std::string>())) {
                         sendError(cb, k401Unauthorized, "BAD_CREDENTIALS", "неверный логин или пароль");
+                        return;
+                    }
+                    if (!res[0]["enabled"].as<bool>()) {
+                        sendError(cb, k403Forbidden, "USER_DISABLED", "пользователь отключён администратором");
                         return;
                     }
                     const long userId = res[0]["id"].as<long long>();
@@ -1046,7 +1051,7 @@ int main() {
             }
             runQuery(
                 db,
-                "SELECT u.login, u.role FROM sessions s JOIN users u ON u.id = s.user_id "
+                "SELECT u.login, u.role FROM sessions s JOIN users u ON u.id = s.user_id AND u.enabled "
                 "WHERE s.token = $1 AND s.expires_at > now()",
                 {token},
                 [cb](const orm::Result &res) {
@@ -1622,6 +1627,265 @@ int main() {
         },
         {Post});
 
+
+
+    // --- Пользователи и роли (ADR-50) ---------------------------------------
+    // Пароли хэшируются тем же PBKDF2, что и при входе (auth.cc). Отключение и смена
+    // пароля гасят сессии пользователя; последнего включённого администратора нельзя
+    // ни отключить, ни понизить, ни удалить — иначе сервер останется без управления.
+    auto userJson = [](PGresult *res) {
+        Json::Value list(Json::arrayValue);
+        const int count = PQntuples(res);
+        for (int i = 0; i < count; ++i) {
+            Json::Value item;
+            item["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, i, 0)));
+            item["login"] = PQgetvalue(res, i, 1);
+            item["role"] = PQgetvalue(res, i, 2);
+            item["enabled"] = std::string(PQgetvalue(res, i, 3)) == "t";
+            item["createdAt"] = PQgetisnull(res, i, 4) ? "" : PQgetvalue(res, i, 4);
+            item["updatedAt"] = PQgetisnull(res, i, 5) ? "" : PQgetvalue(res, i, 5);
+            list.append(item);
+        }
+        return list;
+    };
+
+    app().registerHandler(
+        "/api/admin/users",
+        [adminEnabled, userJson](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            if (req->method() == Get) {
+                PGresult *res = PQexec(conn,
+                                       "SELECT id, login, role, enabled,"
+                                       " to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
+                                       " to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')"
+                                       " FROM users ORDER BY id");
+                if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                    const std::string msg = PQerrorMessage(conn);
+                    PQclear(res);
+                    PQfinish(conn);
+                    sendError(cb, k500InternalServerError, "QUERY_FAILED", msg);
+                    return;
+                }
+                Json::Value out;
+                out["items"] = userJson(res);
+                PQclear(res);
+                PQfinish(conn);
+                cb(jsonResponse(out));
+                return;
+            }
+
+            // создание пользователя
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                PQfinish(conn);
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string login = (*body).get("login", "").asString();
+            const std::string role = (*body).get("role", "viewer").asString();
+            const std::string password = (*body).get("password", "").asString();
+            std::string err;
+            if (!rep::validateUserInput(login, role, password, true, err)) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+            const std::string salt = rep::randomHex(16);
+            const std::string hash = rep::hashPassword(password, salt);
+            const std::string enabled = (*body).get("enabled", true).asBool() ? "true" : "false";
+            const char *values[] = {login.c_str(), salt.c_str(), hash.c_str(), role.c_str(), enabled.c_str()};
+            PGresult *res = PQexecParams(
+                conn,
+                "INSERT INTO users (login, password_salt, password_hash, role, enabled)"
+                " VALUES ($1, $2, $3, $4, $5::boolean) RETURNING id",
+                5, nullptr, values, nullptr, nullptr, 0);
+            if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                const bool duplicate = msg.find("users_login_key") != std::string::npos;
+                sendError(cb, duplicate ? k409Conflict : k422UnprocessableEntity,
+                          duplicate ? "LOGIN_TAKEN" : "INVALID_PARAMS",
+                          duplicate ? "логин «" + login + "» уже занят" : msg);
+                return;
+            }
+            Json::Value out;
+            out["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, 0, 0)));
+            PQclear(res);
+            PQfinish(conn);
+            cb(jsonResponse(out));
+        },
+        {Get, Post});
+
+    app().registerHandler(
+        "/api/admin/users/{id}",
+        [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
+                       const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            const auto finish = [conn, &cb](HttpStatusCode status, const std::string &code, const std::string &msg) {
+                PQfinish(conn);
+                sendError(cb, status, code, msg);
+            };
+
+            // кто выполняет действие: себя удалять/отключать нельзя
+            std::string actor;
+            if (const auto attrs = req->attributes()) actor = attrs->get<std::string>("session_login");
+
+            if (req->method() == Delete) {
+                const char *values[] = {id.c_str()};
+                PGresult *res = PQexecParams(
+                    conn,
+                    "SELECT login, role, enabled FROM users WHERE id = $1", 1, nullptr, values, nullptr, nullptr, 0);
+                if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
+                    PQclear(res);
+                    finish(k404NotFound, "USER_NOT_FOUND", "пользователь не найден");
+                    return;
+                }
+                const std::string login = PQgetvalue(res, 0, 0);
+                const std::string role = PQgetvalue(res, 0, 1);
+                const bool enabled = std::string(PQgetvalue(res, 0, 2)) == "t";
+                PQclear(res);
+                if (!actor.empty() && login == actor) {
+                    finish(k409Conflict, "SELF_PROTECTED", "нельзя удалить собственную учётную запись");
+                    return;
+                }
+                if (role == "admin" && enabled) {
+                    PGresult *admins = PQexec(conn, "SELECT count(*) FROM users WHERE role = 'admin' AND enabled");
+                    const long count = std::stol(PQgetvalue(admins, 0, 0));
+                    PQclear(admins);
+                    if (count <= 1) {
+                        finish(k409Conflict, "LAST_ADMIN", "нельзя удалить последнего администратора");
+                        return;
+                    }
+                }
+                PGresult *del = PQexecParams(conn, "DELETE FROM users WHERE id = $1", 1, nullptr, values, nullptr,
+                                             nullptr, 0);
+                const bool ok = PQresultStatus(del) == PGRES_COMMAND_OK;
+                const std::string msg = ok ? "" : PQerrorMessage(conn);
+                PQclear(del);
+                PQfinish(conn);
+                if (!ok) {
+                    sendError(cb, k500InternalServerError, "DELETE_FAILED", msg);
+                    return;
+                }
+                Json::Value out;
+                out["deleted"] = true;
+                cb(jsonResponse(out));
+                return;
+            }
+
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                finish(k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string role = (*body).get("role", "viewer").asString();
+            const std::string password = (*body).get("password", "").asString();
+            const bool enabled = (*body).get("enabled", true).asBool();
+
+            // текущее состояние: логин для проверок и защиты последнего администратора
+            const char *values[] = {id.c_str()};
+            PGresult *cur = PQexecParams(conn, "SELECT login, role, enabled FROM users WHERE id = $1", 1, nullptr,
+                                         values, nullptr, nullptr, 0);
+            if (PQresultStatus(cur) != PGRES_TUPLES_OK || PQntuples(cur) != 1) {
+                PQclear(cur);
+                finish(k404NotFound, "USER_NOT_FOUND", "пользователь не найден");
+                return;
+            }
+            const std::string login = PQgetvalue(cur, 0, 0);
+            const std::string oldRole = PQgetvalue(cur, 0, 1);
+            const bool oldEnabled = std::string(PQgetvalue(cur, 0, 2)) == "t";
+            PQclear(cur);
+
+            std::string err;
+            if (!rep::validateUserInput(login, role, password, false, err)) {
+                finish(k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+            const bool losesAdmin = oldRole == "admin" && oldEnabled && (role != "admin" || !enabled);
+            if (losesAdmin) {
+                PGresult *admins = PQexec(conn, "SELECT count(*) FROM users WHERE role = 'admin' AND enabled");
+                const long count = std::stol(PQgetvalue(admins, 0, 0));
+                PQclear(admins);
+                if (count <= 1) {
+                    finish(k409Conflict, "LAST_ADMIN", "нельзя оставить сервер без администратора");
+                    return;
+                }
+            }
+            if (!actor.empty() && login == actor && (!enabled || role != oldRole)) {
+                finish(k409Conflict, "SELF_PROTECTED", "нельзя отключить себя или сменить себе роль");
+                return;
+            }
+
+            // пароль меняем только если передан: пустая строка — «не трогать»
+            if (!password.empty()) {
+                const std::string salt = rep::randomHex(16);
+                const std::string hash = rep::hashPassword(password, salt);
+                const char *upd[] = {id.c_str(), salt.c_str(), hash.c_str(), role.c_str(),
+                                     enabled ? "true" : "false"};
+                PGresult *res = PQexecParams(
+                    conn,
+                    "UPDATE users SET password_salt = $2, password_hash = $3, role = $4, enabled = $5::boolean,"
+                    " updated_at = now() WHERE id = $1",
+                    5, nullptr, upd, nullptr, nullptr, 0);
+                const bool ok = PQresultStatus(res) == PGRES_COMMAND_OK;
+                const std::string msg = ok ? "" : PQerrorMessage(conn);
+                PQclear(res);
+                if (!ok) {
+                    finish(k500InternalServerError, "UPDATE_FAILED", msg);
+                    return;
+                }
+                // смена пароля гасит старые сессии
+                const char *del[] = {id.c_str()};
+                PGresult *sessions = PQexecParams(conn, "DELETE FROM sessions WHERE user_id = $1::bigint", 1, nullptr,
+                                                  del, nullptr, nullptr, 0);
+                PQclear(sessions);
+            } else {
+                const char *upd[] = {id.c_str(), role.c_str(), enabled ? "true" : "false"};
+                PGresult *res = PQexecParams(
+                    conn,
+                    "UPDATE users SET role = $2, enabled = $3::boolean, updated_at = now() WHERE id = $1",
+                    3, nullptr, upd, nullptr, nullptr, 0);
+                const bool ok = PQresultStatus(res) == PGRES_COMMAND_OK;
+                const std::string msg = ok ? "" : PQerrorMessage(conn);
+                PQclear(res);
+                if (!ok) {
+                    finish(k500InternalServerError, "UPDATE_FAILED", msg);
+                    return;
+                }
+                if (!enabled) {
+                    const char *del[] = {id.c_str()};
+                    PGresult *sessions = PQexecParams(conn, "DELETE FROM sessions WHERE user_id = $1::bigint", 1,
+                                                      nullptr, del, nullptr, nullptr, 0);
+                    PQclear(sessions);
+                }
+            }
+            PQfinish(conn);
+            Json::Value out;
+            out["updated"] = true;
+            cb(jsonResponse(out));
+        },
+        {Put, Delete});
 
     // --- Рассылка отчётов (ADR-46) ------------------------------------------
     // Подписки хранятся в report_subscriptions; планировщик раз в 30 с выбирает

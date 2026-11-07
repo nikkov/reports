@@ -5,6 +5,7 @@
         <div>
           <h1>Шаблоны отчётов</h1>
       <a class="subs-link" href="subscriptions.html">Рассылка отчётов →</a>
+      <a class="subs-link" href="users.html">Пользователи →</a>
           <p class="brand-sub">Администрирование · JSON + CodeMirror</p>
         </div>
         <button class="btn primary" @click="openCreate">Создать</button>

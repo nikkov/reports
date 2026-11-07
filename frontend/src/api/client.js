@@ -82,6 +82,13 @@ export const api = {
   deleteSubscription: (id) => request(`/api/admin/subscriptions/${id}`, { method: 'DELETE' }),
   runSubscription: (id) => request(`/api/admin/subscriptions/${id}/run`, { method: 'POST' }),
   subscriptionRuns: (id, limit = 20) => request(`/api/admin/subscriptions/${id}/runs?limit=${limit}`),
+
+  // пользователи и роли (ADR-50)
+  users: () => request('/api/admin/users'),
+  createUser: (payload) => request('/api/admin/users', { method: 'POST', body: JSON.stringify(payload) }),
+  updateUser: (id, payload) =>
+    request(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
   // сырой шаблон для редактора: с SQL справочников, в отличие от публичного /api/reports/{id}
   adminTemplate: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`),
   adminHistory: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}/history`),
