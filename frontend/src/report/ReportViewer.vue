@@ -43,7 +43,7 @@
         <TableView
           v-else-if="block.type === 'table'"
           :block="block"
-          :rows="rows"
+          :rows="rowsFor(block)"
           :height="460"
           :styles="stylesFor(block)"
           :print-mode="printMode"
@@ -110,6 +110,14 @@ function missingRequired() {
   )
 }
 
+// Несколько наборов данных (ADR-36): каждый табличный блок читает свой dataKey.
+const dataByKey = ref({})
+
+function rowsFor(block) {
+  const key = block?.dataKey || ''
+  return dataByKey.value[key] || rows.value
+}
+
 async function load() {
   if (template.value && missingRequired().length) return // ждём автовыбор справочника
   if (controller) controller.abort()
@@ -118,7 +126,14 @@ async function load() {
   error.value = null
   const started = performance.now()
   try {
-    const data = await api.data(reportId, { ...paramValues }, controller.signal)
+    const blocks = (template.value?.blocks || []).filter((b) => b.type === 'table')
+    const keys = [...new Set(blocks.map((b) => b.dataKey || ''))]
+    const loaded = {}
+    for (const key of keys) {
+      loaded[key] = (await api.data(reportId, { ...paramValues }, controller.signal, key)).rows
+    }
+    dataByKey.value = loaded
+    const data = { rows: loaded[keys[0]] || [] }
     const renderStart = performance.now()
     rows.value = data.rows
     await nextTick()

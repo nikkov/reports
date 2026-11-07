@@ -38,10 +38,11 @@ export const api = {
       { signal }
     )
   },
-  data: (reportId, params, signal) =>
+  // dataset — ключ из datasets шаблона (ADR-36); без него сервер отдаёт первый набор
+  data: (reportId, params, signal, dataset) =>
     request('/api/report/data', {
       method: 'POST',
-      body: JSON.stringify({ reportId, params }),
+      body: JSON.stringify(dataset ? { reportId, params, dataset } : { reportId, params }),
       signal
     }),
 

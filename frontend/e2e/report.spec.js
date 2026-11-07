@@ -668,9 +668,10 @@ test('drill-through: подытог группы открывает деталь
   await expect(page.locator('.meta')).toContainText('строк')
 })
 
-test('каталог: папки, теги и избранное', async ({ page }) => {
+test('каталог: папки, теги и избранное', async ({ page, request }) => {
+  const total = (await (await request.get('/api/reports')).json()).length
   await page.goto('/')
-  await expect(page.locator('.card')).toHaveCount(13)
+  await expect(page.locator('.card')).toHaveCount(total)
   await expect(page.locator('.folder', { hasText: 'Финансы' })).toBeVisible()
 
   // папка
@@ -784,4 +785,35 @@ test('кэш результатов: повтор из кэша, 304, сброс
   expect(afterPublish.headers()['etag']).not.toBe(etag)
 
   await request.delete(`/api/reports/${id}`)
+})
+
+test('мультинаборность: блоки читают разные наборы одного шаблона', async ({ page, request }) => {
+  // публичный шаблон не должен отдавать SQL ни одного набора
+  const tpl = await (await request.get('/api/reports/sales-two-sets')).json()
+  expect(Object.keys(tpl.datasets).sort()).toEqual(['byCategory', 'byRegion'])
+  for (const ds of Object.values(tpl.datasets)) expect(ds.sql).toBeUndefined()
+
+  await page.goto('/report.html?report=sales-two-sets&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк')
+  await expect(page.locator('.rt-table')).toHaveCount(2)
+
+  const tables = await page.locator('.rt-table').evaluateAll((els) =>
+    els.map((t) => ({
+      head: Array.from(t.querySelectorAll('thead th')).map((th) => th.textContent.trim()),
+      first: t.tBodies[0].rows[0] ? t.tBodies[0].rows[0].cells[0].textContent.trim() : ''
+    }))
+  )
+  // первый блок — регионы, второй — категории: данные разные
+  expect(tables[0].head).toContain('Регион')
+  expect(tables[1].head).toContain('Категория')
+  expect(tables[0].first).not.toBe(tables[1].first)
+
+  // набор можно запросить явно, неизвестный — 422
+  const one = await request.post('/api/report/data', { data: { reportId: 'sales-two-sets', dataset: 'byRegion', params: { from: '2026-03-01', to: '2026-03-10' } } })
+  expect(one.ok()).toBeTruthy()
+  expect((await one.json()).columns[0].name).toBe('region')
+
+  const bad = await request.post('/api/report/data', { data: { reportId: 'sales-two-sets', dataset: 'nope', params: { from: '2026-03-01', to: '2026-03-10' } } })
+  expect(bad.status()).toBe(422)
+  expect((await bad.json()).error.code).toBe('DATASET_NOT_FOUND')
 })

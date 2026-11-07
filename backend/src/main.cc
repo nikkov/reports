@@ -79,11 +79,17 @@ Json::Value fieldToJson(const orm::Field &f, const std::string &type) {
     return Json::Value(v);
 }
 
+struct DatasetInfo {
+    std::string sql;
+    std::map<std::string, std::string> params; // имя параметра запроса → "$param" шаблона
+};
+
 struct TemplateInfo {
     std::string id;
     std::string title;
-    std::string datasetSql;                             // SQL набора данных из шаблона (ADR-27)
-    std::map<std::string, std::string> datasetParams;  // имя параметра запроса → "$param" шаблона
+    std::string datasetSql;                             // SQL первого набора (совместимость)
+    std::map<std::string, std::string> datasetParams;
+    std::map<std::string, DatasetInfo> datasets;        // все наборы шаблона (ADR-36)
 };
 
 
@@ -110,14 +116,21 @@ bool parseTemplate(const std::string &text, const std::string &fallbackId, Templ
     out.title = root.get("title", out.id).asString();
     const Json::Value &datasets = root["datasets"];
     if (!datasets.isObject() || datasets.empty()) return true;  // шаблон без данных
-    const auto first = datasets.begin();
     // SQL набора данных живёт в шаблоне (ADR-27); queryId из реестра больше не поддерживается
-    if ((*first).isMember("queryId")) return false;
-    out.datasetSql = (*first).get("sql", "").asString();
-    const Json::Value &p = (*first)["params"];
-    if (p.isObject()) {
-        for (auto it = p.begin(); it != p.end(); ++it) out.datasetParams[it.name()] = it->asString();
+    out.datasets.clear();
+    for (auto ds = datasets.begin(); ds != datasets.end(); ++ds) {
+        if (ds->isMember("queryId")) return false;
+        DatasetInfo info;
+        info.sql = (*ds).get("sql", "").asString();
+        if (info.sql.empty()) return false;
+        const Json::Value &p = (*ds)["params"];
+        if (p.isObject()) {
+            for (auto it = p.begin(); it != p.end(); ++it) info.params[it.name()] = it->asString();
+        }
+        out.datasets[ds.name()] = info;
     }
+    out.datasetSql = out.datasets.begin()->second.sql;
+    out.datasetParams = out.datasets.begin()->second.params;
     return true;
 }
 
@@ -1267,6 +1280,7 @@ int main() {
 
             std::string datasetSql;
             std::map<std::string, std::string> datasetParams;
+            std::string datasetKey; // какой набор отдаём: '' — первый в шаблоне (ADR-36)
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
                 const auto it = templates.find(reportId);
@@ -1274,8 +1288,22 @@ int main() {
                     sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
                     return;
                 }
-                datasetSql = it->second.datasetSql;
-                datasetParams = it->second.datasetParams;
+                const auto &all = it->second.datasets;
+                if (all.empty()) {
+                    datasetSql = it->second.datasetSql; // шаблон без данных: прежнее поведение
+                    datasetParams = it->second.datasetParams;
+                } else {
+                    datasetKey = (*body).get("dataset", "").asString();
+                    const auto ds = all.find(datasetKey.empty() ? all.begin()->first : datasetKey);
+                    if (ds == all.end()) {
+                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
+                                  "в шаблоне нет набора '" + datasetKey + "'");
+                        return;
+                    }
+                    datasetKey = ds->first;
+                    datasetSql = ds->second.sql;
+                    datasetParams = ds->second.params;
+                }
             }
             if (datasetSql.empty()) {
                 sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
@@ -1316,6 +1344,8 @@ int main() {
             // Версия в ключе делает публикацию шаблона инвалидацией.
             const std::uint64_t tplVersion = templatesVersion.load();
             std::string cacheKey = reportId;
+            cacheKey += '|';
+            cacheKey += datasetKey; // набор данных — часть ключа: у блоков разные запросы
             cacheKey += '|';
             cacheKey += std::to_string(tplVersion);
             for (const auto &kv : bag.values()) {

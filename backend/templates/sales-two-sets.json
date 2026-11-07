@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "id": "sales-two-sets",
+  "title": "Продажи: два набора данных",
+  "description": "Один шаблон, два независимых запроса: итоги по регионам и по категориям.",
+  "folder": "Продажи",
+  "tags": [
+    "наборы данных",
+    "пример"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "byRegion": {
+      "sql": "SELECT r.name AS region, count(*) AS orders, sum(s.amount) AS amount FROM sales s JOIN regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name ORDER BY amount DESC",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      }
+    },
+    "byCategory": {
+      "sql": "SELECT category, count(*) AS orders, sum(profit) AS profit FROM sales WHERE order_date >= :from::date AND order_date <= :to::date GROUP BY category ORDER BY profit DESC",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Два блока читают разные наборы данных одного шаблона: byRegion и byCategory."
+    },
+    {
+      "type": "table",
+      "dataKey": "byRegion",
+      "title": "По регионам",
+      "width": "half",
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "width": 150
+        },
+        {
+          "field": "orders",
+          "title": "Заказов",
+          "format": "integer",
+          "align": "right",
+          "width": 100
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": "integer",
+          "align": "right",
+          "aggregate": "sum",
+          "width": 130
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "byCategory",
+      "title": "По категориям",
+      "width": "half",
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория",
+          "width": 170
+        },
+        {
+          "field": "orders",
+          "title": "Заказов",
+          "format": "integer",
+          "align": "right",
+          "width": 100
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "format": "integer",
+          "align": "right",
+          "aggregate": "sum",
+          "width": 130
+        }
+      ]
+    }
+  ]
+}
