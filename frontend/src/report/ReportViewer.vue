@@ -6,6 +6,16 @@
         <span class="meta" v-if="status">
           строк: <b>{{ rowCount }}</b> · запрос: <b>{{ elapsedMs }} мс</b> · шаблон v{{ template?.version }}
         </span>
+        <div class="tools no-print" v-if="refreshSeconds > 0">
+          <span class="refresh" :class="{ paused: refreshPaused }">
+            <template v-if="refreshPaused">обновление на паузе</template>
+            <template v-else>обновление каждые {{ refreshSeconds }} с</template>
+            <span v-if="lastLoadedAt" class="ref-time">· {{ lastLoadedLabel }}</span>
+          </span>
+          <button type="button" class="tool" @click="toggleRefresh">
+            {{ refreshPaused ? 'Возобновить' : 'Пауза' }}
+          </button>
+        </div>
         <div class="tools no-print">
           <button type="button" class="tool" :disabled="!tableBlock || exporting" @click="exportExcel">
             {{ exporting ? 'Готовим файл…' : 'Excel' }}
@@ -91,8 +101,30 @@ function defaultParams(tpl) {
   return out
 }
 
-function onParams(next) {
-  Object.assign(paramValues, next)
+function stopRefresh() {
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+    refreshTimer.value = null
+  }
+}
+
+function startRefresh() {
+  stopRefresh()
+  if (!refreshSeconds.value) return
+  refreshTimer.value = setInterval(() => {
+    // фон и уже идущий запрос не трогаем: иначе очередь запросов на медленных отчётах
+    if (document.hidden || refreshPaused.value || loading.value) return
+    load()
+  }, refreshSeconds.value * 1000)
+}
+
+function toggleRefresh() {
+  refreshPaused.value = !refreshPaused.value
+  if (!refreshPaused.value) load()
+}
+
+function onParams(params) {
+  Object.assign(paramValues, params)
 }
 
 function syncUrl() {
@@ -146,6 +178,7 @@ async function load() {
     // бюджет рендера: только построение модели и отрисовка окна, без времени запроса
     window.__renderMs = Math.round(performance.now() - renderStart)
     lastLoadedKey = JSON.stringify(paramValues)
+    lastLoadedAt.value = new Date()
     elapsedMs.value = Math.round(performance.now() - started)
     status.value = 'ok'
     syncUrl()
@@ -209,8 +242,10 @@ watch(
 
 onBeforeUnmount(() => {
   clearTimeout(reloadTimer)
+  stopRefresh()
   if (controller) controller.abort()
 })
+
 
 // --- блоки ---
 
@@ -219,6 +254,20 @@ const tableBlock = computed(() => (template.value?.blocks || []).find((b) => b.t
 const printMode = ref(false)
 const exporting = ref(false)
 const printing = ref(false)
+// Автообновление (ADR-39): период задаётся шаблоном, вкладка в фоне не опрашивает сервер.
+const refreshTimer = ref(null)
+const refreshPaused = ref(false)
+const lastLoadedAt = ref(null)
+const refreshSeconds = computed(() => {
+  const value = Number(template.value?.refreshSeconds)
+  return Number.isInteger(value) && value > 0 ? value : 0
+})
+const lastLoadedLabel = computed(() =>
+  lastLoadedAt.value ? lastLoadedAt.value.toLocaleTimeString('ru-RU') : ''
+)
+
+// период приходит из шаблона: меняется — перезапускаем таймер
+watch(() => template.value?.refreshSeconds, () => startRefresh(), { immediate: true })
 // Печать строит полный DOM: при большом объёме браузер «вешается» на секунды, поэтому лимит скромный.
 const PRINT_LIMIT = 5000
 
@@ -349,6 +398,17 @@ function tableColumns(block) {
 .tool:disabled {
   opacity: 0.55;
   cursor: default;
+}
+.refresh {
+  font-size: 12px;
+  color: #5b6472;
+  white-space: nowrap;
+}
+.refresh.paused {
+  color: #8a6d3b;
+}
+.ref-time {
+  color: #8b97a6;
 }
 
 @media print {

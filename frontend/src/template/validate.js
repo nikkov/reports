@@ -262,6 +262,18 @@ export function validateTemplate(template) {
     }
   })
 
+  // автообновление: целое число секунд, 0 выключает
+  if (template.refreshSeconds !== undefined) {
+    const r = template.refreshSeconds
+    if (!Number.isInteger(r)) {
+      errors.push({ path: 'refreshSeconds', message: 'refreshSeconds должен быть целым числом' })
+    } else if (r < 0 || r > 3600) {
+      errors.push({ path: 'refreshSeconds', message: 'refreshSeconds: допустимо 0…3600' })
+    } else if (r > 0 && r < 5) {
+      warnings.push({ path: 'refreshSeconds', message: 'меньше 5 секунд — лишняя нагрузка на базу' })
+    }
+  }
+
   // каталог: папка и теги
   if (template.folder !== undefined && typeof template.folder !== 'string') {
     errors.push({ path: 'folder', message: 'folder должен быть строкой' })

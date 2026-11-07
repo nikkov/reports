@@ -60,6 +60,12 @@ export default {
         "type": "string"
       },
       "description": "теги каталога"
+    },
+    "refreshSeconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3600,
+      "description": "период автообновления данных на экране, секунды; 0 или отсутствие — выключено"
     }
   },
   "$defs": {

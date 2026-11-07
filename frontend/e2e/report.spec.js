@@ -899,3 +899,44 @@ test('серверный экспорт .xlsx: файл совпадает с э
   })
   expect(bad.status()).toBe(422)
 })
+
+test('автообновление: шаблон задаёт период, страница перезапрашивает данные', async ({ page, request }) => {
+  const id = 'refresh-e2e'
+  const body = {
+    version: 1,
+    id,
+    title: 'Автообновление e2e',
+    refreshSeconds: 2,
+    params: [],
+    datasets: { s: { sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }]
+  }
+  await request.delete(`/api/reports/${id}`)
+  expect((await request.post('/api/reports', { data: { id, body } })).ok()).toBeTruthy()
+
+  const calls = []
+  page.on('request', (req) => {
+    if (req.url().includes('/api/report/data')) calls.push(Date.now())
+  })
+
+  await page.goto(`/report.html?report=${id}`)
+  await expect(page.locator('.rt-table')).toBeVisible()
+  await expect(page.locator('.refresh')).toContainText('обновление каждые 2 с')
+
+  // за 5 секунд должно быть минимум 2 запроса: первый и одно автообновление
+  await page.waitForTimeout(5000)
+  expect(calls.length).toBeGreaterThanOrEqual(2)
+
+  // пауза останавливает опрос
+  await page.getByRole('button', { name: 'Пауза' }).click()
+  const before = calls.length
+  await page.waitForTimeout(3000)
+  expect(calls.length).toBe(before)
+  await expect(page.locator('.refresh')).toContainText('на паузе')
+
+  // возобновление сразу перезапрашивает
+  await page.getByRole('button', { name: 'Возобновить' }).click()
+  await expect.poll(() => calls.length, { timeout: 5000 }).toBeGreaterThan(before)
+
+  await request.delete(`/api/reports/${id}`)
+})

@@ -321,3 +321,30 @@ describe('условное форматирование (ADR-25)', () => {
     expect(res.errors).toEqual([])
   })
 })
+
+describe('автообновление (ADR-39)', () => {
+  const withRefresh = (value) => ({ ...base(), refreshSeconds: value })
+
+  it('принимает период в допустимом диапазоне', () => {
+    expect(validateTemplate(withRefresh(30)).errors).toEqual([])
+    expect(validateTemplate(withRefresh(0)).errors).toEqual([])
+  })
+
+  it('отклоняет не целое и выход за границы', () => {
+    expect(validateTemplate(withRefresh(1.5)).errors.map((e) => e.path)).toContain('refreshSeconds')
+    expect(validateTemplate(withRefresh(4000)).errors.map((e) => e.path)).toContain('refreshSeconds')
+    expect(validateTemplate(withRefresh(-5)).errors.map((e) => e.path)).toContain('refreshSeconds')
+  })
+
+  it('слишком частый период — предупреждение, а не ошибка', () => {
+    const res = validateTemplate(withRefresh(2))
+    expect(res.errors).toEqual([])
+    expect(res.warnings.map((w) => w.path)).toContain('refreshSeconds')
+  })
+
+  it('без поля автообновление выключено', () => {
+    const res = validateTemplate(base())
+    expect(res.errors).toEqual([])
+    expect(res.warnings.map((w) => w.path)).not.toContain('refreshSeconds')
+  })
+})
