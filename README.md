@@ -158,3 +158,15 @@ curl -b cookie -X POST localhost:8080/api/report/export.csv \
 # поиск по каталогу, вторая страница
 curl -b cookie 'localhost:8080/api/reports?q=продаж&limit=10&offset=10'
 ```
+
+## Валидация шаблонов
+
+Шаблон проверяется дважды: в редакторе (мгновенная подсказка) и на сервере — истина вторая, без неё
+сохранить шаблон нельзя. Правила живут в `frontend/src/template/validate.js` и `backend/src/validate.cc`,
+а их совпадение держат фикстуры `docs/fixtures/validation-cases.json`: файл читают и Catch2, и vitest.
+
+```bash
+# список ошибок по шаблону
+curl -b cookie -X POST localhost:8080/api/reports/sales-summary/validate \
+  -H 'Content-Type: application/json' -d '{"body": '"$(cat backend/templates/sales-summary.json)"'}'
+```

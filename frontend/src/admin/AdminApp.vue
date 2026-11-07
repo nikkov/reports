@@ -532,9 +532,17 @@ async function runValidate() {
   try {
     const res = await api.validateReport(reportId, tpl)
     if (!res?.ok) {
+      // сервер отдаёт полный список замечаний с путями — показываем их как есть
+      const serverErrors = (res?.errors || []).map((e) => ({ path: `(сервер) ${e.path}`, message: e.message }))
       errors.value = [
         ...errors.value,
-        { path: '(сервер)', message: res?.error || 'сервер отклонил шаблон' }
+        ...(serverErrors.length ? serverErrors : [{ path: '(сервер)', message: res?.error || 'сервер отклонил шаблон' }])
+      ]
+    }
+    if (res?.warnings?.length) {
+      warnings.value = [
+        ...warnings.value,
+        ...res.warnings.map((w) => ({ path: `(сервер) ${w.path}`, message: w.message }))
       ]
     }
   } catch (e) {

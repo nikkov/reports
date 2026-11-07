@@ -19,6 +19,7 @@ add_library(rep_core STATIC
   src/auth.cc
   src/csv_export.cc
   src/dataset.cc
+  src/validate.cc
   src/env.cc
   src/params.cc
   src/queries.cc
@@ -39,6 +40,9 @@ add_executable(rep_tests
   tests/dataset_test.cc
   tests/queries_test.cc
   tests/params_test.cc
+  tests/validate_test.cc
 )
 target_link_libraries(rep_tests PRIVATE rep_core Catch2::Catch2WithMain libxlsxwriter::libxlsxwriter)
+# фикстуры parity лежат в репозитории: тест читает их по этому пути
+target_compile_definitions(rep_tests PRIVATE REP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME rep_tests COMMAND rep_tests)

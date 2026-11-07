@@ -959,6 +959,33 @@ test('drill-through с диаграммы: клик по столбцу откр
   await expect(page.locator('.meta')).toContainText('строк')
 })
 
+test('серверная валидация шаблона: список ошибок с путями, сохранение отклонено', async ({ request }) => {
+  const bad = {
+    version: 1,
+    id: 'bad-server-e2e',
+    title: 'Плохой шаблон',
+    datasets: { s: { sql: 'DELETE FROM sales' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ title: 'без поля' }] }]
+  }
+
+  // проверка отдаёт полный список, а не одну строку
+  const check = await request.post('/api/reports/bad-server-e2e/validate', { data: { body: bad } })
+  expect(check.ok()).toBeTruthy()
+  const payload = await check.json()
+  expect(payload.ok).toBe(false)
+  const paths = payload.errors.map((e) => e.path)
+  expect(paths).toContain('datasets.s')          // SQL только на чтение
+  expect(paths).toContain('blocks.0.columns.0')  // колонка без field/expression
+  expect(payload.errors[0].message).toBeTruthy()
+
+  // сохранить такой шаблон нельзя — даже если клиент не проверял
+  const save = await request.post('/api/reports', { data: { id: 'bad-server-e2e', body: bad } })
+  expect(save.status()).toBe(422)
+  const error = await save.json()
+  expect(error.error.code).toBe('TEMPLATE_INVALID')
+  expect(error.error.message).toContain('datasets.s')
+})
+
 test('обновление по событию: публикация шаблона обновляет экран без опроса', async ({ page, request }) => {
   const id = 'live-e2e'
   const body = {

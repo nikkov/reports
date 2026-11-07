@@ -1,0 +1,407 @@
+{
+  "comment": "Набор шаблонов, на котором серверный (validate.cc) и клиентский (validate.js) валидаторы обязаны давать одинаковые пути ошибок. Проверяется в backend/tests/validate_test.cc и frontend/src/template/validate.parity.test.js.",
+  "cases": [
+    {
+      "name": "валидный минимум",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "версия не 1",
+      "template": {
+        "version": 2,
+        "id": "parity-v",
+        "title": "Т",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "т"
+          }
+        ],
+        "datasets": {}
+      },
+      "errors": [
+        "version"
+      ]
+    },
+    {
+      "name": "нет заголовка",
+      "template": {
+        "version": 1,
+        "id": "parity-t",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "т"
+          }
+        ],
+        "datasets": {}
+      },
+      "errors": [
+        "title"
+      ]
+    },
+    {
+      "name": "пустой список блоков",
+      "template": {
+        "version": 1,
+        "id": "parity-b",
+        "title": "Т",
+        "blocks": [],
+        "datasets": {}
+      },
+      "errors": [
+        "blocks"
+      ]
+    },
+    {
+      "name": "набор без sql",
+      "template": {
+        "version": 1,
+        "id": "parity-ds",
+        "title": "Т",
+        "datasets": {
+          "sales": {}
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.sales.sql"
+      ]
+    },
+    {
+      "name": "набор с queryId",
+      "template": {
+        "version": 1,
+        "id": "parity-q",
+        "title": "Т",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "queryId": "old"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.sales",
+        "datasets.sales.queryId"
+      ]
+    },
+    {
+      "name": "набор ссылается на необъявленный параметр",
+      "template": {
+        "version": 1,
+        "id": "parity-ref",
+        "title": "Т",
+        "params": [],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.sales.params.from"
+      ]
+    },
+    {
+      "name": "select без источника",
+      "template": {
+        "version": 1,
+        "id": "parity-sel",
+        "title": "Т",
+        "params": [
+          {
+            "name": "region",
+            "type": "select",
+            "label": "Регион"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0"
+      ]
+    },
+    {
+      "name": "справочник без sql",
+      "template": {
+        "version": 1,
+        "id": "parity-lookup",
+        "title": "Т",
+        "params": [
+          {
+            "name": "region",
+            "type": "select",
+            "label": "Регион",
+            "source": {
+              "kind": "lookup"
+            }
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source"
+      ]
+    },
+    {
+      "name": "неизвестный родитель каскада",
+      "template": {
+        "version": 1,
+        "id": "parity-dep",
+        "title": "Т",
+        "params": [
+          {
+            "name": "city",
+            "type": "select",
+            "label": "Город",
+            "source": {
+              "kind": "lookup",
+              "sql": "SELECT 1 AS id, 'x' AS name",
+              "dependsOn": "region"
+            }
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source.dependsOn"
+      ]
+    },
+    {
+      "name": "колонка без field и expression",
+      "template": {
+        "version": 1,
+        "id": "parity-col",
+        "title": "Т",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "т"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.columns.0"
+      ]
+    },
+    {
+      "name": "текст с необъявленным параметром",
+      "template": {
+        "version": 1,
+        "id": "parity-txt",
+        "title": "Т",
+        "params": [],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.text"
+      ]
+    },
+    {
+      "name": "период автообновления вне диапазона",
+      "template": {
+        "version": 1,
+        "id": "parity-refresh",
+        "title": "Т",
+        "refreshSeconds": 4000,
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "refreshSeconds"
+      ]
+    },
+    {
+      "name": "drill в диаграмме без report",
+      "template": {
+        "version": 1,
+        "id": "parity-drill",
+        "title": "Т",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y"
+          }
+        },
+        "blocks": [
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "bar",
+            "xField": "x",
+            "yField": "y",
+            "drill": {
+              "params": {
+                "region": "x"
+              }
+            }
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.drill.report"
+      ]
+    }
+  ]
+}

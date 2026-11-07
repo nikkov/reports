@@ -19,6 +19,7 @@
 #include "aggregate.h"
 #include "csv_export.h"
 #include "dataset.h"
+#include "validate.h"
 #include "xlsx_export.h"
 #include "env.h"
 #include "params.h"
@@ -319,107 +320,36 @@ int main() {
     };
 
     // Разрешён только чтение: админка не должна давать исполнять произвольный SQL под ролью postgres (5.9).
-    auto sqlGuard = [](const std::string &sql, std::string &err) {
-        std::string s;
-        for (char c : sql) {
-            if (!std::isspace(static_cast<unsigned char>(c))) s.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        }
-        if (s.rfind("select", 0) != 0 && s.rfind("with", 0) != 0) {
-            err = "SQL справочника должен начинаться с SELECT или WITH";
-            return false;
-        }
-        if (sql.find(';') != std::string::npos || sql.find("--") != std::string::npos ||
-            sql.find("/*") != std::string::npos) {
-            err = "SQL не может содержать ';', '--' или '/*'";
-            return false;
-        }
-        static const std::vector<std::string> forbidden = {
-            "insert", "update", "delete", "drop", "alter", "create", "truncate",
-            "grant", "revoke", "copy", "merge", "call", "do", "vacuum", "reindex"};
-        for (const auto &word : forbidden) {
-            size_t pos = 0;
-            while ((pos = s.find(word, pos)) != std::string::npos) {
-                const bool leftOk = pos == 0 || !std::isalnum(static_cast<unsigned char>(s[pos - 1]));
-                const bool rightOk = pos + word.size() >= s.size() ||
-                                     !std::isalnum(static_cast<unsigned char>(s[pos + word.size()]));
-                if (leftOk && rightOk) {
-                    err = "SQL содержит запрещённую операцию «" + word + "»";
-                    return false;
-                }
-                pos += word.size();
-            }
-        }
-        return true;
-    };
+    auto sqlGuard = [](const std::string &sql, std::string &err) { return rep::isReadOnlySql(sql, err); };
 
-    // Структурная проверка шаблона на сервере (полная семантика — на клиенте, см. ADR-26).
-    auto validateTemplate = [maxTemplateBytes, &sqlGuard](const std::string &raw, const std::string &urlId,
-                                                          std::string &err) {
+    // Полная проверка шаблона на сервере (ADR-45): те же правила, что в клиентском
+    // validate.js, плюс SQL-гард — админский API не принимает шаблон, который
+    // клиент просто не отправил на проверку.
+    auto validateTemplateFull = [maxTemplateBytes](const std::string &raw,
+                                                   const std::string &urlId) {
+        rep::ValidationResult result;
         if (raw.size() > maxTemplateBytes) {
-            err = "шаблон больше " + std::to_string(maxTemplateBytes) + " байт";
-            return false;
+            result.errors.push_back({"(корень)", "шаблон больше " + std::to_string(maxTemplateBytes) + " байт"});
+            return result;
         }
         Json::CharReaderBuilder rb;
         Json::Value root;
         std::string parseErr;
         std::istringstream in(raw);
-        if (!Json::parseFromStream(rb, in, &root, &parseErr) || !root.isObject()) {
-            err = "шаблон не является JSON-объектом: " + parseErr;
-            return false;
+        if (!Json::parseFromStream(rb, in, &root, &parseErr)) {
+            result.errors.push_back({"(корень)", "шаблон не является JSON: " + parseErr});
+            return result;
         }
-        if (root.get("version", Json::Value(0)).asInt() != 1) {
-            err = "version должен быть 1";
-            return false;
-        }
-        if (!urlId.empty() && root.get("id", Json::Value("")).asString() != urlId) {
-            err = "id в шаблоне не совпадает с URL";
-            return false;
-        }
-        if (root.get("title", Json::Value("")).asString().empty()) {
-            err = "title обязателен";
-            return false;
-        }
-        if (!root["blocks"].isArray() || root["blocks"].empty()) {
-            err = "blocks должен быть непустым массивом";
-            return false;
-        }
-        if (!root["params"].isNull() && !root["params"].isArray()) {
-            err = "params должен быть массивом";
-            return false;
-        }
-        if (!root["datasets"].isNull() && !root["datasets"].isObject()) {
-            err = "datasets должен быть объектом";
-            return false;
-        }
-        for (const auto &ds : root["datasets"]) {
-            if (ds.isMember("queryId")) {
-                err = "queryId больше не поддерживается: SQL набора данных задаётся в datasets.<key>.sql";
-                return false;
-            }
-            if (ds.get("sql", Json::Value("")).asString().empty()) {
-                err = "у набора данных нет sql";
-                return false;
-            }
-        }
-        for (const auto &param : root["params"]) {
-            const Json::Value &source = param["source"];
-            if (!source.isObject() || source.get("kind", Json::Value("")).asString() != "lookup") continue;
-            if (source.isMember("queryId")) {
-                err = "queryId больше не поддерживается: SQL справочника задаётся в source.sql";
-                return false;
-            }
-            const std::string sql = source.get("sql", Json::Value("")).asString();
-            if (sql.empty()) {
-                err = "у справочника " + param.get("name", Json::Value("")).asString() + " нет source.sql";
-                return false;
-            }
-            std::string sqlErr;
-            if (!sqlGuard(sql, sqlErr)) {
-                err = sqlErr;
-                return false;
-            }
-        }
-        return true;
+        return rep::validateTemplateJson(root, urlId);
+    };
+
+    auto validateTemplate = [&validateTemplateFull](const std::string &raw, const std::string &urlId,
+                                                    std::string &err) {
+        const auto result = validateTemplateFull(raw, urlId);
+        if (result.ok()) return true;
+        const auto &first = result.errors.front();
+        err = first.path == "(корень)" ? first.message : first.path + ": " + first.message;
+        return false;
     };
 
     // Атомарная замена шаблона в памяти: сначала разбор, потом запись под мьютексом.
@@ -672,9 +602,9 @@ int main() {
 
     app().registerHandler(
         "/api/reports/{id}/validate",
-        [adminEnabled, &validateTemplate](const HttpRequestPtr &req,
-                                          std::function<void(const HttpResponsePtr &)> &&cb,
-                                          const std::string &id) {
+        [adminEnabled, &validateTemplateFull](const HttpRequestPtr &req,
+                                              std::function<void(const HttpResponsePtr &)> &&cb,
+                                              const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -687,10 +617,29 @@ int main() {
             Json::StreamWriterBuilder wb;
             wb["indentation"] = "";
             const std::string raw = Json::writeString(wb, (*body)["body"] ? (*body)["body"] : *body);
-            std::string err;
+            const auto result = validateTemplateFull(raw, id);
+            Json::Value errors(Json::arrayValue);
+            for (const auto &e : result.errors) {
+                Json::Value item;
+                item["path"] = e.path;
+                item["message"] = e.message;
+                errors.append(item);
+            }
+            Json::Value warnings(Json::arrayValue);
+            for (const auto &w : result.warnings) {
+                Json::Value item;
+                item["path"] = w.path;
+                item["message"] = w.message;
+                warnings.append(item);
+            }
             Json::Value out;
-            out["ok"] = validateTemplate(raw, id, err);
-            if (!out["ok"].asBool()) out["error"] = err;
+            out["ok"] = result.ok();
+            out["errors"] = errors;
+            out["warnings"] = warnings;
+            if (!result.ok()) {
+                const auto &first = result.errors.front();
+                out["error"] = first.path == "(корень)" ? first.message : first.path + ": " + first.message;
+            }
             cb(jsonResponse(out));
         },
         {Post});
