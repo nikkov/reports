@@ -34,11 +34,40 @@ const starts = []
 while ((match = re.exec(section)) !== null) {
   starts.push({ number: Number(match[1]), title: match[2].trim(), from: match.index, headerEnd: re.lastIndex })
 }
+// Тело решения обязано состоять из четырёх частей: без них смысл теряется,
+// а «единый формат» превращается в лозунг — поэтому проверяем при сборке.
+const PARTS = [
+  ['problem', 'Проблема'],
+  ['decision', 'Решение'],
+  ['effects', 'Следствия'],
+  ['limits', 'Ограничения']
+]
+
+function parseParts(body) {
+  const parts = {}
+  for (const [key, label] of PARTS) {
+    const re = new RegExp(`^- \\*\\*${label}:\\*\\* ?([\\s\\S]*?)(?=^- \\*\\*(?:Проблема|Решение|Следствия|Ограничения):|$)`, 'm')
+    const m = body.match(re)
+    if (m) parts[key] = m[1].trim()
+  }
+  return parts
+}
+
 starts.forEach((item, i) => {
   const to = i + 1 < starts.length ? starts[i + 1].from : section.length
   const body = section.slice(item.headerEnd, to).trim()
-  blocks.push({ ...item, body })
+  blocks.push({ ...item, body, ...parseParts(body) })
 })
+
+const incomplete = blocks.filter((b) => PARTS.some(([key]) => !b[key]))
+if (incomplete.length) {
+  console.error('у этих ADR нет четырёх частей (Проблема, Решение, Следствия, Ограничения):')
+  for (const b of incomplete) {
+    const missing = PARTS.filter(([key]) => !b[key]).map(([, label]) => label)
+    console.error(`  ADR-${b.number}: нет «${missing.join('», «')}»`)
+  }
+  process.exit(1)
+}
 
 blocks.sort((a, b) => a.number - b.number)
 
@@ -55,6 +84,8 @@ lines.push('')
 lines.push(`Реестр собран из \`docs/plan/PLAN.md\` — там решения пишутся рядом с фазами и гейтами.`)
 lines.push('Файл генерируется: `node scripts/adr.mjs`; актуальность проверяет `./scripts/check.sh`')
 lines.push('(`node scripts/adr.mjs --check`). Правьте PLAN.md, а не этот файл.')
+lines.push('')
+lines.push('Каждое решение записано четырьмя частями: **проблема**, **решение**, **следствия**, **ограничения**.')
 lines.push('')
 const maxNumber = decorated.length ? decorated[decorated.length - 1].number : 0
 const present = new Set(decorated.map((b) => b.number))
@@ -81,8 +112,10 @@ for (const b of decorated) {
   lines.push('')
   lines.push(`## ADR-${b.number}. ${b.plain}${b.version ? ` (версия ${b.version})` : ''}`)
   lines.push('')
-  lines.push(b.body)
-  lines.push('')
+  for (const [key, label] of PARTS) {
+    lines.push(`**${label}.** ${b[key]}`)
+    lines.push('')
+  }
 }
 
 const generated = lines.join('\n')
