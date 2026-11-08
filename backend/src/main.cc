@@ -244,6 +244,35 @@ std::time_t nextRunInZone(PGconn *conn, const rep::Cron &cron, const std::string
     return nextUtc;
 }
 
+// Попытки без finished_at старше заёма означают, что процесс упал во время отправки.
+// Закрываем их как прерванные, иначе журнал вечно показывает «в процессе», а человек
+// не знает, ушло письмо или нет (ADR-62).
+int closeStaleRuns(int leaseSeconds) {
+    PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+    if (PQstatus(conn) != CONNECTION_OK) {
+        LOG_WARN << "прерванные отправки: нет соединения с БД: " << PQerrorMessage(conn);
+        PQfinish(conn);
+        return -1;
+    }
+    const std::string leaseText = std::to_string(leaseSeconds);
+    const char *values[] = {leaseText.c_str()};
+    PGresult *res = PQexecParams(
+        conn,
+        "UPDATE subscription_runs SET finished_at = now(), ok = false,"
+        " error = coalesce(error, 'прервано: процесс остановлен')"
+        " WHERE finished_at IS NULL AND started_at < now() - ($1 || ' seconds')::interval",
+        1, nullptr, values, nullptr, nullptr, 0);
+    int closed = -1;
+    if (PQresultStatus(res) == PGRES_COMMAND_OK) {
+        closed = static_cast<int>(std::strtol(PQcmdTuples(res), nullptr, 10));
+    } else {
+        LOG_WARN << "прерванные отправки: " << PQerrorMessage(conn);
+    }
+    PQclear(res);
+    PQfinish(conn);
+    return closed;
+}
+
 std::string requestActor(const HttpRequestPtr &req) {
     if (!req) return "system";
     if (const auto attrs = req->attributes()) {
@@ -473,6 +502,15 @@ int main() {
     // Повторы неудачной отправки (ADR-61): сколько раз и с каким шагом (экспоненциально).
     const int smtpRetryAttempts = std::stoi(rep::envOr("REP_SMTP_RETRY_ATTEMPTS", "3"));
     const int smtpRetryDelaySeconds = std::stoi(rep::envOr("REP_SMTP_RETRY_DELAY_SECONDS", "60"));
+    // «Заём» подписки на время отправки (ADR-62): сколько секунд подписка считается занятой.
+    // Слишком мало — второй экземпляр возьмётся за ту же подписку; слишком много — долгая
+    // пауза после падения процесса. Диапазон 10…3600.
+    int subscriptionLeaseSeconds = std::stoi(rep::envOr("REP_SUBSCRIPTION_LEASE_SECONDS", "120"));
+    // Тик планировщика: 30 с по умолчанию; меньше — только для проверок и тестовых стендов.
+    int schedulerTickSeconds = std::stoi(rep::envOr("REP_SCHEDULER_TICK_SECONDS", "30"));
+    if (schedulerTickSeconds < 1) schedulerTickSeconds = 1;
+    if (subscriptionLeaseSeconds < 10) subscriptionLeaseSeconds = 10;
+    if (subscriptionLeaseSeconds > 3600) subscriptionLeaseSeconds = 3600;
     const int sessionTtlHours = std::stoi(rep::envOr("REP_SESSION_TTL_HOURS", "12"));
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
     std::mutex templatesMutex;
@@ -3234,6 +3272,22 @@ int main() {
             Json::parseFromStream(reader, in, &params, &errs);
         }
 
+        // Пишем попытку в журнал ДО отправки: если процесс упадёт в середине, строка
+        // останется с finished_at = NULL, и при следующем старте её закроют как прерванную
+        // (ADR-62). Так «тихой» потери попытки не бывает.
+        const std::string attemptText = std::to_string(attempt);
+        const char *beginValues[] = {idText.c_str(), attemptText.c_str()};
+        PGresult *begin = PQexecParams(
+            conn,
+            "INSERT INTO subscription_runs (subscription_id, attempt, ok) VALUES ($1, $2::int, false)"
+            " RETURNING id",
+            2, nullptr, beginValues, nullptr, nullptr, 0);
+        std::string runId;
+        if (PQresultStatus(begin) == PGRES_TUPLES_OK && PQntuples(begin) == 1) {
+            runId = PQgetvalue(begin, 0, 0);
+        }
+        PQclear(begin);
+
         const auto started = std::chrono::steady_clock::now();
         bool ok = false;
         std::string error;
@@ -3297,14 +3351,13 @@ int main() {
         const std::string rowsText = std::to_string(rows);
         const std::string sentText = std::to_string(sent);
         const std::string msText = std::to_string(elapsed);
-        const std::string attemptText = std::to_string(attempt);
-        const char *runValues[] = {idText.c_str(), okText.c_str(), error.c_str(), rowsText.c_str(),
-                                   sentText.c_str(), msText.c_str(), attemptText.c_str()};
+        const char *runValues[] = {runId.c_str(), okText.c_str(), error.c_str(), rowsText.c_str(),
+                                   sentText.c_str(), msText.c_str()};
         PGresult *run = PQexecParams(
             conn,
-            "INSERT INTO subscription_runs (subscription_id, finished_at, ok, error, rows, recipients, duration_ms,"
-            " attempt) VALUES ($1, now(), $2::boolean, NULLIF($3, ''), $4::int, $5::int, $6::int, $7::int)",
-            7, nullptr, runValues, nullptr, nullptr, 0);
+            "UPDATE subscription_runs SET finished_at = now(), ok = $2::boolean, error = NULLIF($3, ''),"
+            " rows = $4::int, recipients = $5::int, duration_ms = $6::int WHERE id = $1::bigint",
+            6, nullptr, runValues, nullptr, nullptr, 0);
         PQclear(run);
 
         // Следующий запуск считается в часовом поясе подписки (ADR-60).
@@ -3410,7 +3463,7 @@ int main() {
                 "SELECT to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
                 " to_char(finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
                 " ok, coalesce(error, ''), coalesce(rows, 0), coalesce(recipients, 0), coalesce(duration_ms, 0)"
-                " FROM subscription_runs WHERE subscription_id = $1::bigint"
+                " FROM subscription_runs WHERE subscription_id = $1::bigint AND finished_at IS NOT NULL"
                 " ORDER BY started_at DESC LIMIT LEAST($2::int, 100)",
                 2, nullptr, values, nullptr, nullptr, 0);
             if (PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -3468,12 +3521,13 @@ int main() {
         }).detach();
     };
 
-    auto startScheduler = [schedulerEnabled, runSubscription, smtpHost, smtpPort, smtpFrom]() {
+    auto startScheduler = [schedulerEnabled, runSubscription, smtpHost, smtpPort, smtpFrom,
+                           subscriptionLeaseSeconds, schedulerTickSeconds]() {
         if (!schedulerEnabled) return;
-        std::thread([runSubscription]() {
+        std::thread([runSubscription, subscriptionLeaseSeconds, schedulerTickSeconds]() {
             PGconn *conn = nullptr;
             while (true) {
-                std::this_thread::sleep_for(std::chrono::seconds(30));
+                std::this_thread::sleep_for(std::chrono::seconds(schedulerTickSeconds));
                 if (!conn || PQstatus(conn) != CONNECTION_OK) {
                     if (conn) PQfinish(conn);
                     conn = PQconnectdb(rep::connInfoFromEnv().c_str());
@@ -3482,11 +3536,13 @@ int main() {
                 // Подписка «к отправке», если подошло плановое время ИЛИ наступил
                 // срок повтора после сбоя SMTP (ADR-61). is_retry отличает второй случай:
                 // повтор не должен сдвигать расписание.
+                const std::string leaseText = std::to_string(subscriptionLeaseSeconds);
+                const char *leaseValue[] = {leaseText.c_str()};
                 // «Заём» на время отправки: подписка не должна достаться второму экземпляру,
                 // пока первый ещё собирает файл. next_run_at уезжает вперёд на 2 минуты и
                 // перезаписывается настоящим расписанием в конце отправки; retry_at снимается,
                 // его заново выставит runSubscription при повторном сбое (ADR-61).
-                PGresult *res = PQexec(
+                PGresult *res = PQexecParams(
                     conn,
                     "WITH due AS ("
                     "  SELECT id, (retry_at IS NOT NULL AND retry_at <= now()"
@@ -3501,10 +3557,11 @@ int main() {
                     "UPDATE report_subscriptions s SET"
                     "  last_run_at = now(),"
                     "  next_run_at = CASE WHEN d.is_retry THEN s.next_run_at"
-                    "                    ELSE now() + interval '2 minutes' END,"
+                    "                    ELSE now() + ($1 || ' seconds')::interval END,"
                     "  retry_at = NULL"
                     " FROM due d WHERE s.id = d.id"
-                    " RETURNING s.id, d.is_retry");
+                    " RETURNING s.id, d.is_retry",
+                    1, nullptr, leaseValue, nullptr, nullptr, 0);
                 if (PQresultStatus(res) == PGRES_TUPLES_OK) {
                     const int count = PQntuples(res);
                     std::vector<std::pair<long long, bool>> due;
@@ -3520,7 +3577,8 @@ int main() {
                 }
             }
         }).detach();
-        LOG_INFO << "планировщик рассылки запущен (тик 30 с, SMTP "
+        LOG_INFO << "планировщик рассылки запущен (тик " << schedulerTickSeconds << " с, заём "
+                 << subscriptionLeaseSeconds << " с, SMTP "
                  << (smtpHost.empty() ? std::string("не настроен") : smtpHost + ":" + std::to_string(smtpPort)) << ")";
     };
 
@@ -3542,6 +3600,15 @@ int main() {
                 LOG_ERROR << "порт " << port << " уже занят — сервер не запущен";
                 std::_Exit(1);
             }
+        }
+    }
+
+    // Сначала закрываем то, что осталось от прошлого запуска, потом начинаем принимать работу.
+    {
+        const int closedRuns = closeStaleRuns(subscriptionLeaseSeconds);
+        if (closedRuns > 0) {
+            LOG_WARN << "прерванные отправки: закрыто " << closedRuns
+                     << " попыток (процесс останавливался во время отправки)";
         }
     }
 
