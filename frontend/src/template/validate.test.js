@@ -386,3 +386,38 @@ describe('drill-through с диаграммы (ADR-43)', () => {
   })
 })
 
+describe('табличный блок: заголовок и агрегация на сервере (ADR-37, ADR-55)', () => {
+  const withTable = (patchBlock) => {
+    const tpl = base()
+    tpl.blocks[1] = { ...tpl.blocks[1], ...patchBlock }
+    return tpl
+  }
+
+  it('title блока допустим (идёт в имя листа Excel)', () => {
+    expect(validateTemplate(withTable({ title: 'Итоги по категориям' })).errors).toEqual([])
+  })
+
+  it('aggregate с groupBy и measures допустим', () => {
+    const res = validateTemplate(
+      withTable({
+        aggregate: {
+          groupBy: ['region'],
+          measures: [{ field: 'amount', agg: 'sum' }, { field: 'profit', agg: 'avg' }]
+        }
+      })
+    )
+    expect(res.errors).toEqual([])
+  })
+
+  it('неизвестный агрегат — ошибка с путём поля', () => {
+    const res = validateTemplate(
+      withTable({ aggregate: { groupBy: ['region'], measures: [{ field: 'amount', agg: 'median' }] } })
+    )
+    expect(paths(res)).toContain('blocks.1.aggregate.measures.0.agg')
+  })
+
+  it('aggregate без measures — ошибка', () => {
+    const res = validateTemplate(withTable({ aggregate: { groupBy: ['region'] } }))
+    expect(paths(res)).toContain('blocks.1.aggregate.measures')
+  })
+})

@@ -324,6 +324,55 @@
           "type": "string",
           "minLength": 1
         },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aggregate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "groupBy",
+            "measures"
+          ],
+          "properties": {
+            "groupBy": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "measures": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "field",
+                  "agg"
+                ],
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "agg": {
+                    "enum": [
+                      "sum",
+                      "avg",
+                      "min",
+                      "max",
+                      "count"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
         "collapsible": {
           "type": "boolean"
         },

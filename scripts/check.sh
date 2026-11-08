@@ -65,7 +65,14 @@ if [ -f "$ROOT/frontend/package.json" ]; then
     cd "$ROOT/frontend"
     npm run --silent build >/dev/null && echo "build ok"
     if node -e "const s=require('./package.json').scripts||{}; process.exit(s.validate?0:1)"; then
-      npm run --silent validate -- ../backend/templates/*.json && echo "templates ok"
+      # без `&&`: его левая часть не подпадает под set -e, и ошибка шаблона
+      # раньше молча проглатывалась — так схема разошлась с форматом (ADR-55)
+      if npm run --silent validate -- ../backend/templates/*.json; then
+        echo "templates ok"
+      else
+        echo "FAIL: шаблоны не проходят валидацию (схема или шаблон)" >&2
+        exit 1
+      fi
     else
       echo "skip templates (нет npm-скрипта validate)"
     fi
