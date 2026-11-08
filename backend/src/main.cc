@@ -15,6 +15,7 @@
 #include <fstream>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <map>
 #include <future>
 #include <mutex>
@@ -139,6 +140,51 @@ void auditEvent(const std::string &actor, const std::string &action, const std::
     if (PQresultStatus(res) != PGRES_COMMAND_OK) LOG_WARN << "аудит: " << PQerrorMessage(conn);
     PQclear(res);
     PQfinish(conn);
+}
+
+// Ретеншен журналов (ADR-59): удаляем записи старше N дней. Журналы только растут,
+// поэтому глубина хранения — настройка, а не «когда-нибудь почистим руками».
+struct PurgeResult {
+    bool ok = false;
+    long audit = 0;
+    long runs = 0;
+    std::string error;
+};
+
+PurgeResult purgeOldLogs(int days) {
+    PurgeResult out;
+    if (days <= 0) {
+        out.ok = true;
+        return out;
+    }
+    PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+    if (PQstatus(conn) != CONNECTION_OK) {
+        out.error = std::string(PQerrorMessage(conn));
+        PQfinish(conn);
+        return out;
+    }
+    const std::string daysText = std::to_string(days);
+    const char *values[] = {daysText.c_str()};
+    const auto run = [&](const char *sql) -> long {
+        PGresult *res = PQexecParams(conn, sql, 1, nullptr, values, nullptr, nullptr, 0);
+        long affected = -1;
+        if (PQresultStatus(res) == PGRES_COMMAND_OK) {
+            affected = std::strtol(PQcmdTuples(res), nullptr, 10);
+        } else {
+            out.error = std::string(PQerrorMessage(conn));
+        }
+        PQclear(res);
+        return affected;
+    };
+    // журнал действий и журнал рассылки — обе таблицы с датой начала
+    const long audit = run("DELETE FROM audit_log WHERE at < now() - ($1::int || ' days')::interval");
+    const long runs = run("DELETE FROM subscription_runs WHERE started_at < now() - ($1::int || ' days')::interval");
+    PQfinish(conn);
+    if (audit < 0 || runs < 0) return out;
+    out.ok = true;
+    out.audit = audit;
+    out.runs = runs;
+    return out;
 }
 
 std::string requestActor(const HttpRequestPtr &req) {
@@ -365,6 +411,8 @@ int main() {
     const bool proxyAutocreate = rep::envOr("REP_AUTH_PROXY_AUTOCREATE", "0") == "1";
     const std::string proxyDefaultRole = rep::envOr("REP_AUTH_PROXY_ROLE", "viewer");
     const int proxyCacheSeconds = std::stoi(rep::envOr("REP_AUTH_PROXY_CACHE_SECONDS", "60"));
+    // Глубина хранения журналов (ADR-59): 0 — хранить бессрочно.
+    const int logRetentionDays = std::stoi(rep::envOr("REP_LOG_RETENTION_DAYS", "90"));
     const int sessionTtlHours = std::stoi(rep::envOr("REP_SESSION_TTL_HOURS", "12"));
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
     std::mutex templatesMutex;
@@ -2541,10 +2589,11 @@ int main() {
 
     app().registerHandler(
         "/api/health",
-        [db, maxRows, authMode, &dbRo](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [db, maxRows, authMode, logRetentionDays, &dbRo](const HttpRequestPtr &,
+                                                         std::function<void(const HttpResponsePtr &)> &&cb) {
             runQuery(
                 db, "SELECT 1", {},
-                [cb, maxRows, authMode, &dbRo](const orm::Result &res) {
+                [cb, maxRows, authMode, logRetentionDays, &dbRo](const orm::Result &res) {
                     Json::Value body;
                     body["status"] = "ok";
                     body["schemaVersion"] = rep::kCurrentTemplateVersion;
@@ -2555,6 +2604,7 @@ int main() {
                                        : authMode == rep::AuthMode::Session ? "session" : "off";
                     // версия приложения из файла VERSION (единая точка, см. scripts/version.sh)
                     body["version"] = REP_VERSION;
+                    body["logRetentionDays"] = logRetentionDays;
                     cb(jsonResponse(body));
                 },
                 [cb](const std::exception_ptr &eptr) {
@@ -3282,6 +3332,33 @@ int main() {
         },
         {Get});
 
+    // Чистка журналов: сразу при старте и раз в 6 часов, только если глубина задана.
+    auto startLogRetention = [logRetentionDays]() {
+        if (logRetentionDays <= 0) {
+            LOG_INFO << "ретеншен журналов выключен (REP_LOG_RETENTION_DAYS=0)";
+            return;
+        }
+        std::thread([logRetentionDays]() {
+            while (true) {
+                const PurgeResult purged = purgeOldLogs(logRetentionDays);
+                if (purged.ok) {
+                    LOG_INFO << "ретеншен журналов: " << logRetentionDays << " дн., удалено audit_log "
+                             << purged.audit << ", subscription_runs " << purged.runs;
+                    if (purged.audit > 0 || purged.runs > 0) {
+                        auditEvent("system", "logs.purge", "journal", "audit_log",
+                                   "{\"days\":" + std::to_string(logRetentionDays) +
+                                       ",\"deleted\":" + std::to_string(purged.audit) +
+                                       ",\"runs\":" + std::to_string(purged.runs) + "}",
+                                   "");
+                    }
+                } else {
+                    LOG_WARN << "ретеншен журналов: ошибка: " << purged.error;
+                }
+                std::this_thread::sleep_for(std::chrono::hours(6));
+            }
+        }).detach();
+    };
+
     auto startScheduler = [schedulerEnabled, runSubscription, smtpHost, smtpPort, smtpFrom]() {
         if (!schedulerEnabled) return;
         std::thread([runSubscription]() {
@@ -3337,6 +3414,7 @@ int main() {
     }
 
     startScheduler();
+    startLogRetention();
 
     try {
         app().addListener(host, port).setThreadNum(threads).run();
