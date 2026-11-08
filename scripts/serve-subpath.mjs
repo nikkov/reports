@@ -68,10 +68,24 @@ async function proxy(req, res, path) {
     res.end()
     return
   }
-  // поток без буферизации: SSE и большие xlsx идут как есть
+  // Поток без буферизации: SSE и большие xlsx идут как есть. Обрыв на стороне бэкенда —
+  // обычное дело стенда (сервис перезапускают, зритель закрывает страницу, SSE отменяют):
+  // раньше такой обрыв отвергал промис итератора и убивал весь прокси вместе со статикой.
   req.on('close', () => upstream.body?.cancel?.().catch?.(() => {}))
-  for await (const chunk of upstream.body) res.write(chunk)
-  res.end()
+  try {
+    for await (const chunk of upstream.body) {
+      if (res.writableEnded) break
+      res.write(chunk)
+    }
+  } catch (e) {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end(`upstream оборвал поток: ${e.message}`)
+      return
+    }
+    // заголовки уже у клиента — доигрываем закрытием, иначе он ждёт до таймаута
+  }
+  if (!res.writableEnded) res.end()
 }
 
 // ловушка: сборка с абсолютными путями (/assets/…) под префиксом даёт 404
@@ -84,7 +98,7 @@ try {
   console.warn(`внимание: в ${root} нет index.html — запустите ./scripts/build.sh`)
 }
 
-const server = createServer(async (req, res) => {
+async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`)
   if (url.pathname === prefix) {
     res.writeHead(302, { location: `${prefix}/` })
@@ -126,6 +140,19 @@ const server = createServer(async (req, res) => {
       res.end('не найдено')
     }
   }
+}
+
+const server = createServer((req, res) => {
+  // последний рубеж: любое исключение в обработчике — 500 и запись в лог, прокси живёт дальше
+  handle(req, res).catch((e) => {
+    console.warn('ошибка обработки запроса:', e?.message || e)
+    if (!res.headersSent) {
+      res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('внутренняя ошибка прокси')
+      return
+    }
+    if (!res.writableEnded) res.end()
+  })
 })
 
 server.listen(port, '127.0.0.1', () => {
