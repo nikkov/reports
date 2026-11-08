@@ -148,7 +148,9 @@ pg_restore -d reporting_restore /backup/reporting-2026-11-08.dump
 
 ## Мониторинг и журналы
 
-- `GET /api/health` → `{"status":"ok","db":true,"maxRows":50000,"readOnlyRole":true,"authMode":"proxy","schemaVersion":2}`.
+- `GET /api/health` → `{"status":"ok","db":true,"maxRows":50000,"readOnlyRole":true,"authMode":"proxy","schemaVersion":2,"version":"1.28.1"}`;
+  `version` берётся из файла `VERSION` при сборке — по нему видно, какая сборка развёрнута,
+  `schemaVersion` — версия формата шаблона.
   Пропал `db` — потеряна БД; `readOnlyRole: false` — данные читаются основной ролью (проверьте `REP_RO_DB_*`);
 - журнал действий — `audit_log`, страница `/reports/audit.html` (роль admin): публикации, роли,
   рассылка, входы;

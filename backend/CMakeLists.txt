@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
-project(rep CXX)
+
+# Версия приложения — из файла VERSION в корне репозитория (единая точка).
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" REP_VERSION)
+string(STRIP "${REP_VERSION}" REP_VERSION)
+
+project(rep VERSION ${REP_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +37,7 @@ target_include_directories(rep_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(rep_core PUBLIC Drogon::Drogon OpenSSL::SSL OpenSSL::Crypto)
 
 add_executable(rep src/main.cc src/xlsx_export.cc)
+target_compile_definitions(rep PRIVATE REP_VERSION="${REP_VERSION}")
 target_link_libraries(rep PRIVATE rep_core libxlsxwriter::libxlsxwriter)
 
 enable_testing()

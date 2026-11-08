@@ -153,4 +153,5 @@ export REP_SMTP_HOST=smtp.corp.local REP_SMTP_PORT=587 REP_SMTP_TLS=1
 ```
 
 Проверить, что настройки применились: `curl -s localhost:8080/api/health` — в ответе видны
-`db`, `maxRows`, `readOnlyRole`, `authMode`, `schemaVersion`.
+`db`, `maxRows`, `readOnlyRole`, `authMode`, `schemaVersion` (версия формата шаблона, сейчас 2)
+и `version` (версия приложения из файла `VERSION`).

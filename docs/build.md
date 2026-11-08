@@ -63,6 +63,20 @@ npm run e2e          # Playwright, нужны запущенные бэкенд 
 вычисляется на клиенте (ADR-53). Переменные `REP_BASE` и `VITE_API_BASE` нужны только для
 нестандартных схем — см. `docs/configuration.md`.
 
+## Версия приложения
+
+Единственный источник — файл `VERSION` в корне репозитория. Его читает CMake: версия попадает
+в бинарник и в ответ `/api/health` (`version`). Копии в `README.md`, `CHANGELOG.md` и
+`frontend/package.json` сверяются скриптом:
+
+```bash
+./scripts/version.sh            # показать версию и расхождения
+./scripts/version.sh --check    # только проверка, код 1 при расхождении
+```
+
+Шаг входит в `./scripts/check.sh`. Поднимая версию, правьте `VERSION`, первую строку README,
+заголовок CHANGELOG и `npm pkg set version=…`, затем ставьте тег `v<версия>`.
+
 ## Схема шаблона
 
 Канон — `frontend/src/template/schema.js`; машинночитаемая копия `docs/template.schema.json`

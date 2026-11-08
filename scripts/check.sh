@@ -18,6 +18,9 @@ if [ -f "$ROOT/frontend/package.json" ]; then
   echo "node $(node -v)"
 fi
 
+step "Версия (VERSION, README, CHANGELOG, package.json)"
+"$ROOT/scripts/version.sh" --check || fail "версия расходится между файлами"
+
 step "Conan v1"
 VER="$("$ROOT/scripts/conan" --version 2>/dev/null | tail -1 | awk '{print $3}')"
 case "$VER" in

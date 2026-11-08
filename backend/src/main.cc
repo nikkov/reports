@@ -2547,12 +2547,14 @@ int main() {
                 [cb, maxRows, authMode, &dbRo](const orm::Result &res) {
                     Json::Value body;
                     body["status"] = "ok";
-                    body["schemaVersion"] = 1;
+                    body["schemaVersion"] = rep::kCurrentTemplateVersion;
                     body["db"] = !res.empty();
                     body["maxRows"] = static_cast<Json::UInt64>(maxRows);
                     body["readOnlyRole"] = static_cast<bool>(dbRo);
                     body["authMode"] = authMode == rep::AuthMode::Proxy ? "proxy"
                                        : authMode == rep::AuthMode::Session ? "session" : "off";
+                    // версия приложения из файла VERSION (единая точка, см. scripts/version.sh)
+                    body["version"] = REP_VERSION;
                     cb(jsonResponse(body));
                 },
                 [cb](const std::exception_ptr &eptr) {

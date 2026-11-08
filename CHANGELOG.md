@@ -1,5 +1,29 @@
 # История версий
 
+## v1.28.1 — 2026-11-08
+
+Версия зафиксирована в одном месте.
+
+**Было:** README и CHANGELOG говорили 1.28.0, `frontend/package.json` — 0.1.0, у бэкенда версии нет
+вовсе, а `/api/health` отдавал `schemaVersion: 1` при актуальной версии формата шаблона 2.
+
+**Стало:**
+
+- файл `VERSION` (1.28.1) — единственный источник: его читает CMake, версия попадает в бинарник;
+- `GET /api/health` отдаёт `version` приложения и честный `schemaVersion: 2` (константа
+  `rep::kCurrentTemplateVersion`, а не литерал);
+- `frontend/package.json` и `package-lock.json` переведены на ту же версию;
+- `./scripts/version.sh` печатает версию и сверяет копии в README, CHANGELOG и `package.json`;
+  `--check` возвращает 1 при расхождении; шаг добавлен в `scripts/check.sh`.
+
+**Проверено:** `/api/health` на отдельном экземпляре →
+`{"authMode":"off","db":true,"maxRows":50000,"readOnlyRole":true,"schemaVersion":2,"status":"ok","version":"1.28.1"}`;
+`./scripts/version.sh --check` до правок честно показал три расхождения и код 1, после — код 0.
+
+### Проверки
+
+`ctest 59`, `vitest 135`, `golden 15/15`, `e2e 50` — `ALL CHECKS PASSED`.
+
 ## v1.28.0 — 2026-11-08
 
 Документация по сборке, конфигурации, развёртыванию и формату шаблона приведена в соответствие с кодом.
