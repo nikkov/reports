@@ -26,4 +26,9 @@ bool parseCron(const std::string &expr, Cron &cron, std::string &err);
 // Ближайшее совпадение строго после `after`; 0, если в течение года его нет.
 std::time_t nextRun(const Cron &cron, std::time_t after);
 
+// То же, но во «наивном» локальном времени: `naiveAfter` считается как время без
+// пояса (переходы на летнее время здесь не участвуют — их применяет база, ADR-60).
+// Так расписание можно считать в часовом поясе подписки, не меняя TZ процесса.
+std::time_t nextRunNaive(const Cron &cron, std::time_t naiveAfter);
+
 } // namespace rep

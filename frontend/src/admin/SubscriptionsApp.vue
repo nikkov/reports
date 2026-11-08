@@ -2,8 +2,9 @@
   <div class="subs">
     <h1>Рассылка отчётов</h1>
     <p class="muted">
-      Подписка отправляет CSV-файл отчёта на почту по расписанию (cron, время сервера).
-      Отправку выполняет сервер; ручная кнопка не сдвигает расписание.
+      Подписка отправляет файл отчёта (CSV или XLSX) на почту по расписанию. Время cron считается
+      в часовом поясе подписки, а не сервера. При сбое SMTP сервер сам повторяет отправку
+      с растущей паузой; ручная кнопка не сдвигает расписание.
     </p>
 
     <p v-if="error" class="err">{{ error }}</p>
@@ -25,9 +26,14 @@
         <tr :class="{ off: !s.enabled }" :data-sub="s.id">
           <td>
             <b>{{ s.title }}</b>
-            <div class="muted small">{{ s.reportId }} · {{ s.format }}</div>
+            <div class="muted small">{{ s.reportId }} · {{ s.format }} · {{ s.timezone }}</div>
           </td>
-          <td><code>{{ s.cron }}</code></td>
+          <td>
+            <code>{{ s.cron }}</code>
+            <div v-if="s.retryAt" class="retry small" :data-retry="s.id">
+              повтор {{ formatDate(s.retryAt) }} (попытка {{ s.retryCount + 1 }})
+            </div>
+          </td>
           <td class="small">{{ s.recipients.join(', ') }}</td>
           <td class="small">{{ formatDate(s.nextRunAt) || '—' }}</td>
           <td class="small">
@@ -100,6 +106,19 @@
         <span class="hint">минута час день месяц день_недели; «0 9 * * 1-5» — будни в 9:00</span>
       </label>
       <label>
+        Часовой пояс расписания
+        <input v-model="form.timezone" list="tz-list" placeholder="Europe/Moscow" required />
+        <datalist id="tz-list">
+          <option value="UTC" />
+          <option value="Europe/Moscow" />
+          <option value="Europe/Kaliningrad" />
+          <option value="Europe/Yekaterinburg" />
+          <option value="Asia/Novosibirsk" />
+          <option value="Asia/Vladivostok" />
+        </datalist>
+        <span class="hint">IANA-идентификатор: «0 9 * * 1-5» + Europe/Moscow = 9:00 по Москве</span>
+      </label>
+      <label>
         Получатели
         <input v-model="form.recipients" placeholder="po@example.test, analyst@example.test" required />
         <span class="hint">через запятую</span>
@@ -147,6 +166,7 @@ const emptyForm = () => ({
   reportId: '',
   title: '',
   cron: '0 9 * * 1-5',
+  timezone: 'UTC',
   recipients: '',
   params: '{}',
   format: 'csv',
@@ -190,6 +210,7 @@ function parseForm() {
     reportId: form.reportId,
     title: form.title || form.reportId,
     cron: form.cron.trim(),
+    timezone: form.timezone.trim() || 'UTC',
     params,
     recipients,
     format: form.format,
@@ -280,6 +301,7 @@ async function toggle(s) {
       reportId: s.reportId,
       title: s.title,
       cron: s.cron,
+      timezone: s.timezone,
       params: s.params,
       recipients: s.recipients,
       format: s.format,
@@ -312,6 +334,7 @@ function edit(s) {
     reportId: s.reportId,
     title: s.title,
     cron: s.cron,
+    timezone: s.timezone || 'UTC',
     recipients: s.recipients.join(', '),
     params: JSON.stringify(s.params || {}, null, 0),
     format: s.format || 'csv',
@@ -350,6 +373,14 @@ h2 {
 }
 .small {
   font-size: 12px;
+}
+.retry {
+  color: #8a5a00;
+  background: #fff4dd;
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-top: 3px;
+  display: inline-block;
 }
 .err {
   color: #b3261e;

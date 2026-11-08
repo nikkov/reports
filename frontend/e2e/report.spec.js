@@ -1064,6 +1064,50 @@ test('диаграммы gauge и sankey: спидометр и потоки р�
   await expect(page.locator('.chart-box').first()).toContainText('Маржа за период')
 })
 
+test('рассылка: часовой пояс расписания считается при создании', async ({ request, page }) => {
+  const created = await request.post('/api/admin/subscriptions', {
+    data: {
+      reportId: 'sales-summary',
+      title: 'e2e часовой пояс',
+      cron: '0 9 * * *',
+      recipients: ['tz@example.test'],
+      format: 'csv',
+      timezone: 'Asia/Novosibirsk'
+    }
+  })
+  expect(created.ok()).toBeTruthy()
+  const sub = await created.json()
+  // 9:00 в Новосибирске (UTC+7) — это 02:00 UTC
+  const next = new Date(Number(sub.nextRunAt) * 1000)
+  expect(next.getUTCHours()).toBe(2)
+  expect(next.getUTCMinutes()).toBe(0)
+  expect(sub.timezone).toBe('Asia/Novosibirsk')
+
+  // пояс виден в списке и в карточке подписки
+  const list = await (await request.get('/api/admin/subscriptions')).json()
+  const row = list.items.find((s) => s.id === sub.id)
+  expect(row.timezone).toBe('Asia/Novosibirsk')
+
+  // неизвестный пояс отклоняется сервером
+  const bad = await request.post('/api/admin/subscriptions', {
+    data: {
+      reportId: 'sales-summary',
+      title: 'e2e плохой пояс',
+      cron: '0 9 * * *',
+      recipients: ['tz@example.test'],
+      timezone: 'Mars/Olympus'
+    }
+  })
+  expect(bad.status()).toBe(422)
+  expect((await bad.json()).error.message).toContain('часовой пояс')
+
+  // на странице подписки пояс подписан рядом с форматом
+  await page.goto('/subscriptions.html')
+  await expect(page.locator(`tr[data-sub="${sub.id}"]`)).toContainText('Asia/Novosibirsk')
+
+  await request.delete(`/api/admin/subscriptions/${sub.id}`)
+})
+
 test('аудит: действия попадают в журнал и видны на странице', async ({ page, request }) => {
   // действие: создание пользователя и его удаление
   const login = 'e2e_audit'

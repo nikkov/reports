@@ -15,6 +15,7 @@
 #include <fstream>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <future>
@@ -185,6 +186,62 @@ PurgeResult purgeOldLogs(int days) {
     out.audit = audit;
     out.runs = runs;
     return out;
+}
+
+// Часовой пояс подписки (ADR-60). Локальное «наивное» время считаем в C++,
+// а пересчёт местное ↔ UTC отдаём PostgreSQL: только база знает переходы на летнее
+// время, самодельная арифметика на них ошибается дважды в год.
+bool timezoneExists(PGconn *conn, const std::string &tz) {
+    if (tz.empty()) return false;
+    const char *values[] = {tz.c_str()};
+    PGresult *res = PQexecParams(conn, "SELECT 1 FROM pg_timezone_names WHERE name = $1 LIMIT 1", 1, nullptr, values,
+                                 nullptr, nullptr, 0);
+    const bool ok = PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1;
+    PQclear(res);
+    return ok;
+}
+
+std::time_t nextRunInZone(PGconn *conn, const rep::Cron &cron, const std::string &tz, std::time_t afterEpoch) {
+    const std::string epochText = std::to_string(static_cast<long long>(afterEpoch));
+    const char *first[] = {epochText.c_str(), tz.c_str()};
+    PGresult *res = PQexecParams(conn,
+                                 "SELECT to_char(to_timestamp($1::bigint) AT TIME ZONE $2,"
+                                 " 'YYYY-MM-DD\"T\"HH24:MI:SS')",
+                                 2, nullptr, first, nullptr, nullptr, 0);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
+        PQclear(res);
+        return 0;
+    }
+    const std::string localText = PQgetvalue(res, 0, 0);
+    PQclear(res);
+
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    if (std::sscanf(localText.c_str(), "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
+        return 0;
+    }
+    std::tm local{};
+    local.tm_year = year - 1900;
+    local.tm_mon = month - 1;
+    local.tm_mday = day;
+    local.tm_hour = hour;
+    local.tm_min = minute;
+    const std::time_t nextNaive = rep::nextRunNaive(cron, ::timegm(&local));
+    if (nextNaive == 0) return 0;
+
+    std::tm out = *::gmtime(&nextNaive);
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:00", out.tm_year + 1900, out.tm_mon + 1,
+                  out.tm_mday, out.tm_hour, out.tm_min);
+    const char *toUtc[] = {buffer, tz.c_str()};
+    res = PQexecParams(conn, "SELECT extract(epoch FROM ($1::timestamp AT TIME ZONE $2))::bigint", 2, nullptr, toUtc,
+                       nullptr, nullptr, 0);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
+        PQclear(res);
+        return 0;
+    }
+    const std::time_t nextUtc = static_cast<std::time_t>(std::stoll(PQgetvalue(res, 0, 0)));
+    PQclear(res);
+    return nextUtc;
 }
 
 std::string requestActor(const HttpRequestPtr &req) {
@@ -413,6 +470,9 @@ int main() {
     const int proxyCacheSeconds = std::stoi(rep::envOr("REP_AUTH_PROXY_CACHE_SECONDS", "60"));
     // Глубина хранения журналов (ADR-59): 0 — хранить бессрочно.
     const int logRetentionDays = std::stoi(rep::envOr("REP_LOG_RETENTION_DAYS", "90"));
+    // Повторы неудачной отправки (ADR-61): сколько раз и с каким шагом (экспоненциально).
+    const int smtpRetryAttempts = std::stoi(rep::envOr("REP_SMTP_RETRY_ATTEMPTS", "3"));
+    const int smtpRetryDelaySeconds = std::stoi(rep::envOr("REP_SMTP_RETRY_DELAY_SECONDS", "60"));
     const int sessionTtlHours = std::stoi(rep::envOr("REP_SESSION_TTL_HOURS", "12"));
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
     std::mutex templatesMutex;
@@ -2260,6 +2320,9 @@ int main() {
             item["lastRunAt"] = PQgetisnull(res, i, 9) ? "" : PQgetvalue(res, i, 9);
             item["lastOk"] = PQgetisnull(res, i, 10) ? Json::Value() : Json::Value(std::string(PQgetvalue(res, i, 10)) == "t");
             item["lastError"] = PQgetisnull(res, i, 11) ? "" : PQgetvalue(res, i, 11);
+            item["timezone"] = PQgetvalue(res, i, 12);
+            item["retryAt"] = PQgetvalue(res, i, 13);
+            item["retryCount"] = std::atoi(PQgetvalue(res, i, 14));
             list.append(item);
         }
         return list;
@@ -2269,13 +2332,15 @@ int main() {
         "SELECT s.id, s.report_id, s.title, s.cron, s.params::text, s.format, s.recipients::text, s.enabled,"
         " to_char(s.next_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
         " to_char(s.last_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
-        " r.ok, r.error"
+        " r.ok, r.error, s.timezone,"
+        " coalesce(to_char(s.retry_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), ''),"
+        " s.retry_count"
         " FROM report_subscriptions s"
         " LEFT JOIN LATERAL (SELECT ok, error FROM subscription_runs WHERE subscription_id = s.id"
         "                    ORDER BY started_at DESC LIMIT 1) r ON true";
 
-    // проверка полей подписки: cron, получатели, существование отчёта
-    auto validateSubscription = [&templates, &templatesMutex](const Json::Value &body, std::string &err,
+    // проверка полей подписки: cron, получатели, существование отчёта, часовой пояс
+    auto validateSubscription = [&templates, &templatesMutex](PGconn *conn, const Json::Value &body, std::string &err,
                                                               rep::Cron &cron) {
         const std::string cronExpr = body.get("cron", "").asString();
         if (!rep::parseCron(cronExpr, cron, err)) return false;
@@ -2301,6 +2366,11 @@ int main() {
         const std::string reportId = body.get("reportId", "").asString();
         if (reportId.empty()) {
             err = "нужен reportId";
+            return false;
+        }
+        const std::string timezone = body.get("timezone", "UTC").asString();
+        if (!timezoneExists(conn, timezone)) {
+            err = "неизвестный часовой пояс «" + timezone + "»: нужен IANA-идентификатор (Europe/Moscow)";
             return false;
         }
         std::lock_guard<std::mutex> lock(templatesMutex);
@@ -2352,7 +2422,7 @@ int main() {
             }
             std::string err;
             rep::Cron cron;
-            if (!validateSubscription(*body, err, cron)) {
+            if (!validateSubscription(conn, *body, err, cron)) {
                 PQfinish(conn);
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
                 return;
@@ -2362,22 +2432,24 @@ int main() {
             const std::string paramsJson = Json::writeString(wb, (*body)["params"]);
             Json::StreamWriterBuilder rb;
             const std::string recipientsJson = Json::writeString(rb, (*body)["recipients"]);
-            const std::time_t next = rep::nextRun(cron, std::time(nullptr));
+            const std::string timezone = (*body).get("timezone", "UTC").asString();
+            const std::time_t next = nextRunInZone(conn, cron, timezone, std::time(nullptr));
             const std::string nextText = std::to_string(next);
             const std::string format = (*body).get("format", "csv").asString();
             const bool enabled = (*body).get("enabled", true).asBool();
 
             const char *sql =
-                "INSERT INTO report_subscriptions (report_id, title, cron, params, format, recipients, enabled, next_run_at)"
+                "INSERT INTO report_subscriptions (report_id, title, cron, params, format, recipients, enabled,"
+                " next_run_at, timezone)"
                 " VALUES ($1, $2, $3, $4::jsonb, $5, (SELECT array_agg(value::text) FROM json_array_elements_text($6::json)),"
-                "         $7, to_timestamp($8)) RETURNING id";
+                "         $7, to_timestamp($8), $9) RETURNING id";
             const std::string values[] = {(*body).get("reportId", "").asString(),
                                           (*body).get("title", (*body).get("reportId", "")).asString(),
                                           (*body).get("cron", "").asString(), paramsJson, format,
-                                          recipientsJson, enabled ? "true" : "false", nextText};
-            const char *params[8];
-            for (int i = 0; i < 8; ++i) params[i] = values[i].c_str();
-            PGresult *res = PQexecParams(conn, sql, 8, nullptr, params, nullptr, nullptr, 0);
+                                          recipientsJson, enabled ? "true" : "false", nextText, timezone};
+            const char *params[9];
+            for (int i = 0; i < 9; ++i) params[i] = values[i].c_str();
+            PGresult *res = PQexecParams(conn, sql, 9, nullptr, params, nullptr, nullptr, 0);
             if (PQresultStatus(res) != PGRES_TUPLES_OK) {
                 const std::string msg = PQerrorMessage(conn);
                 PQclear(res);
@@ -2387,11 +2459,12 @@ int main() {
             }
             auditEvent(requestActor(req), "subscription.create", "subscription", PQgetvalue(res, 0, 0),
                        "{\"report\":\"" + (*body)["reportId"].asString() + "\",\"cron\":\"" + (*body)["cron"].asString() +
-                           "\",\"format\":\"" + format + "\"}",
+                           "\",\"format\":\"" + format + "\",\"timezone\":\"" + timezone + "\"}",
                        requestIp(req));
             Json::Value out;
             out["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, 0, 0)));
             out["nextRunAt"] = nextText;
+            out["timezone"] = timezone;
             PQclear(res);
             PQfinish(conn);
             cb(jsonResponse(out));
@@ -2440,7 +2513,7 @@ int main() {
             }
             std::string err;
             rep::Cron cron;
-            if (!validateSubscription(*body, err, cron)) {
+            if (!validateSubscription(conn, *body, err, cron)) {
                 PQfinish(conn);
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
                 return;
@@ -2449,7 +2522,8 @@ int main() {
             wb["indentation"] = "";
             const std::string paramsJson = Json::writeString(wb, (*body)["params"]);
             const std::string recipientsJson = Json::writeString(wb, (*body)["recipients"]);
-            const std::time_t next = rep::nextRun(cron, std::time(nullptr));
+            const std::string timezone = (*body).get("timezone", "UTC").asString();
+            const std::time_t next = nextRunInZone(conn, cron, timezone, std::time(nullptr));
             const std::string nextText = std::to_string(next);
             const std::string values[] = {id,
                                           (*body).get("reportId", "").asString(),
@@ -2459,15 +2533,17 @@ int main() {
                                           (*body).get("format", "csv").asString(),
                                           recipientsJson,
                                           (*body).get("enabled", true).asBool() ? "true" : "false",
-                                          nextText};
-            const char *params[9];
-            for (int i = 0; i < 9; ++i) params[i] = values[i].c_str();
+                                          nextText,
+                                          timezone};
+            const char *params[10];
+            for (int i = 0; i < 10; ++i) params[i] = values[i].c_str();
             const char *sql =
                 "UPDATE report_subscriptions SET report_id = $2, title = $3, cron = $4, params = $5::jsonb,"
                 " format = $6, recipients = (SELECT array_agg(value::text) FROM json_array_elements_text($7::json)),"
-                " enabled = $8::boolean, next_run_at = to_timestamp($9), updated_at = now()"
+                " enabled = $8::boolean, next_run_at = to_timestamp($9), timezone = $10,"
+                " retry_count = 0, retry_at = NULL, updated_at = now()"
                 " WHERE id = $1 RETURNING id";
-            PGresult *res = PQexecParams(conn, sql, 9, nullptr, params, nullptr, nullptr, 0);
+            PGresult *res = PQexecParams(conn, sql, 10, nullptr, params, nullptr, nullptr, 0);
             const bool ok = PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1;
             const std::string msg = ok ? "" : PQerrorMessage(conn);
             PQclear(res);
@@ -3118,8 +3194,8 @@ int main() {
     // Одна подписка: собрать CSV через buildCsv (в цикле событий), отправить письма,
     // записать результат в журнал и пересчитать next_run_at. Ошибки не бросают
     // исключений — попадают в журнал и в lastError.
-    auto runSubscription = [buildCsv, buildXlsx, smtpConfig, parseTextArray](
-                                long long id, bool manual, const std::string &actor) {
+    auto runSubscription = [buildCsv, buildXlsx, smtpConfig, parseTextArray, smtpRetryAttempts,
+                            smtpRetryDelaySeconds](long long id, bool manual, const std::string &actor, bool retry) {
         PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
         if (PQstatus(conn) != CONNECTION_OK) {
             LOG_ERROR << "рассылка: нет соединения с БД: " << PQerrorMessage(conn);
@@ -3130,8 +3206,8 @@ int main() {
         const char *values[] = {idText.c_str()};
         PGresult *res = PQexecParams(
             conn,
-            "SELECT report_id, title, cron, params::text, recipients::text, format FROM report_subscriptions"
-            " WHERE id = $1",
+            "SELECT report_id, title, cron, params::text, recipients::text, format, timezone, retry_count"
+            " FROM report_subscriptions WHERE id = $1",
             1, nullptr, values, nullptr, nullptr, 0);
         if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
             PQclear(res);
@@ -3145,7 +3221,10 @@ int main() {
         const std::string paramsText = PQgetvalue(res, 0, 3);
         const auto recipients = parseTextArray(PQgetvalue(res, 0, 4));
         const std::string format = PQgetvalue(res, 0, 5);
+        const std::string timezone = PQgetvalue(res, 0, 6);
+        const int retryCount = std::atoi(PQgetvalue(res, 0, 7));
         PQclear(res);
+        const int attempt = retry ? retryCount + 1 : 1;
 
         Json::Value params;
         {
@@ -3218,38 +3297,67 @@ int main() {
         const std::string rowsText = std::to_string(rows);
         const std::string sentText = std::to_string(sent);
         const std::string msText = std::to_string(elapsed);
+        const std::string attemptText = std::to_string(attempt);
         const char *runValues[] = {idText.c_str(), okText.c_str(), error.c_str(), rowsText.c_str(),
-                                   sentText.c_str(), msText.c_str()};
+                                   sentText.c_str(), msText.c_str(), attemptText.c_str()};
         PGresult *run = PQexecParams(
             conn,
-            "INSERT INTO subscription_runs (subscription_id, finished_at, ok, error, rows, recipients, duration_ms)"
-            " VALUES ($1, now(), $2::boolean, NULLIF($3, ''), $4::int, $5::int, $6::int)",
-            6, nullptr, runValues, nullptr, nullptr, 0);
+            "INSERT INTO subscription_runs (subscription_id, finished_at, ok, error, rows, recipients, duration_ms,"
+            " attempt) VALUES ($1, now(), $2::boolean, NULLIF($3, ''), $4::int, $5::int, $6::int, $7::int)",
+            7, nullptr, runValues, nullptr, nullptr, 0);
         PQclear(run);
 
-        // следующий запуск: для ручного «отправить сейчас» расписание не сдвигаем раньше срока
+        // Следующий запуск считается в часовом поясе подписки (ADR-60).
+        // Повтор неудачной отправки расписание не сдвигает: иначе сбой SMTP
+        // «съедал» бы плановое время, и отчёт за период не уходил вовсе.
         rep::Cron cron;
         std::string cronErr;
-        std::string nextText = "NULL";
-        std::time_t next = 0;
-        if (rep::parseCron(cronExpr, cron, cronErr)) next = rep::nextRun(cron, std::time(nullptr));
-        const std::string nextEpoch = std::to_string(next);
-        const char *markValues[] = {idText.c_str(), nextEpoch.c_str()};
+        std::string nextEpoch = "0";
+        if (rep::parseCron(cronExpr, cron, cronErr)) {
+            const std::time_t next = nextRunInZone(conn, cron, timezone, std::time(nullptr));
+            if (next > 0) nextEpoch = std::to_string(next);
+        }
+
+        // Состояние повторов (ADR-61): успех сбрасывает счётчик, неудача планирует
+        // следующий повтор с удвоением паузы, исчерпание попыток — отказ и запись в журнал.
+        std::string retryAtSql = "NULL";
+        std::string retryCountText = "0";
+        bool gaveUp = false;
+        if (ok) {
+            retryCountText = "0";
+        } else if (!manual && smtpRetryAttempts > 0 && attempt < smtpRetryAttempts) {
+            const int delay = smtpRetryDelaySeconds * (1 << (attempt - 1)); // 60, 120, 240…
+            retryAtSql = "now() + (" + std::to_string(delay) + " || ' seconds')::interval";
+            retryCountText = std::to_string(attempt);
+        } else if (!manual && smtpRetryAttempts > 0) {
+            gaveUp = true;
+        }
+
+        const char *markValues[] = {idText.c_str(), nextEpoch.c_str(), retryCountText.c_str()};
         PGresult *mark = PQexecParams(
             conn,
-            "UPDATE report_subscriptions SET last_run_at = now(),"
-            " next_run_at = CASE WHEN $2::bigint > 0 THEN to_timestamp($2::bigint) ELSE next_run_at END"
-            " WHERE id = $1",
-            2, nullptr, markValues, nullptr, nullptr, 0);
+            ("UPDATE report_subscriptions SET last_run_at = now(), retry_count = $3::int,"
+             " retry_at = " + retryAtSql +
+             ", next_run_at = CASE WHEN $2::bigint > 0 AND NOT " + std::string(retry ? "true" : "false") +
+             " THEN to_timestamp($2::bigint) ELSE next_run_at END WHERE id = $1")
+                .c_str(),
+            3, nullptr, markValues, nullptr, nullptr, 0);
         PQclear(mark);
+        if (gaveUp) {
+            auditEvent(actor, "subscription.given_up", "subscription", idText,
+                       "{\"attempts\":" + std::to_string(smtpRetryAttempts) + ",\"error\":\"" + error + "\"}", "");
+        }
         PQfinish(conn);
 
-        LOG_INFO << "рассылка: подписка " << id << " («" << title << "», " << reportId << "), строк " << rows
-                 << ", писем " << sent << "/" << recipients.size() << ", " << (ok ? "ок" : ("ошибка: " + error))
+        LOG_INFO << "рассылка: подписка " << id << " («" << title << "», " << reportId << "), попытка " << attempt
+                 << (retry ? " (повтор)" : "") << ", строк " << rows << ", писем " << sent << "/" << recipients.size()
+                 << ", зона " << timezone << ", " << (ok ? "ок" : ("ошибка: " + error))
                  << (manual ? " (вручную)" : "");
         auditEvent(actor, "subscription.run", "subscription", idText,
                    std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"rows\":" + std::to_string(rows) +
-                       ",\"sent\":" + std::to_string(sent) + ",\"manual\":" + (manual ? "true" : "false") + "}",
+                       ",\"sent\":" + std::to_string(sent) + ",\"manual\":" + (manual ? "true" : "false") +
+                       ",\"attempt\":" + std::to_string(attempt) +
+                       ",\"retry\":" + (retry ? "true" : "false") + "}",
                    "");
     };
 
@@ -3270,7 +3378,8 @@ int main() {
             const long long subscriptionId = std::stoll(id);
             std::string actor = requestActor(req);
             std::thread([runSubscription, subscriptionId, actor]() {
-                runSubscription(subscriptionId, true, actor);
+                // ручной запуск: повторов не планируем, ошибку видит человек
+                runSubscription(subscriptionId, true, actor, false);
             }).detach();
             Json::Value out;
             out["scheduled"] = true;
@@ -3370,19 +3479,42 @@ int main() {
                     conn = PQconnectdb(rep::connInfoFromEnv().c_str());
                     if (PQstatus(conn) != CONNECTION_OK) continue;
                 }
+                // Подписка «к отправке», если подошло плановое время ИЛИ наступил
+                // срок повтора после сбоя SMTP (ADR-61). is_retry отличает второй случай:
+                // повтор не должен сдвигать расписание.
+                // «Заём» на время отправки: подписка не должна достаться второму экземпляру,
+                // пока первый ещё собирает файл. next_run_at уезжает вперёд на 2 минуты и
+                // перезаписывается настоящим расписанием в конце отправки; retry_at снимается,
+                // его заново выставит runSubscription при повторном сбое (ADR-61).
                 PGresult *res = PQexec(
                     conn,
-                    "UPDATE report_subscriptions SET last_run_at = now() WHERE id IN ("
-                    "  SELECT id FROM report_subscriptions"
-                    "   WHERE enabled AND (next_run_at IS NULL OR next_run_at <= now())"
-                    "   ORDER BY next_run_at NULLS FIRST LIMIT 10 FOR UPDATE SKIP LOCKED"
-                    ") RETURNING id");
+                    "WITH due AS ("
+                    "  SELECT id, (retry_at IS NOT NULL AND retry_at <= now()"
+                    "              AND (next_run_at IS NULL OR next_run_at > now())) AS is_retry"
+                    "    FROM report_subscriptions"
+                    "   WHERE enabled AND ("
+                    "     (next_run_at IS NOT NULL AND next_run_at <= now())"
+                    "     OR (retry_at IS NOT NULL AND retry_at <= now())"
+                    "   )"
+                    "   ORDER BY coalesce(retry_at, next_run_at) NULLS FIRST LIMIT 10 FOR UPDATE SKIP LOCKED"
+                    ") "
+                    "UPDATE report_subscriptions s SET"
+                    "  last_run_at = now(),"
+                    "  next_run_at = CASE WHEN d.is_retry THEN s.next_run_at"
+                    "                    ELSE now() + interval '2 minutes' END,"
+                    "  retry_at = NULL"
+                    " FROM due d WHERE s.id = d.id"
+                    " RETURNING s.id, d.is_retry");
                 if (PQresultStatus(res) == PGRES_TUPLES_OK) {
                     const int count = PQntuples(res);
-                    std::vector<long long> ids;
-                    for (int i = 0; i < count; ++i) ids.push_back(std::stoll(PQgetvalue(res, i, 0)));
+                    std::vector<std::pair<long long, bool>> due;
+                    for (int i = 0; i < count; ++i) {
+                        due.emplace_back(std::stoll(PQgetvalue(res, i, 0)), std::string(PQgetvalue(res, i, 1)) == "t");
+                    }
                     PQclear(res);
-                    for (long long subscriptionId : ids) runSubscription(subscriptionId, false, "system");
+                    for (const auto &[subscriptionId, isRetry] : due) {
+                        runSubscription(subscriptionId, false, "system", isRetry);
+                    }
                 } else {
                     PQclear(res);
                 }

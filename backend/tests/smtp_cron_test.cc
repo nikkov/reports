@@ -101,3 +101,46 @@ TEST_CASE("cron: следующий запуск в известные моме�
     REQUIRE(tomorrowLocal.tm_hour == 8);
     REQUIRE(tomorrowLocal.tm_min == 30);
 }
+
+TEST_CASE("cron: следующее срабатывание в наивном локальном времени") {
+    rep::Cron cron;
+    std::string err;
+    REQUIRE(rep::parseCron("0 9 * * *", cron, err));
+
+    // 2026-03-01 08:00 «местного» времени → 09:00 того же дня
+    std::tm base{};
+    base.tm_year = 2026 - 1900;
+    base.tm_mon = 3 - 1;
+    base.tm_mday = 1;
+    base.tm_hour = 8;
+    base.tm_min = 0;
+    const std::time_t naive = ::timegm(&base);
+    const std::time_t next = rep::nextRunNaive(cron, naive);
+    std::tm out = *std::gmtime(&next);
+    REQUIRE(out.tm_hour == 9);
+    REQUIRE(out.tm_mday == 1);
+
+    // ровно в момент срабатывания — следующее через сутки, а не «сейчас»
+    std::tm atNine = base;
+    atNine.tm_hour = 9;
+    const std::time_t nextAfter = rep::nextRunNaive(cron, ::timegm(&atNine));
+    std::tm out2 = *std::gmtime(&nextAfter);
+    REQUIRE(out2.tm_mday == 2);
+    REQUIRE(out2.tm_hour == 9);
+}
+
+TEST_CASE("cron: будни в наивном времени не попадают на выходные") {
+    rep::Cron cron;
+    std::string err;
+    REQUIRE(rep::parseCron("30 9 * * 1-5", cron, err));
+    std::tm base{};
+    base.tm_year = 2026 - 1900;
+    base.tm_mon = 2 - 1;
+    base.tm_mday = 7; // суббота
+    base.tm_hour = 10;
+    const std::time_t next = rep::nextRunNaive(cron, ::timegm(&base));
+    std::tm out = *std::gmtime(&next);
+    REQUIRE(out.tm_mday == 9); // понедельник
+    REQUIRE(out.tm_hour == 9);
+    REQUIRE(out.tm_min == 30);
+}

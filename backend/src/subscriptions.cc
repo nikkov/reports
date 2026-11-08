@@ -120,6 +120,22 @@ bool parseCron(const std::string &expr, Cron &cron, std::string &err) {
            parseField(fields[4], 0, 6, cron.weekdays, err);
 }
 
+std::time_t nextRunNaive(const Cron &cron, std::time_t naiveAfter) {
+    // время без пояса храним как «UTC-подобное»: gmtime/timegm дают ровный календарь
+    std::tm t = *std::gmtime(&naiveAfter);
+    t.tm_sec = 0;
+    t.tm_min += 1; // строго после указанной минуты
+    std::time_t candidate = ::timegm(&t);
+    for (int step = 0; step < 366 * 24 * 60; ++step) {
+        std::tm local = *std::gmtime(&candidate);
+        if (cron.matches(local)) return candidate;
+        local.tm_min += 1;
+        candidate = ::timegm(&local);
+        if (candidate == static_cast<std::time_t>(-1)) return 0;
+    }
+    return 0;
+}
+
 std::time_t nextRun(const Cron &cron, std::time_t after) {
     std::tm t = *std::localtime(&after);
     t.tm_sec = 0;
