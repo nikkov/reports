@@ -36,17 +36,19 @@ add_library(rep_core STATIC
 target_include_directories(rep_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(rep_core PUBLIC Drogon::Drogon OpenSSL::SSL OpenSSL::Crypto)
 
-add_executable(rep src/main.cc src/xlsx_export.cc)
+add_executable(rep src/main.cc src/xlsx_export.cc src/group_rows.cc)
 target_compile_definitions(rep PRIVATE REP_VERSION="${REP_VERSION}")
 target_link_libraries(rep PRIVATE rep_core libxlsxwriter::libxlsxwriter)
 
 enable_testing()
 add_executable(rep_tests
   src/xlsx_export.cc
+  src/group_rows.cc
   tests/aggregate_test.cc
   tests/csv_test.cc
   tests/xlsx_test.cc
   tests/xlsx_group_test.cc
+  tests/group_rows_test.cc
   tests/template_migrate_test.cc
   tests/auth_test.cc
   tests/dataset_test.cc

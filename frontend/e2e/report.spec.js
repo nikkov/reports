@@ -1095,14 +1095,17 @@ test('серверный экспорт .xlsx: файл совпадает с э
   const ws = wb.worksheets[0]
   expect(String(ws.getRow(1).getCell(1).value)).toBe('Категория')
 
-  // экспорт учитывает агрегацию блока: 5 групп + шапка, а не 2 746 детальных строк
-  expect(ws.rowCount).toBe(6)
+  // экспорт учитывает агрегацию блока: 5 групп + ИТОГО + шапка, а не 2 746 детальных строк
+  expect(ws.rowCount).toBe(7)
+  expect(String(ws.getRow(7).getCell(1).value)).toBe('ИТОГО')
   const amounts = []
   ws.eachRow((row, n) => {
-    if (n > 1 && typeof row.getCell(2).value === 'number') amounts.push(row.getCell(2).value)
+    // ИТОГО (последняя строка) в сумму групп не входит — иначе она считается дважды
+    if (n > 1 && n < ws.rowCount && typeof row.getCell(2).value === 'number') amounts.push(row.getCell(2).value)
   })
   expect(amounts.length).toBeGreaterThanOrEqual(4)
   expect(amounts.reduce((a, b) => a + b, 0)).toBe(150977000) // сумма совпадает с экраном и golden
+  expect(ws.getRow(ws.rowCount).getCell(2).value).toBe(150977000) // ИТОГО равно сумме групп
 
   const params = wb.getWorksheet('Параметры')
   expect(params).toBeTruthy()
@@ -1116,6 +1119,60 @@ test('серверный экспорт .xlsx: файл совпадает с э
     data: { reportId: 'sales-aggregate', dataset: 'nope', params: {} }
   })
   expect(bad.status()).toBe(422)
+})
+
+// ADR-66: серверный .xlsx долго выгружал плоскую таблицу — подытоги и ИТОГО были только
+// в браузерном экспорте. Теперь книгу собирает один лист: подытог на уровне из шаблона,
+// общий итог последней строкой, а CSV остаётся машинным (без строк итогов).
+test('серверный экспорт .xlsx: подытоги групп и ИТОГО, CSV без них', async ({ request }) => {
+  const params = { from: '2026-03-01', to: '2026-03-10' }
+  const res = await request.post('/api/report/export.xlsx', { data: { reportId: 'sales-summary', params } })
+  expect(res.ok()).toBeTruthy()
+
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(await res.body())
+  const ws = wb.worksheets[0]
+
+  // 2 748 детальных строк + 6 подытогов (5 регионов и (пусто)) + ИТОГО + шапка
+  expect(ws.rowCount).toBe(2756)
+
+  const summary = []
+  ws.eachRow((row, n) => {
+    const first = String(row.getCell(1).value ?? '')
+    if (n > 1 && (first.startsWith('Итого') || first === 'ИТОГО')) {
+      summary.push({
+        n,
+        first,
+        amount: row.getCell(4).value,
+        profit: row.getCell(5).value,
+        bold: Boolean(row.getCell(1).font && row.getCell(1).font.bold)
+      })
+    }
+  })
+  expect(summary.map((s) => s.first)).toEqual([
+    'Итого Восток',
+    'Итого Запад',
+    'Итого Север',
+    'Итого Центр',
+    'Итого Юг',
+    'Итого (пусто)',
+    'ИТОГО'
+  ])
+  // суммы совпадают с GROUP BY по тем же датам (проверено запросом к БД)
+  expect(summary[0].amount).toBe(30367500)
+  expect(summary[0].profit).toBe(6134375)
+  expect(summary[5].amount).toBe(43600) // группа с пустым регионом
+  expect(summary[6].amount).toBe(150977000)
+  expect(summary[6].profit).toBe(31013250)
+  // строки итогов оформлены как зона экрана, а не как обычные детали
+  expect(summary.every((s) => s.bold)).toBe(true)
+
+  // CSV — машинный формат: строк итогов в нём нет
+  const csv = await request.post('/api/report/export.csv', { data: { reportId: 'sales-summary', params } })
+  const text = (await csv.body()).toString('utf8')
+  expect(text).not.toContain('Итого')
+  expect(text.trim().split('\r\n')).toHaveLength(2749) // шапка + 2 748 деталей
 })
 
 test('drill-through с диаграммы: клик по столбцу открывает детали с параметрами', async ({ page }) => {

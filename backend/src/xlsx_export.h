@@ -21,6 +21,10 @@ struct ExportMerge {
     int lastRow = 0;
 };
 
+// Вид строки: деталь, подытог группы, общий итог. Нужен и стилю книги, и CSV,
+// которому строки итогов мешают (машинный формат).
+enum class RowKind : unsigned char { Detail = 0, Subtotal = 1, Grand = 2 };
+
 struct ExportSheet {
     std::string title;
     std::vector<ExportColumn> columns;
@@ -28,6 +32,8 @@ struct ExportSheet {
     std::vector<std::pair<std::string, std::string>> params;    // лист «Параметры»
     std::vector<int> rowLevels;                                 // outline-уровень строки (0 — без группы)
     std::vector<ExportMerge> merges;                            // объединения групповых колонок
+    std::vector<unsigned char> rowKind;                         // RowKind по строке; пусто — все детальные
+    std::vector<int> rowSubtotalLevel;                          // для подытога — уровень группы, иначе -1
 };
 
 // Раскладывает строки по группам: устойчивая сортировка по групповым колонкам, объединения

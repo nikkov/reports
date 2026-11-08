@@ -34,6 +34,7 @@
 #include "subscriptions.h"
 #include "template_migrate.h"
 #include "validate.h"
+#include "group_rows.h"
 #include "xlsx_export.h"
 #include "env.h"
 #include "params.h"
@@ -1731,207 +1732,8 @@ int main() {
 
     // Серверный экспорт в .xlsx (ADR-38): шапка из шаблона, данные набора, лист параметров.
     // Нужен для рассылки и для объёмов, которые не помещаются в браузерный экспорт.
-    app().registerHandler(
-        "/api/report/export.xlsx",
-        [dataDb, &templates, &templatesRaw, &templatesMutex](const HttpRequestPtr &req,
-                                                             std::function<void(const HttpResponsePtr &)> &&cb) {
-            const auto body = req->getJsonObject();
-            if (!body || !body->isObject()) {
-                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
-                return;
-            }
-            const std::string reportId = (*body).get("reportId", "").asString();
-            if (reportId.empty()) {
-                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
-                return;
-            }
+    // (обработчик export.xlsx регистрируется ниже, после buildXlsx: он использует общий лист)
 
-            std::string datasetSql;
-            std::map<std::string, std::string> datasetParams;
-            std::string datasetKey;
-            std::string raw;
-            {
-                std::lock_guard<std::mutex> lock(templatesMutex);
-                const auto it = templates.find(reportId);
-                if (it == templates.end()) {
-                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
-                    return;
-                }
-                const auto &all = it->second.datasets;
-                if (all.empty()) {
-                    datasetSql = it->second.datasetSql;
-                    datasetParams = it->second.datasetParams;
-                } else {
-                    const std::string key = (*body).get("dataset", "").asString();
-                    const auto ds = all.find(key.empty() ? all.begin()->first : key);
-                    if (ds == all.end()) {
-                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
-                                  "в шаблоне нет набора '" + key + "'");
-                        return;
-                    }
-                    datasetKey = ds->first;
-                    datasetSql = ds->second.sql;
-                    datasetParams = ds->second.params;
-                }
-                const auto rawIt = templatesRaw.find(reportId);
-                if (rawIt != templatesRaw.end()) raw = rawIt->second;
-            }
-
-            rep::ParamBag bag;
-            const Json::Value &rawParams = (*body)["params"];
-            if (rawParams.isObject()) {
-                for (auto it = rawParams.begin(); it != rawParams.end(); ++it) {
-                    if (it->isString() || it->isInt64() || it->isUInt64() || it->isDouble() || it->isBool()) {
-                        bag.set(it.name(), it->asString());
-                    }
-                }
-            }
-
-            rep::DatasetQuery query;
-            std::string err;
-            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
-                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
-                return;
-            }
-
-            // колонки и заголовок — из шаблона: блок с этим dataKey, иначе первый табличный
-            Json::Value tpl;
-            if (!raw.empty()) {
-                Json::CharReaderBuilder builder;
-                std::string errs;
-                std::istringstream in(raw);
-                Json::parseFromStream(builder, in, &tpl, &errs);
-            }
-
-            Json::Value block;
-            for (const auto &b : tpl["blocks"]) {
-                if (b.get("type", "").asString() != "table") continue;
-                if (block.isNull() || (!datasetKey.empty() && b.get("dataKey", "").asString() == datasetKey)) {
-                    block = b;
-                }
-            }
-
-            struct Leaf {
-                std::string field;
-                std::string title;
-                std::string numFmt;
-                bool numeric;
-            };
-            std::vector<Leaf> leaves;
-            std::vector<std::size_t> groupColumns;
-            std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
-                if (col["children"].isArray()) {
-                    for (const auto &child : col["children"]) walk(child);
-                    return;
-                }
-                Leaf leaf;
-                leaf.field = col.get("field", "").asString();
-                leaf.title = col.get("title", leaf.field).asString();
-                const std::string fmt = col["format"].isString() ? col["format"].asString() : "";
-                leaf.numeric = fmt == "number" || fmt == "integer" || fmt == "percent" ||
-                               fmt == "currency" || col.isMember("aggregate");
-                leaf.numFmt = fmt == "percent" ? "0.00%" : leaf.numeric ? "# ##0" : "";
-                if (col["group"].asBool()) groupColumns.push_back(leaves.size());
-                leaves.push_back(leaf);
-            };
-            for (const auto &col : block["columns"]) walk(col);
-
-            const std::string title = tpl.get("title", reportId).asString();
-
-            // Если блок агрегирует на сервере — файл должен содержать те же строки, что на экране
-            std::string finalSql = query.sql;
-            const Json::Value &agg = block["aggregate"];
-            if (agg.isObject()) {
-                std::vector<std::string> groupBy;
-                for (const auto &g : agg["groupBy"]) {
-                    if (g.isString()) groupBy.push_back(g.asString());
-                }
-                std::vector<std::pair<std::string, std::string>> measures;
-                for (const auto &m : agg["measures"]) {
-                    if (m.isObject() && m["field"].isString() && m["agg"].isString()) {
-                        measures.emplace_back(m["field"].asString(), m["agg"].asString());
-                    }
-                }
-                std::string aggErr;
-                if (!rep::buildAggregateSql(finalSql, groupBy, measures, finalSql, aggErr)) {
-                    sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", aggErr);
-                    return;
-                }
-            }
-
-            static const std::map<std::string, std::string> noDeclared;
-            runQuery(
-                dataDb, finalSql, query.values,
-                [cb, leaves, title, bag, noDeclared, reportId, groupColumns](const orm::Result &res) {
-                    const auto ncols = static_cast<size_t>(res.columns());
-                    std::vector<std::string> names;
-                    std::vector<std::string> types;
-                    for (size_t c = 0; c < ncols; ++c) {
-                        names.emplace_back(res.columnName(static_cast<unsigned long>(c)));
-                        types.push_back(columnType(names.back(), noDeclared, res));
-                    }
-
-                    rep::ExportSheet sheet;
-                    sheet.title = title;
-                    for (const auto &leaf : leaves) {
-                        sheet.columns.push_back({leaf.title, leaf.numFmt, leaf.numeric});
-                    }
-                    for (const auto &kv : bag.values()) sheet.params.emplace_back(kv.first, kv.second);
-
-                    for (const auto &row : res) {
-                        std::vector<std::string> values;
-                        for (const auto &leaf : leaves) {
-                            const auto pos = std::find(names.begin(), names.end(), leaf.field);
-                            if (pos == names.end()) {
-                                values.emplace_back();
-                                continue;
-                            }
-                            const size_t idx = static_cast<size_t>(pos - names.begin());
-                            const orm::Field &f = row[idx];
-                            if (f.isNull()) {
-                                values.emplace_back();
-                            } else if (types[idx] == "int") {
-                                values.push_back(std::to_string(f.as<long long>()));
-                            } else if (types[idx] == "double") {
-                                std::ostringstream os;
-                                os << f.as<double>();
-                                values.push_back(os.str());
-                            } else {
-                                values.push_back(f.as<std::string>());
-                            }
-                        }
-                        sheet.rows.push_back(values);
-                    }
-
-                    const char *tmp = std::getenv("TMPDIR");
-                    const std::string path = std::string(tmp ? tmp : "/tmp") + "/rep-export-" +
-                                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-                                             ".xlsx";
-                    std::string werr;
-                    rep::applyGrouping(sheet, groupColumns);
-                    if (!rep::writeXlsx(path, sheet, werr)) {
-                        sendError(cb, k500InternalServerError, "EXPORT_FAILED", werr);
-                        return;
-                    }
-                    std::ifstream file(path, std::ios::binary);
-                    std::stringstream ss;
-                    ss << file.rdbuf();
-                    file.close();
-                    std::remove(path.c_str());
-
-                    auto resp = HttpResponse::newHttpResponse();
-                    resp->setContentTypeString(
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-                    // имя файла только ASCII: кириллица в заголовке недопустима по RFC 6266
-                    resp->addHeader("Content-Disposition", "attachment; filename=\"" + reportId + ".xlsx\"");
-                    resp->setBody(ss.str());
-                    cb(resp);
-                },
-                [cb](const std::exception_ptr &e) {
-                    sendError(cb, k500InternalServerError, "EXPORT_FAILED", describeError(e));
-                });
-        },
-        {Post});
 
     // CSV-экспорт (ADR-40): тот же расчёт, что у .xlsx, но текстом; ';' и BOM — для Excel.
     // Общая сборка листа отчёта: один расчёт для CSV, XLSX и рассылки (ADR-46, ADR-48).
@@ -2007,20 +1809,27 @@ int main() {
             std::string title;
             bool numeric;
             std::string numFmt;
+            bool aggregated;
         };
         std::vector<Leaf> leaves;
         std::vector<std::size_t> groupColumns;
+        std::vector<int> subtotalLevels;
         std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
             if (col["children"].isArray()) {
                 for (const auto &child : col["children"]) walk(child);
                 return;
             }
             const std::string fmt = col["format"].isString() ? col["format"].asString() : "";
+            const bool aggregated = col.isMember("aggregate");
             const bool numeric = fmt == "number" || fmt == "integer" || fmt == "percent" ||
-                                 fmt == "currency" || col.isMember("aggregate");
+                                 fmt == "currency" || aggregated;
             const std::string numFmt = fmt == "percent" ? "0.00%" : numeric ? "# ##0" : "";
-            if (col["group"].asBool()) groupColumns.push_back(leaves.size());
-            leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(), numeric, numFmt});
+            if (col["group"].asBool()) {
+                if (col["subtotal"].asBool()) subtotalLevels.push_back(static_cast<int>(groupColumns.size()));
+                groupColumns.push_back(leaves.size());
+            }
+            leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(), numeric, numFmt,
+                              aggregated});
         };
         for (const auto &col : block["columns"]) walk(col);
 
@@ -2045,10 +1854,13 @@ int main() {
         }
 
         const std::string sheetTitle = tpl.get("title", "").asString();
+        // на экране общий итог включён по умолчанию (ADR-1); в книге — так же
+        const bool grandTotal = block.isNull() || block.get("grandTotal", true).asBool();
         static const std::map<std::string, std::string> noDeclared;
         runQuery(
             dataDb, finalSql, query.values,
-            [done, leaves, bag, noDeclared, sheetTitle, groupColumns](const orm::Result &res) {
+            [done, leaves, bag, noDeclared, sheetTitle, groupColumns, subtotalLevels,
+             grandTotal](const orm::Result &res) {
                 const auto ncols = static_cast<size_t>(res.columns());
                 std::vector<std::string> names;
                 std::vector<std::string> types;
@@ -2083,7 +1895,18 @@ int main() {
                     }
                     sheet.rows.push_back(values);
                 }
-                rep::applyGrouping(sheet, groupColumns);
+                if (groupColumns.empty() && !grandTotal) {
+                    done(200, "", sheet, "");
+                    return;
+                }
+                rep::GroupLayout layout;
+                layout.groupColumns = groupColumns;
+                layout.subtotalLevels = subtotalLevels;
+                layout.grandTotal = grandTotal;
+                for (std::size_t c = 0; c < leaves.size(); ++c) {
+                    if (leaves[c].aggregated) layout.measureColumns.push_back(c);
+                }
+                rep::buildGroupedSheet(sheet, layout);
                 done(200, "", sheet, "");
             },
             [done](const std::exception_ptr &e) { done(500, "EXPORT_FAILED", rep::ExportSheet{}, describeError(e)); });
@@ -2100,7 +1923,10 @@ int main() {
                            done(status, code, message, 0);
                            return;
                        }
-                       done(200, "", rep::toCsv(sheet), static_cast<int>(sheet.rows.size()));
+                       // CSV — машинный формат: строки итогов в него не идут (ADR-40, ADR-66)
+                       rep::ExportSheet flat = sheet;
+                       rep::dropSummaryRows(flat);
+                       done(200, "", rep::toCsv(flat), static_cast<int>(flat.rows.size()));
                    });
     };
 
@@ -2131,6 +1957,40 @@ int main() {
                        done(200, "", buffer.str(), static_cast<int>(sheet.rows.size()));
                    });
     };
+
+    // Экспорт .xlsx строится тем же листом, что CSV и рассылка (ADR-38, ADR-66).
+    // Раньше здесь была вторая копия сборки листа, поэтому подытоги и ИТОГО попадали
+    // в письмо, но не в скачиваемый файл — один и тот же отчёт выглядел по-разному.
+    app().registerHandler(
+        "/api/report/export.xlsx",
+        [buildXlsx](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string reportId = (*body).get("reportId", "").asString();
+            if (reportId.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
+                return;
+            }
+            buildXlsx(
+                reportId, (*body).get("dataset", "").asString(), (*body)["params"],
+                [cb, reportId](int status, const std::string &code, const std::string &bytes, int) {
+                    if (status != 200) {
+                        sendError(cb, static_cast<HttpStatusCode>(status), code, bytes);
+                        return;
+                    }
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setContentTypeString(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                    // имя файла только ASCII: кириллица в заголовке недопустима по RFC 6266
+                    resp->addHeader("Content-Disposition", "attachment; filename=\"" + reportId + ".xlsx\"");
+                    resp->setBody(bytes);
+                    cb(resp);
+                });
+        },
+        {Post});
 
     app().registerHandler(
         "/api/report/export.csv",

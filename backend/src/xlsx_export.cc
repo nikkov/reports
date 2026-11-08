@@ -118,11 +118,41 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
 
     // объединения рисуем после записи значений: текст нужен в первой ячейке диапазона
     std::vector<lxw_format *> formats(sheet.columns.size(), nullptr);
+    // Строки итогов (ADR-66) красятся как зоны экрана: подытог — светло-серый, ИТОГО — темнее
+    // и с линией сверху. Формат нужен свой на колонку: у чисел сохраняется числовой формат.
+    std::vector<lxw_format *> subtotalFormats(sheet.columns.size(), nullptr);
+    std::vector<lxw_format *> grandFormats(sheet.columns.size(), nullptr);
     for (size_t c = 0; c < sheet.columns.size(); ++c) {
-        if (sheet.columns[c].numFmt.empty()) continue;
-        lxw_format *fmt = workbook_add_format(wb);
-        format_set_num_format(fmt, sheet.columns[c].numFmt.c_str());
-        formats[c] = fmt;
+        const bool numeric = !sheet.columns[c].numFmt.empty();
+        if (numeric) {
+            lxw_format *fmt = workbook_add_format(wb);
+            format_set_num_format(fmt, sheet.columns[c].numFmt.c_str());
+            formats[c] = fmt;
+
+            lxw_format *sub = workbook_add_format(wb);
+            format_set_num_format(sub, sheet.columns[c].numFmt.c_str());
+            format_set_bold(sub);
+            format_set_bg_color(sub, 0xF7F9FC);
+            subtotalFormats[c] = sub;
+
+            lxw_format *grand = workbook_add_format(wb);
+            format_set_num_format(grand, sheet.columns[c].numFmt.c_str());
+            format_set_bold(grand);
+            format_set_bg_color(grand, 0xE9EDF2);
+            format_set_top(grand, LXW_BORDER_MEDIUM);
+            grandFormats[c] = grand;
+            continue;
+        }
+        lxw_format *sub = workbook_add_format(wb);
+        format_set_bold(sub);
+        format_set_bg_color(sub, 0xF7F9FC);
+        subtotalFormats[c] = sub;
+
+        lxw_format *grand = workbook_add_format(wb);
+        format_set_bold(grand);
+        format_set_bg_color(grand, 0xE9EDF2);
+        format_set_top(grand, LXW_BORDER_MEDIUM);
+        grandFormats[c] = grand;
     }
 
     // какие ячейки объединены и должны заполняться только с первой строки диапазона
@@ -143,6 +173,7 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
                                            .collapsed = 0};
             worksheet_set_row_opt(ws, static_cast<lxw_row_t>(r + 1), LXW_DEF_ROW_HEIGHT, nullptr, &options);
         }
+        const unsigned char kind = sheet.rowKind.empty() ? 0 : sheet.rowKind[r];
         for (size_t c = 0; c < sheet.columns.size() && c < row.size(); ++c) {
             const std::string &value = row[c];
             if (value.empty()) continue;
@@ -150,10 +181,13 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
             if (std::find(skip.begin(), skip.end(), static_cast<int>(c)) != skip.end()) continue;
             const auto rowIdx = static_cast<lxw_row_t>(r + 1);
             const auto colIdx = static_cast<lxw_col_t>(c);
+            lxw_format *fmt = formats[c];
+            if (kind == static_cast<unsigned char>(RowKind::Subtotal)) fmt = subtotalFormats[c];
+            else if (kind == static_cast<unsigned char>(RowKind::Grand)) fmt = grandFormats[c];
             if (sheet.columns[c].numeric && looksNumeric(value)) {
-                worksheet_write_number(ws, rowIdx, colIdx, std::strtod(value.c_str(), nullptr), formats[c]);
+                worksheet_write_number(ws, rowIdx, colIdx, std::strtod(value.c_str(), nullptr), fmt);
             } else {
-                worksheet_write_string(ws, rowIdx, colIdx, value.c_str(), nullptr);
+                worksheet_write_string(ws, rowIdx, colIdx, value.c_str(), fmt);
             }
         }
     }
