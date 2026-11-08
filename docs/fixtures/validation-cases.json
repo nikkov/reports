@@ -831,6 +831,210 @@
         ]
       },
       "errors": []
+    },
+    {
+      "name": "gauge: четыре границы и пять цветов",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 40,
+            "thresholds": [
+              10,
+              15,
+              25,
+              30
+            ],
+            "zoneColors": [
+              "#c62828",
+              "#f9a825",
+              "#2e7d32",
+              "#f9a825",
+              "#c62828"
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "gauge: границы не возрастают",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 40,
+            "thresholds": [
+              10,
+              5,
+              25,
+              30
+            ],
+            "zoneColors": [
+              "#c62828",
+              "#f9a825",
+              "#2e7d32",
+              "#f9a825",
+              "#c62828"
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.thresholds.1"
+      ]
+    },
+    {
+      "name": "gauge: цветов меньше, чем зон",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 40,
+            "thresholds": [
+              10,
+              15,
+              25,
+              30
+            ],
+            "zoneColors": [
+              "#c62828",
+              "#f9a825",
+              "#2e7d32",
+              "#c62828"
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.zoneColors"
+      ]
+    },
+    {
+      "name": "gauge: одна граница мало",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 40,
+            "thresholds": [
+              10
+            ],
+            "zoneColors": [
+              "#c62828",
+              "#2e7d32"
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.thresholds",
+        "blocks.1.zoneColors"
+      ]
     }
   ]
 }

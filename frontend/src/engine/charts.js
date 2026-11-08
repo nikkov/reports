@@ -15,8 +15,40 @@ function niceMax(value, min) {
   return min + Math.ceil(raw / step) * step
 }
 
+// Цветовые зоны (ADR-57): N границ делят шкалу на N+1 отрезок, цветов столько же.
+// Цвет может быть hex или именем из styles.palette — разрешение делает вызывающий.
+export function buildGaugeZones({ min, max, thresholds, zoneColors, palette = {} }) {
+  if (!Array.isArray(thresholds) || thresholds.length < 2) return { zones: [], color: null }
+  if (!Array.isArray(zoneColors) || zoneColors.length !== thresholds.length + 1) return { zones: [], color: null }
+  const lo = Number.isFinite(min) ? min : 0
+  const hi = Number.isFinite(max) && max > lo ? max : lo + 1
+  const resolve = (c) => (palette && palette[c]) || c
+
+  const edges = [lo, ...thresholds.map(Number), hi]
+  const zones = []
+  for (let i = 0; i < edges.length - 1; i++) {
+    const from = Math.max(lo, edges[i])
+    const to = Math.min(hi, edges[i + 1])
+    if (!(to > from)) continue
+    zones.push({ from, to, color: resolve(zoneColors[i]) })
+  }
+  return { zones, paletteHits: zoneColors.map(resolve) }
+}
+
+// Цвет текущего значения: та зона, в которую попало число.
+export function gaugeColorFor(value, zones) {
+  for (const zone of zones || []) {
+    if (value >= zone.from && value < zone.to) return zone.color
+  }
+  if (!zones || !zones.length) return null
+  return zones[zones.length - 1].color // значение на самой правой границе или выше
+}
+
 // Значение для gauge: агрегат по всей выборке (без группировки по категориям).
-export function buildGaugeModel(rows, { yField, aggregate = 'sum', min, max, unit = '', name = '' } = {}) {
+export function buildGaugeModel(
+  rows,
+  { yField, aggregate = 'sum', min, max, unit = '', name = '', thresholds, zoneColors, palette } = {}
+) {
   const values = []
   for (const row of rows || []) {
     const v = num(row?.[yField])
@@ -47,7 +79,11 @@ export function buildGaugeModel(rows, { yField, aggregate = 'sum', min, max, uni
 
   const lo = num(min) ?? 0
   const hi = num(max) ?? niceMax(value, lo)
-  return { value, min: lo, max: hi > lo ? hi : lo + 1, unit, name, rows: values.length }
+  const model = { value, min: lo, max: hi > lo ? hi : lo + 1, unit, name, rows: values.length }
+  const zoneInfo = buildGaugeZones({ min: model.min, max: model.max, thresholds, zoneColors, palette })
+  model.zones = zoneInfo.zones || []
+  model.color = gaugeColorFor(value, model.zones)
+  return model
 }
 
 // Потоки для sankey: пары «источник → приёмник» со агрегированным весом.

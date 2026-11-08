@@ -49,9 +49,19 @@ function buildOption() {
       min: props.block.min,
       max: props.block.max,
       unit: props.block.unit || '',
-      name: props.block.title || props.block.yField
+      name: props.block.title || props.block.yField,
+      // цветовые зоны (ADR-57): границы и цвета из шаблона, токены — из styles.palette
+      thresholds: props.block.thresholds,
+      zoneColors: props.block.zoneColors,
+      palette: props.styles?.palette
     })
     const accent = props.styles?.palette?.accent || props.styles?.colors?.accent || '#17427f'
+    const span = model.max - model.min || 1
+    // ось красится полосами: доля правой границы зоны на шкале
+    const axisColors = model.zones.length
+      ? model.zones.map((z) => [(z.to - model.min) / span, z.color])
+      : [[1, '#e6ebf2']]
+    const valueColor = model.color || accent
     return {
       animation: false,
       textStyle: textStyle(),
@@ -62,18 +72,19 @@ function buildOption() {
           max: model.max,
           startAngle: 210,
           endAngle: -30,
-          progress: { show: true, width: 12, itemStyle: { color: accent } },
-          axisLine: { lineStyle: { width: 12, color: [[1, '#e6ebf2']] } },
+          // при цветовых зонах полоса прогресса закрыла бы зоны — оставляем только полосы
+          progress: { show: !model.zones.length, width: 12, itemStyle: { color: accent } },
+          axisLine: { lineStyle: { width: 12, color: axisColors } },
           axisTick: { show: false },
           splitLine: { length: 10, lineStyle: { color: '#c3ccd8' } },
           axisLabel: { color: textStyle()?.color, fontSize: 11, distance: 14 },
-          pointer: { width: 4, itemStyle: { color: accent } },
+          pointer: { width: 4, itemStyle: { color: valueColor } },
           title: { show: !!model.name, offsetCenter: [0, '72%'], fontSize: 12, color: textStyle()?.color },
           detail: {
             valueAnimation: false,
             offsetCenter: [0, '42%'],
             fontSize: 26,
-            color: textStyle()?.color,
+            color: valueColor,
             formatter: (v) => `${nf.format(Math.round(v * 100) / 100)}${model.unit}`
           },
           data: [{ value: model.value, name: model.name }]

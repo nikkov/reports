@@ -1,0 +1,106 @@
+{
+  "version": 2,
+  "id": "margin-zones",
+  "title": "Маржа: цветовые зоны по четырём границам",
+  "description": "Gauge с границами p1…p4: красная зона ниже p1, жёлтая p1…p2, зелёная p2…p3, жёлтая p3…p4, красная выше p4.",
+  "folder": "Примеры",
+  "tags": [
+    "gauge",
+    "зоны",
+    "пример"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "margin": {
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT round(sum(s.profit)::numeric / nullif(sum(s.amount), 0) * 100, 2) AS margin_pct, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS deals FROM sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Границы заданы в шаблоне: p1 = 10 %, p2 = 15 %, p3 = 25 %, p4 = 30 %. Ниже p1 и выше p4 — красная зона, p1…p2 и p3…p4 — жёлтая, p2…p3 — зелёная. Указатель и число окрашиваются по зоне, в которую попало значение."
+    },
+    {
+      "type": "chart",
+      "chartType": "gauge",
+      "dataKey": "margin",
+      "yField": "margin_pct",
+      "aggregate": "max",
+      "min": 0,
+      "max": 40,
+      "unit": "%",
+      "title": "Маржа за период",
+      "thresholds": [
+        10,
+        15,
+        25,
+        30
+      ],
+      "zoneColors": [
+        "#c62828",
+        "#f9a825",
+        "#2e7d32",
+        "#f9a825",
+        "#c62828"
+      ],
+      "width": "half"
+    },
+    {
+      "type": "table",
+      "dataKey": "margin",
+      "title": "Числа под шкалой",
+      "width": "half",
+      "columns": [
+        {
+          "field": "margin_pct",
+          "title": "Маржа, %",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма продаж",
+          "format": "number",
+          "type": "int",
+          "align": "right"
+        },
+        {
+          "field": "deals",
+          "title": "Сделок",
+          "format": "number",
+          "type": "int",
+          "align": "right"
+        }
+      ],
+      "grandTotal": false
+    }
+  ],
+  "styles": {
+    "preset": "default"
+  }
+}

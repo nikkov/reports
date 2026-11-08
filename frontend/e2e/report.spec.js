@@ -964,6 +964,37 @@ test('drill-through с диаграммы: клик по столбцу откр
   await expect(page.locator('.meta')).toContainText('строк')
 })
 
+test('gauge с четырьмя границами: пять цветовых зон и цвет указателя', async ({ page }) => {
+  await page.goto('/report.html?report=margin-zones&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('шаблон v2')
+
+  const gauge = await page.evaluate(() => {
+    const entry = (window.__charts || []).find((c) => c.type === 'gauge')
+    const s = entry?.instance?.getOption()?.series?.[0]
+    return s
+      ? {
+          value: s.data?.[0]?.value,
+          bands: s.axisLine?.lineStyle?.color?.length ?? 0,
+          first: s.axisLine?.lineStyle?.color?.[0]?.[1],
+          last: s.axisLine?.lineStyle?.color?.at(-1)?.[1],
+          middle: s.axisLine?.lineStyle?.color?.[2]?.[1],
+          pointer: s.pointer?.itemStyle?.color,
+          detail: s.detail?.color
+        }
+      : null
+  })
+
+  expect(gauge).not.toBeNull()
+  expect(gauge.value).toBeCloseTo(20.54, 2)      // попадает в зелёную зону 15…25
+  expect(gauge.bands).toBe(5)                     // 4 границы → 5 зон
+  expect(gauge.first).toBe('#c62828')             // ниже p1 — красная
+  expect(gauge.middle).toBe('#2e7d32')            // p2…p3 — зелёная
+  expect(gauge.last).toBe('#c62828')              // выше p4 — красная
+  expect(gauge.pointer).toBe('#2e7d32')
+  expect(gauge.detail).toBe('#2e7d32')
+  await expect(page.locator('.chart-box').first()).toContainText('Маржа за период')
+})
+
 test('диаграммы gauge и sankey: спидометр и потоки рисуются из своих наборов', async ({ page }) => {
   await page.goto('/report.html?report=sales-flow&from=2026-03-01&to=2026-03-10')
   await expect(page.locator('.meta')).toContainText('шаблон v2')

@@ -155,3 +155,63 @@ describe('пустая выборка для каждого агрегата gau
     })
   }
 })
+
+describe('gauge: цветовые зоны по четырём границам', () => {
+  const rows = [{ v: 20.54 }]
+  const thresholds = [10, 15, 25, 30]
+  const zoneColors = ['#c62828', '#f9a825', '#2e7d32', '#f9a825', '#c62828']
+
+  it('четыре границы дают пять зон и пять цветов', () => {
+    const model = buildGaugeModel(rows, { yField: 'v', min: 0, max: 40, thresholds, zoneColors })
+    expect(model.zones).toEqual([
+      { from: 0, to: 10, color: '#c62828' },
+      { from: 10, to: 15, color: '#f9a825' },
+      { from: 15, to: 25, color: '#2e7d32' },
+      { from: 25, to: 30, color: '#f9a825' },
+      { from: 30, to: 40, color: '#c62828' }
+    ])
+  })
+
+  it('значение в зелёной зоне красит указатель в зелёный', () => {
+    const model = buildGaugeModel(rows, { yField: 'v', min: 0, max: 40, thresholds, zoneColors })
+    expect(model.value).toBeCloseTo(20.54, 2)
+    expect(model.color).toBe('#2e7d32')
+  })
+
+  it('значение в жёлтой зоне и выше последней границы — свои цвета', () => {
+    const yellow = buildGaugeModel([{ v: 12 }], { yField: 'v', min: 0, max: 40, thresholds, zoneColors })
+    expect(yellow.color).toBe('#f9a825')
+    const red = buildGaugeModel([{ v: 35 }], { yField: 'v', min: 0, max: 40, thresholds, zoneColors })
+    expect(red.color).toBe('#c62828')
+  })
+
+  it('ниже первой границы — первый цвет', () => {
+    expect(buildGaugeModel([{ v: 3 }], { yField: 'v', min: 0, max: 40, thresholds, zoneColors }).color).toBe('#c62828')
+  })
+
+  it('цвет может быть токеном палитры', () => {
+    const palette = { bad: '#b00020', warn: '#f9a825', good: '#2e7d32' }
+    const model = buildGaugeModel([{ v: 20 }], {
+      yField: 'v', min: 0, max: 40, palette,
+      thresholds, zoneColors: ['bad', 'warn', 'good', 'warn', 'bad']
+    })
+    expect(model.zones.map((z) => z.color)).toEqual(['#b00020', '#f9a825', '#2e7d32', '#f9a825', '#b00020'])
+    expect(model.color).toBe('#2e7d32')
+  })
+
+  it('несовпадение числа цветов и границ отключает зоны, а не ломает рендер', () => {
+    const model = buildGaugeModel([{ v: 20 }], { yField: 'v', min: 0, max: 40, thresholds, zoneColors: ['#fff'] })
+    expect(model.zones).toEqual([])
+    expect(model.color).toBeNull()
+    expect(model.value).toBe(20)
+  })
+
+  it('границы вне шкалы обрезаются по min/max', () => {
+    const model = buildGaugeModel([{ v: 5 }], {
+      yField: 'v', min: 0, max: 20, thresholds: [2, 6, 18, 30], zoneColors
+    })
+    expect(model.zones[0]).toEqual({ from: 0, to: 2, color: '#c62828' })
+    // зона p3…p4 обрезана верхом шкалы: она жёлтая, и красная зона «выше p4» в шкалу не попадает
+    expect(model.zones[model.zones.length - 1]).toEqual({ from: 18, to: 20, color: '#f9a825' })
+  })
+})

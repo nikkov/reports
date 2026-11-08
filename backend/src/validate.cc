@@ -273,6 +273,39 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
             block["max"].asDouble() <= block["min"].asDouble()) {
             addError(r, base + ".max", "max должен быть больше min");
         }
+        // Цветовые зоны: N границ → N+1 зона и столько же цветов (ADR-57).
+        const bool hasZones = block.isMember("thresholds") || block.isMember("zoneColors");
+        if (hasZones) {
+            const Json::Value &th = block["thresholds"];
+            const Json::Value &colors = block["zoneColors"];
+            // границы схемы (2…8) и цвета (3…9) зеркалят JSON Schema клиента
+            if (colors.isArray() && colors.size() < 3) {
+                addError(r, base + ".zoneColors", "нужно не меньше трёх цветов — по одному на зону");
+            } else if (colors.isArray() && colors.size() > 9) {
+                addError(r, base + ".zoneColors", "больше девяти цветов не поддерживается");
+            }
+            if (!th.isArray() || th.size() < 2) {
+                addError(r, base + ".thresholds", "нужно не меньше двух границ (например p1…p4)");
+            } else if (th.size() > 8) {
+                addError(r, base + ".thresholds", "больше восьми границ не поддерживается");
+            } else {
+                for (Json::ArrayIndex i = 1; i < th.size(); ++i) {
+                    if (!th[i].isNumeric() || !th[i - 1].isNumeric() ||
+                        th[i].asDouble() <= th[i - 1].asDouble()) {
+                        addError(r, base + ".thresholds." + std::to_string(i),
+                                 "границы должны возрастать: каждое значение больше предыдущего");
+                    }
+                }
+                if (!colors.isArray()) {
+                    addError(r, base + ".zoneColors",
+                             "нужно " + std::to_string(th.size() + 1) + " цвет(а/ов) — по одному на зону");
+                } else if (colors.size() != th.size() + 1) {
+                    addError(r, base + ".zoneColors",
+                             "границ " + std::to_string(th.size()) + " — зон " + std::to_string(th.size() + 1) +
+                                 ", а цветов " + std::to_string(colors.size()));
+                }
+            }
+        }
     } else if (type == "sankey") {
         need("sourceField");
         need("targetField");

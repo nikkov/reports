@@ -287,7 +287,43 @@ export function validateTemplate(template) {
     errors.push({ path: 'tags', message: 'tags должен быть массивом строк' })
   }
 
-  // drill-through: из подытога таблицы (ADR-29) или из точки диаграммы (ADR-43)
+  // Цветовые зоны gauge (ADR-57): N границ дают N+1 зону, значит и N+1 цвет.
+function checkGaugeZones(block, base, errors) {
+  const thresholds = block.thresholds
+  const colors = block.zoneColors
+  if (thresholds === undefined && colors === undefined) return
+  if (!Array.isArray(thresholds) || thresholds.length < 2) {
+    errors.push({ path: `${base}.thresholds`, message: 'нужно не меньше двух границ (например p1…p4)' })
+    return
+  }
+  for (let i = 1; i < thresholds.length; i++) {
+    if (!(thresholds[i] > thresholds[i - 1])) {
+      errors.push({
+        path: `${base}.thresholds.${i}`,
+        message: 'границы должны возрастать: каждое значение больше предыдущего'
+      })
+    }
+  }
+  if (!Array.isArray(colors)) {
+    errors.push({ path: `${base}.zoneColors`, message: `нужно ${thresholds.length + 1} цвет(а/ов) — по одному на зону` })
+    return
+  }
+  if (colors.length !== thresholds.length + 1) {
+    errors.push({
+      path: `${base}.zoneColors`,
+      message: `границ ${thresholds.length} — зон ${thresholds.length + 1}, а цветов ${colors.length}`
+    })
+  }
+  const palette = {} // hex проверяется схемой; токены палитры проверит styles
+  for (const [i, color] of colors.entries()) {
+    if (typeof color !== 'string' || (!/^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$|^transparent$/.test(color) && !/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(color))) {
+      errors.push({ path: `${base}.zoneColors.${i}`, message: 'цвет — hex или имя из styles.palette' })
+    }
+  }
+  void palette
+}
+
+// drill-through: из подытога таблицы (ADR-29) или из точки диаграммы (ADR-43)
   ;(template.blocks || []).forEach((block, i) => {
     if (!block.drill) return
     const isTable = block.type === 'table'
@@ -504,6 +540,7 @@ export function validateTemplate(template) {
         need('yField')
         forbid('xField', 'значение одно, категории нет')
         forbid('seriesField', 'значение одно, серий нет')
+        checkGaugeZones(block, base, errors)
         if (typeof block.min === 'number' && typeof block.max === 'number' && block.max <= block.min) {
           errors.push({ path: `${base}.max`, message: 'max должен быть больше min' })
         }
@@ -547,6 +584,9 @@ export function validateTemplate(template) {
         if (type !== 'gauge') {
           warnings.push({ path: `${base}.chartType`, message: 'min/max/unit учитываются только у gauge' })
         }
+      }
+      if ((block.thresholds !== undefined || block.zoneColors !== undefined) && type !== 'gauge') {
+        warnings.push({ path: `${base}.chartType`, message: 'thresholds/zoneColors учитываются только у gauge' })
       }
 
       const cols = (columnsByDataKey[block.dataKey] || []).map((c) => c.col)

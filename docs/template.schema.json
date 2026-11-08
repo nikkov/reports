@@ -469,6 +469,22 @@
           "type": "string",
           "maxLength": 8
         },
+        "thresholds": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {
+            "type": "number"
+          }
+        },
+        "zoneColors": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/$defs/color"
+          }
+        },
         "aggregate": {
           "enum": [
             "sum",
