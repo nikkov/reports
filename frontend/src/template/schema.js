@@ -330,6 +330,32 @@ export default {
           "type": "string",
           "minLength": 1
         },
+        "detailOrder": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dir": {
+                "type": "string",
+                "enum": [
+                  "asc",
+                  "desc"
+                ]
+              }
+            }
+          },
+          "description": "порядок деталей при раскрытии группы (только с aggregate)"
+        },
         "aggregate": {
           "type": "object",
           "additionalProperties": false,

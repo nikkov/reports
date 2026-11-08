@@ -88,6 +88,16 @@
           "aggregate": "sum",
           "width": 150
         }
+      ],
+      "detailOrder": [
+        {
+          "field": "profit",
+          "dir": "desc"
+        },
+        {
+          "field": "amount",
+          "dir": "desc"
+        }
       ]
     }
   ],

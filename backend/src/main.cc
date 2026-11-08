@@ -1549,13 +1549,49 @@ int main() {
                 values.push_back(value.asString());
                 sql += " = $" + std::to_string(values.size());
             }
-            // Страницы не должны пересекаться: если набор данных не задаёт порядок,
-            // сортируем по содержимому строки — иначе LIMIT/OFFSET по разным планам
-            // может вернуть одну строку дважды и потерять другую.
+            // Порядок деталей (ADR-71): шаблон задаёт detailOrder — тогда строки идут
+            // по делу (дата, сумма), а не по тексту. Без него порядок берётся из набора,
+            // а если и там его нет — по содержимому строки: иначе LIMIT/OFFSET на разных
+            // планах может вернуть строку дважды и потерять другую.
+            std::vector<std::pair<std::string, std::string>> order;
+            const Json::Value &orderSpec = (*body)["order"];
+            if (orderSpec.isArray()) {
+                for (const auto &item : orderSpec) {
+                    if (!item.isObject()) {
+                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                  "order: элемент — объект {field, dir}");
+                        return;
+                    }
+                    const std::string orderField = item.get("field", "").asString();
+                    if (!rep::validIdentifier(orderField)) {
+                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                  "order: поле должно быть идентификатором");
+                        return;
+                    }
+                    std::string dir = item.get("dir", "asc").asString();
+                    std::transform(dir.begin(), dir.end(), dir.begin(),
+                                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                    if (dir != "asc" && dir != "desc") {
+                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                  "order: направление — asc или desc");
+                        return;
+                    }
+                    order.emplace_back(orderField, dir);
+                }
+            }
             std::string lowered = query.sql;
             std::transform(lowered.begin(), lowered.end(), lowered.begin(),
                            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-            if (lowered.find(" order by ") == std::string::npos) {
+            const bool datasetOrdered = lowered.find(" order by ") != std::string::npos;
+            if (!order.empty()) {
+                std::string clause;
+                for (const auto &[name, dir] : order) {
+                    if (!clause.empty()) clause += ", ";
+                    clause += "d." + name + " " + dir;
+                }
+                // равенство по ключу не должно «плавать» между страницами
+                sql += " ORDER BY " + clause + ", row_to_json(d)::text";
+            } else if (!datasetOrdered) {
                 sql += " ORDER BY row_to_json(d)::text";
             }
             sql += " LIMIT " + std::to_string(limit) + " OFFSET " + std::to_string(offset);

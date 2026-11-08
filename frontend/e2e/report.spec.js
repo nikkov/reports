@@ -1425,14 +1425,70 @@ test('детали группы: страницы по 200, кнопка «ещ�
   expect(calls).toHaveLength(4)
   expect(calls.map((c) => c.offset ?? 0)).toEqual([0, 200, 400, 600])
 
-  // сворачивание и повторное раскрытие берут строки из кэша — новых запросов нет
-  const chev = page.locator('.rt-table tr', { hasText: 'Электроника' }).locator('.chev').first()
-  await chev.click()
-  await chev.click()
+  // «Развернуть всё» тянет все группы до конца страницами, а не только первую
+  const beforeExpandAll = calls.length
+  await page.getByRole('button', { name: 'Развернуть всё' }).click()
+  await expect(page.getByRole('button', { name: 'Развернуть всё' })).toBeEnabled({ timeout: 30000 })
   await expect(page.locator('.tv-info', { hasText: 'показано' })).toHaveCount(0)
-  expect(calls).toHaveLength(4)
+  await expect(page.locator('.tv-more')).toHaveCount(0)
+  // пять групп по 689/687/686/685/1 строке: 4+4+4+4+1 страниц, первая из них уже была
+  expect(calls.length).toBeGreaterThan(beforeExpandAll)
+  const offsets = calls.slice(beforeExpandAll).map((c) => c.offset ?? 0)
+  expect(offsets).toContain(600)
+  expect(offsets.filter((o) => o === 0).length).toBeGreaterThanOrEqual(3) // остальные группы грузятся с начала
+
+  // сворачивание и повторное раскрытие берут строки из кэша — новых запросов нет.
+  // После «Развернуть всё» строк тысячи: возвращаемся к началу, иначе строки группы
+  // нет в окне виртуализации и шеврон некуда нажать.
+  const callsAfterExpandAll = calls.length
+  // «Свернуть всё» возвращает короткую таблицу: в развёрнутой группу не найти в окне
+  // виртуализации, а кэш деталей при сворачивании сохраняется
+  await page.getByRole('button', { name: 'Свернуть всё' }).click()
+  await expect(page.locator('.rt-table tr')).toHaveCount(7) // шапка + пять групп + ИТОГО
+  const chev = page.locator('.rt-table tr', { hasText: 'Итого Электроника' }).locator('.chev').first()
+  await chev.click()
+  await expect(page.locator('.rt-info, .tv-info', { hasText: 'показано' })).toHaveCount(0)
+  expect(calls).toHaveLength(callsAfterExpandAll)
 
   await request.delete(`/api/reports/${id}`)
+})
+
+// ADR-71: порядок деталей задаёт шаблон, а не текст строки.
+test('порядок деталей группы берётся из detailOrder шаблона', async ({ page, request }) => {
+  const body = (offset) => ({
+    reportId: 'sales-aggregate',
+    params: { from: '2026-03-01', to: '2026-03-10' },
+    field: 'category',
+    value: 'Электроника',
+    dataset: 'sales',
+    limit: 200,
+    offset,
+    order: [{ field: 'profit', dir: 'desc' }, { field: 'amount', dir: 'desc' }]
+  })
+
+  const first = await (await request.post('/api/report/group', { data: body(0) })).json()
+  const second = await (await request.post('/api/report/group', { data: body(200) })).json()
+  const profits = [...first.rows, ...second.rows].map((r) => r.profit)
+
+  // стартовая строка — максимальная прибыль, дальше только невозрастание
+  expect(profits[0]).toBe(24400)
+  expect(profits.every((v, i) => i === 0 || profits[i - 1] >= v)).toBe(true)
+  // стык страниц не рвёт порядок
+  expect(profits[199]).toBeGreaterThanOrEqual(profits[200])
+
+  // то же в интерфейсе: первая детальная строка показывает максимум
+  await page.goto('/report.html?report=sales-aggregate&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк: 5')
+  await page.locator('.rt-table tr', { hasText: 'Итого Электроника' }).locator('.chev').first().click()
+  await expect(page.locator('.tv-info', { hasText: 'показано 200 из 689' })).toBeVisible()
+  const rowsText = (await page.locator('.rt-table tr').allInnerTexts()).map((t) => t.replace(/\s+/g, ' '))
+  // первая детальная строка — максимальная прибыль: 98 400 суммы при 24 400 прибыли
+  const detail = rowsText.find((t) => t.includes('24 400'))
+  expect(detail).toBeTruthy()
+  expect(detail).toContain('98 400')
+  // до неё нет строки с большей прибылью
+  const before = rowsText.slice(0, rowsText.indexOf(detail)).join(' ')
+  expect(before).not.toContain('24 500')
 })
 
 // ADR-69: несколько коридоров в band — каждая пара границ закрашивается своим цветом.

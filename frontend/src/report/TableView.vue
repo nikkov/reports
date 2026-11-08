@@ -1,7 +1,9 @@
 <template>
   <div v-if="isGrouped" class="tv-bar">
     <button type="button" @click="collapseAll">Свернуть всё</button>
-    <button type="button" @click="expandAll">Развернуть всё</button>
+    <button type="button" :disabled="expandingAll" @click="expandAll">
+      {{ expandingAll ? 'разворачиваю…' : 'Развернуть всё' }}
+    </button>
     <span class="tv-info">{{ collapsed.size }} свёрнуто</span>
     <span v-if="loadedNote" class="tv-info">{{ loadedNote }}</span>
     <!-- детали приходят страницами: остаток добираем той же кнопкой (ADR-70) -->
@@ -330,11 +332,35 @@ function collapseAll() {
   collapsed.value = new Set(allGroupIds.value)
 }
 
+// «Развернуть всё» тянет группы до конца страницами, но не бесконечно: на широком
+// периоде строки в группах измеряются тысячами, и открывать всё разом — верный способ
+// подвесить вкладку. Потолок общий на операцию; что не влезло, видно по кнопке «ещё N».
+const EXPAND_ALL_LIMIT = 20000
+const expandingAll = ref(false)
+
+async function loadAllPages(id, budget) {
+  for (;;) {
+    const item = details.value.get(id)
+    const shown = item?.rows?.length || 0
+    const total = Number(item?.total) || 0
+    if (item && total <= shown) return // группа загружена полностью
+    if (budget.left <= 0) return
+    await loadDetails(id, Boolean(item))
+    const after = details.value.get(id)?.rows?.length || 0
+    budget.left -= Math.max(0, after - shown)
+    if (after === shown) return // страница не пришла — не крутимся вхолостую
+  }
+}
+
 async function expandAll() {
-  // «Развернуть всё» в агрегированном отчёте означает «подгрузить все группы»:
-  // по одному запросу на группу, каждый со своим пределом строк.
   if (serverAggregated.value && props.loadGroup) {
-    await Promise.all([...allGroupIds.value].map((id) => loadDetails(id)))
+    expandingAll.value = true
+    const budget = { left: EXPAND_ALL_LIMIT }
+    try {
+      for (const id of allGroupIds.value) await loadAllPages(id, budget)
+    } finally {
+      expandingAll.value = false
+    }
   }
   collapsed.value = new Set()
 }

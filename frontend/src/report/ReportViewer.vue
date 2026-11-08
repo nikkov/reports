@@ -159,7 +159,9 @@ const dataByKey = ref({})
 // и с теми же параметрами, что и агрегат. Строк — не больше limit сервера (200).
 async function loadGroupDetails(block, pathKey, spec) {
   const key = block?.dataKey || ''
-  return api.group(reportId, { ...paramValues }, { ...spec, dataset: key || undefined })
+  // порядок деталей задаёт шаблон (ADR-71): без него строки идут по содержимому
+  const order = Array.isArray(block?.detailOrder) ? block.detailOrder : undefined
+  return api.group(reportId, { ...paramValues }, { ...spec, dataset: key || undefined, order })
 }
 
 function rowsFor(block) {

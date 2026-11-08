@@ -1822,6 +1822,315 @@
    "errors": [
     "blocks.1.bands"
    ]
+  },
+  {
+   "name": "detailOrder: порядок деталей допустим",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "table",
+      "dataKey": "sales",
+      "columns": [
+       {
+        "field": "a",
+        "title": "A",
+        "group": true
+       },
+       {
+        "field": "v",
+        "title": "V",
+        "aggregate": "sum"
+       }
+      ],
+      "aggregate": {
+       "groupBy": [
+        "a"
+       ],
+       "measures": [
+        {
+         "field": "v",
+         "agg": "sum"
+        }
+       ]
+      },
+      "detailOrder": [
+       {
+        "field": "v",
+        "dir": "desc"
+       },
+       {
+        "field": "a"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": []
+  },
+  {
+   "name": "detailOrder без aggregate бессмыслен",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "table",
+      "dataKey": "sales",
+      "columns": [
+       {
+        "field": "a",
+        "title": "A",
+        "group": true
+       },
+       {
+        "field": "v",
+        "title": "V",
+        "aggregate": "sum"
+       }
+      ],
+      "detailOrder": [
+       {
+        "field": "v",
+        "dir": "desc"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.detailOrder"
+   ]
+  },
+  {
+   "name": "detailOrder: неверное направление",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "table",
+      "dataKey": "sales",
+      "columns": [
+       {
+        "field": "a",
+        "title": "A",
+        "group": true
+       },
+       {
+        "field": "v",
+        "title": "V",
+        "aggregate": "sum"
+       }
+      ],
+      "aggregate": {
+       "groupBy": [
+        "a"
+       ],
+       "measures": [
+        {
+         "field": "v",
+         "agg": "sum"
+        }
+       ]
+      },
+      "detailOrder": [
+       {
+        "field": "v",
+        "dir": "вниз"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.detailOrder.0.dir"
+   ]
+  },
+  {
+   "name": "detailOrder: пустой список",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "table",
+      "dataKey": "sales",
+      "columns": [
+       {
+        "field": "a",
+        "title": "A",
+        "group": true
+       },
+       {
+        "field": "v",
+        "title": "V",
+        "aggregate": "sum"
+       }
+      ],
+      "aggregate": {
+       "groupBy": [
+        "a"
+       ],
+       "measures": [
+        {
+         "field": "v",
+         "agg": "sum"
+        }
+       ]
+      },
+      "detailOrder": []
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.detailOrder"
+   ]
+  },
+  {
+   "name": "detailOrder: поле не идентификатор",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "table",
+      "dataKey": "sales",
+      "columns": [
+       {
+        "field": "a",
+        "title": "A",
+        "group": true
+       },
+       {
+        "field": "v",
+        "title": "V",
+        "aggregate": "sum"
+       }
+      ],
+      "aggregate": {
+       "groupBy": [
+        "a"
+       ],
+       "measures": [
+        {
+         "field": "v",
+         "agg": "sum"
+        }
+       ]
+      },
+      "detailOrder": [
+       {
+        "field": "v desc; drop table sales"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.detailOrder.0.field"
+   ]
   }
  ]
 }

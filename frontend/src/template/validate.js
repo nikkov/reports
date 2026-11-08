@@ -525,6 +525,32 @@ function checkGaugeZones(block, base, errors) {
       if (block.grandTotal && !block.columns.some((c) => !c.group)) {
         warnings.push({ path: `${base}.grandTotal`, message: 'нет листовых колонок для строки ИТОГО' })
       }
+
+      // Порядок деталей группы (ADR-71): имеет смысл только там, где группа раскрывается,
+      // то есть у блока с серверной агрегацией
+      if (block.detailOrder !== undefined) {
+        const list = block.detailOrder
+        const aggregated = block.aggregate && typeof block.aggregate === 'object'
+        if (!Array.isArray(list) || list.length < 1 || list.length > 4) {
+          errors.push({ path: `${base}.detailOrder`, message: 'detailOrder: от 1 до 4 полей' })
+        } else if (!aggregated) {
+          errors.push({ path: `${base}.detailOrder`, message: 'detailOrder имеет смысл только с aggregate' })
+        } else {
+          list.forEach((item, i) => {
+            const path = `${base}.detailOrder.${i}`
+            if (!item || typeof item !== 'object' || Array.isArray(item)) {
+              errors.push({ path, message: 'элемент — объект {field, dir}' })
+              return
+            }
+            if (typeof item.field !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(item.field)) {
+              errors.push({ path: `${path}.field`, message: 'нужно имя поля' })
+            }
+            if (item.dir !== undefined && item.dir !== 'asc' && item.dir !== 'desc') {
+              errors.push({ path: `${path}.dir`, message: 'направление: asc или desc' })
+            }
+          })
+        }
+      }
     }
 
     if (block.type === 'chart') {

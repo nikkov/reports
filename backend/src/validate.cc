@@ -752,6 +752,37 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         }
                     }
                 }
+                // порядок деталей группы (ADR-71): только у блока с серверной агрегацией
+                if (!block["detailOrder"].isNull()) {
+                    const Json::Value &order = block["detailOrder"];
+                    const bool aggregated = block["aggregate"].isObject();
+                    if (!order.isArray() || order.size() < 1 || order.size() > 4) {
+                        addError(r, base + ".detailOrder", "detailOrder: от 1 до 4 полей");
+                    } else if (!aggregated) {
+                        addError(r, base + ".detailOrder", "detailOrder имеет смысл только с aggregate");
+                    } else {
+                        for (Json::ArrayIndex i = 0; i < order.size(); ++i) {
+                            const Json::Value &item = order[i];
+                            const std::string path = base + ".detailOrder." + std::to_string(i);
+                            if (!item.isObject()) {
+                                addError(r, path, "элемент — объект {field, dir}");
+                                continue;
+                            }
+                            const std::string field = item["field"].asString();
+                            if (field.empty() || !std::all_of(field.begin(), field.end(), [](unsigned char c) {
+                                    return std::isalnum(c) || c == '_';
+                                }) || std::isdigit(static_cast<unsigned char>(field[0]))) {
+                                addError(r, path + ".field", "нужно имя поля");
+                            }
+                            if (!item["dir"].isNull()) {
+                                const std::string dir = item["dir"].asString();
+                                if (dir != "asc" && dir != "desc") {
+                                    addError(r, path + ".dir", "направление: asc или desc");
+                                }
+                            }
+                        }
+                    }
+                }
                 checkDrill(r, block, base, true, false);
             } else {
                 checkChartBlock(r, block, base);
