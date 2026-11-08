@@ -176,7 +176,9 @@ test('свёрнутая категория не меняет шеврон ре�
 
   await page.locator('.rt').evaluate((el) => { el.scrollTop = 20000 })
   await page.waitForTimeout(300)
-  const scrolled = page.locator('.rt-table tbody tr:not(.spacer)').first()
+  // Первая строка окна может быть частично скрыта шапкой — её групповая ячейка
+  // прозрачная (держит выравнивание колонок), а шеврон стоит на первой видимой строке.
+  const scrolled = page.locator('.rt-table tbody tr:not(.spacer)').filter({ has: page.locator('.chev') }).first()
   await expect(scrolled.locator('.chev').nth(0)).toHaveText(regionBefore)
 })
 
@@ -217,6 +219,68 @@ test('«свернуть всё» оставляет только итоги р�
   await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
   const heightExpanded = await page.locator('.rt').evaluate((el) => el.scrollHeight)
   expect(heightExpanded).toBe(heightBefore)
+})
+
+// Дефект стенда: у отчётов с объединёнными группами при прокрутке между липкой шапкой
+// и первой строкой оставалась пустая полоса — окно начиналось со следующей строки.
+test('при прокрутке под шапкой нет пустой полосы, а подпись группы видна', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  await waitRows(page)
+
+  for (const top of [200, 1200, 6000]) {
+    await page.locator('.rt').evaluate((el, y) => {
+      el.scrollTop = y
+      el.dispatchEvent(new Event('scroll'))
+    }, top)
+    await page.waitForTimeout(250)
+
+    const measured = await page.evaluate(() => {
+      const sc = document.querySelector('.rt')
+      const head = sc.querySelector('thead')
+      const headerBottom = head.getBoundingClientRect().bottom
+      const rows = [...sc.querySelectorAll('tbody tr')].filter((r) => !r.classList.contains('spacer'))
+      const painted = rows.filter((r) => r.getBoundingClientRect().bottom > headerBottom + 0.5)
+      const visible = rows.find((r) => r.getBoundingClientRect().top >= headerBottom - 0.5)
+      return {
+        gap: painted[0] ? painted[0].getBoundingClientRect().top - headerBottom : null,
+        label: visible ? (visible.children[0].textContent || '').trim() : ''
+      }
+    })
+
+    // строка, попавшая под шапку, должна быть видна хотя бы частично — иначе полоса пустая
+    expect(measured.gap, `пустая полоса под шапкой при scrollTop=${top}`).not.toBeNull()
+    expect(measured.gap, `пустая полоса под шапкой при scrollTop=${top}`).toBeLessThanOrEqual(1)
+    // первая полноценно видимая строка обязана показывать подпись группы
+    expect(measured.label, `групповая колонка пуста при scrollTop=${top}`).not.toBe('')
+  }
+})
+
+test('«свернуть всё» после прокрутки не оставляет пустоты и показывает итоги', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  await waitRows(page)
+
+  await page.locator('.rt').evaluate((el) => {
+    el.scrollTop = 9000
+    el.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForTimeout(250)
+  await page.getByRole('button', { name: 'Свернуть всё' }).click()
+
+  await expect(page.locator('.rt-table tbody tr.subtotal').first()).toContainText('Итого')
+  const measured = await page.evaluate(() => {
+    const sc = document.querySelector('.rt')
+    const headerBottom = sc.querySelector('thead').getBoundingClientRect().bottom
+    const rows = [...sc.querySelectorAll('tbody tr')].filter((r) => !r.classList.contains('spacer'))
+    return {
+      scrollTop: sc.scrollTop,
+      gap: rows[0] ? rows[0].getBoundingClientRect().top - headerBottom : null,
+      kinds: rows.map((r) => r.className.split(' ')[0])
+    }
+  })
+  // модель схлопнулась — окно обязано уехать к началу, иначе показывается хвост таблицы
+  expect(measured.scrollTop).toBe(0)
+  expect(measured.gap).toBeLessThanOrEqual(1)
+  expect(measured.kinds.every((k) => k === 'subtotal' || k === 'grandtotal')).toBe(true)
 })
 
 test('диаграмма получает агрегаты из того же движка', async ({ page }) => {

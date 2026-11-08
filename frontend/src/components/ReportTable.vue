@@ -123,7 +123,7 @@ function pretty(value) {
 // Свой рендерер таблицы отчёта (ADR-20): нативная <table>, объединения из модели.
 // Стили (ADR-23) приходят разрешёнными из шаблона и уходят в CSS-переменные:
 // inline-стили на ячейках — только для переопределений конкретной колонки.
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { DEFAULTS, rowHeightFor, zoneVars } from '../template/styles.js'
 
 const props = defineProps({
@@ -233,6 +233,15 @@ const offsets = computed(() => {
 
 const totalHeight = computed(() => offsets.value[props.rows.length] || 0)
 
+// Свёртывание группы сокращает модель, но элемент прокрутки упирается в свой новый
+// максимум молча: событие scroll при этом не приходит, и окно остаётся посчитанным по
+// прежнему scrollTop — таблица показывает хвост, а над первой строкой висит пустота.
+// Поэтому после каждого изменения модели забираем фактический scrollTop у элемента.
+watch([() => props.rows.length, totalHeight], async () => {
+  await nextTick()
+  if (scroller.value) scrollTop.value = scroller.value.scrollTop
+})
+
 // Заголовок перекрывает строки только когда прокрутка началась: при scrollTop = 0
 // первые строки (например, «Итого» свёрнутой группы) видны полностью.
 const headerHeight = computed(() => headerRows.value.length * layout.value.headerHeight)
@@ -248,13 +257,23 @@ function lowerBound(arr, value) {
   return lo
 }
 
-const anchor = computed(() => scrollTop.value + (scrollTop.value > 0 ? headerHeight.value : 0))
+// В координатах строк (префиксных сумм) верх видимой части таблицы равен scrollTop:
+// шапка липкая и «съедает» столько же, сколько занимает в потоке. Прибавка её высоты
+// здесь давала сдвиг на строку вниз: подпись группы уезжала, а строка под ней оставалась
+// с пустой групповой колонкой.
+const anchor = computed(() => scrollTop.value)
 
+// Окно начинается со строки, которая пересекает верх окна, а не со следующей за ней.
+// Если брать первую строку НИЖЕ верха, между шапкой и первой строкой остаётся полоса
+// высотой «остаток предыдущей строки» — у таблиц с подытогами он доходит до 20 px и
+// читается как пустой промежуток под заголовком. Последняя строка перед окном
+// добавляется, чтобы её видимый остаток закрыл эту полосу.
 const start = computed(() => {
   if (!props.virtual) return 0
   const n = props.rows.length
   if (!n) return 0
-  const index = lowerBound(offsets.value, anchor.value)
+  let index = lowerBound(offsets.value, scrollTop.value)
+  if (index > 0 && offsets.value[index] > scrollTop.value) index -= 1
   return Math.max(0, Math.min(index, n - 1))
 })
 
@@ -491,24 +510,55 @@ function cellsAt(index) {
     const run = runs.value[col].find((r) => rel >= r.start && rel < r.end)
     if (!run) continue
 
-    if (rel !== run.start) continue
+    // Серия, начавшаяся выше окна, не должна рисовать подпись под шапкой: её там не видно.
+    // Поэтому объединение режется на две ячейки: прозрачную часть над шапкой (она держит
+    // выравнивание колонок) и подпись, которая начинается на первой ПОЛНОСТЬЮ видимой строке.
+    const headAbs = start.value + run.start
+    const tailAbs = start.value + run.end
+    // Подпись берётся у головы серии: в модели значение групповой колонки заполнено
+    // только на первой строке группы, у остальных строк этой колонки нет значения.
+    const headRow = props.rows[headAbs]
+    let labelAbs = headAbs
+    const limit = anchor.value
+    while (labelAbs < tailAbs && offsets.value[labelAbs] < limit) labelAbs++
+
+    if (index === headAbs && labelAbs > headAbs) {
+      cells.push({
+        key: col,
+        col,
+        render: true,
+        rowspan: labelAbs - headAbs,
+        colspan: 1,
+        continued: true,
+        hidden: true,
+        text: '',
+        inherit: row.kind === 'subtotal' && col < row.level,
+        toggle: null,
+        drillable: false,
+        expanded: false
+      })
+    }
+    if (index !== labelAbs) continue
 
     cells.push({
       key: col,
       col,
       render: true,
-      rowspan: run.end - run.start,
+      rowspan: tailAbs - labelAbs,
       colspan: 1,
-      continued: false,
+      continued: labelAbs > headAbs,
       // ячейка группы-предка в строке итога: фон и начертание как у обычных строк
       inherit: row.kind === 'subtotal' && col < row.level,
-      text: props.cellText(row, props.columns[col].field),
+      text: props.cellText(headRow, props.columns[col].field),
       // у детальной строки сворачиваем группу этого уровня, у строки итога — саму группу
-      toggle: row.kind === 'detail' || row.kind === 'subtotal' ? row.groupPath.slice(0, col + 1) : null,
+      toggle:
+        headRow.kind === 'detail' || headRow.kind === 'subtotal'
+          ? (headRow.groupPath || []).slice(0, col + 1)
+          : null,
       drillable: Boolean(props.drill) && row.kind === 'detail',
         // направление шеврона — всегда по префиксу своей колонки: свёрнутость категории
         // не должна переключать галочку региона
-        expanded: props.expanded.has((row.groupPath || []).slice(0, col + 1).join('\u0001'))
+        expanded: props.expanded.has((headRow.groupPath || []).slice(0, col + 1).join('\u0001'))
     })
   }
   return cells
