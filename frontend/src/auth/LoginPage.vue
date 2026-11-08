@@ -1,6 +1,16 @@
 <template>
   <div class="wrap">
-    <form class="card" @submit.prevent="submit">
+    <div v-if="proxyMode" class="card">
+      <h1>Сервер отчётов</h1>
+      <p class="sub">Вход выполняется на реверс-прокси</p>
+      <p class="hint">
+        Сервер работает в режиме <code>REP_AUTH=proxy</code>: имя пользователя приходит от прокси
+        в HTTP-заголовке. Вход и выход выполняются средствами прокси, отдельного пароля у приложения нет.
+      </p>
+      <p v-if="proxyError" class="error">{{ proxyError }}</p>
+    </div>
+
+    <form v-else class="card" @submit.prevent="submit">
       <h1>Сервер отчётов</h1>
       <p class="sub">Вход в систему</p>
 
@@ -20,13 +30,33 @@
 
 <script setup>
 // Страница входа (ADR-34): cookie rep_session ставит сервер, роль приходит в ответе.
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { API_BASE } from '../api/client.js'
 
 const login = ref('')
 const password = ref('')
 const busy = ref(false)
 const error = ref('')
+const proxyMode = ref(false)
+const proxyError = ref('')
+
+// В режиме прокси формы быть не должно: приложение всё равно не примет пароль.
+onMounted(async () => {
+  try {
+    const res = await fetch(`${API_BASE}/api/health`)
+    const health = await res.json()
+    proxyMode.value = health.authMode === 'proxy'
+    if (proxyMode.value) {
+      const me = await fetch(`${API_BASE}/api/auth/me`)
+      if (me.status === 401 || me.status === 403) {
+        proxyError.value =
+          'Прокси не передал имя пользователя. Проверьте настройку заголовка и списка доверенных прокси.'
+      }
+    }
+  } catch {
+    // сервер недоступен — покажем обычную форму, submit сообщит об ошибке
+  }
+})
 
 function nextUrl() {
   const next = new URLSearchParams(location.search).get('next')

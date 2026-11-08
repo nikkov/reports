@@ -353,8 +353,18 @@ int main() {
     // --- Администрирование отчётов (ADR-26) ---
     // Включается только REP_ADMIN=1; иначе маршруты записи отвечают 404.
     const bool adminEnabled = rep::envOr("REP_ADMIN", "0") == "1";
-    // Аутентификация (ADR-34): по умолчанию выключена, включает REP_AUTH=1
-    const bool authEnabled = rep::envOr("REP_AUTH", "0") == "1";
+    // Аутентификация: REP_AUTH=1 — сессии в cookie (ADR-34), REP_AUTH=proxy — личность
+    // приходит от реверс-прокси в заголовке (ADR-54), иначе выключена.
+    const rep::AuthMode authMode = rep::parseAuthMode(rep::envOr("REP_AUTH", "0"));
+    const bool authEnabled = authMode != rep::AuthMode::Off;
+    const bool proxyAuth = authMode == rep::AuthMode::Proxy;
+    const std::string proxyHeader = rep::envOr("REP_AUTH_PROXY_HEADER", "X-Remote-User");
+    // Кому верим: адрес, с которого пришёл запрос, должен быть в списке. Пустое
+    // значение REP_AUTH_PROXY_TRUSTED означает «никому не верим» (никаких запросов).
+    const auto proxyTrusted = rep::parseTrustedProxies(rep::envOr("REP_AUTH_PROXY_TRUSTED", "127.0.0.1,::1"));
+    const bool proxyAutocreate = rep::envOr("REP_AUTH_PROXY_AUTOCREATE", "0") == "1";
+    const std::string proxyDefaultRole = rep::envOr("REP_AUTH_PROXY_ROLE", "viewer");
+    const int proxyCacheSeconds = std::stoi(rep::envOr("REP_AUTH_PROXY_CACHE_SECONDS", "60"));
     const int sessionTtlHours = std::stoi(rep::envOr("REP_SESSION_TTL_HOURS", "12"));
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
     std::mutex templatesMutex;
@@ -1001,14 +1011,110 @@ int main() {
         return resp;
     };
 
+    // Режим прокси (ADR-54): личность приходит в заголовке от доверенного прокси.
+    // Роль ищется в users; положительный ответ кэшируется на REP_AUTH_PROXY_CACHE_SECONDS,
+    // чтобы не ходить в базу на каждый запрос (отключение пользователя видно не дольше TTL).
+    struct ProxyRoleEntry {
+        std::string role;
+        std::chrono::steady_clock::time_point until;
+    };
+    auto proxyRoles = std::make_shared<std::map<std::string, ProxyRoleEntry>>();
+    auto proxyRolesMutex = std::make_shared<std::mutex>();
+    auto resolveProxyUser = [db, proxyAutocreate, proxyDefaultRole, proxyRoles, proxyRolesMutex, proxyCacheSeconds](
+                                const std::string &login,
+                                std::function<void(const std::string &role, const std::string &err)> done) {
+        auto remember = [proxyRoles, proxyRolesMutex, proxyCacheSeconds, login](const std::string &role) {
+            if (proxyCacheSeconds <= 0) return;
+            std::lock_guard<std::mutex> lock(*proxyRolesMutex);
+            (*proxyRoles)[login] = {role, std::chrono::steady_clock::now() + std::chrono::seconds(proxyCacheSeconds)};
+        };
+        if (proxyCacheSeconds > 0) {
+            std::lock_guard<std::mutex> lock(*proxyRolesMutex);
+            const auto it = proxyRoles->find(login);
+            if (it != proxyRoles->end() && it->second.until > std::chrono::steady_clock::now()) {
+                done(it->second.role, "");
+                return;
+            }
+        }
+        runQuery(
+            db, "SELECT role FROM users WHERE login = $1 AND enabled", {login},
+            [db, login, done, remember, proxyAutocreate, proxyDefaultRole](const orm::Result &res) {
+                if (!res.empty()) {
+                    const std::string role = res[0]["role"].as<std::string>();
+                    remember(role);
+                    done(role, "");
+                    return;
+                }
+                if (!proxyAutocreate) {
+                    done("", "пользователь прокси не найден в справочнике или отключён");
+                    return;
+                }
+                // Автосоздание: пароль пустой, поэтому по паролю такой пользователь войти не может.
+                runQuery(
+                    db,
+                    "INSERT INTO users (login, password_salt, password_hash, role) VALUES ($1, '', '', $2) "
+                    "ON CONFLICT (login) DO UPDATE SET login = EXCLUDED.login RETURNING role, enabled",
+                    {login, proxyDefaultRole},
+                    [login, done, remember](const orm::Result &created) {
+                        if (created.empty() || !created[0]["enabled"].as<bool>()) {
+                            done("", "пользователь прокси отключён администратором");
+                            return;
+                        }
+                        const std::string role = created[0]["role"].as<std::string>();
+                        auditEvent("system", "user.autocreate", "user", login,
+                                   "{\"role\":\"" + role + "\",\"source\":\"proxy\"}", "");
+                        remember(role);
+                        done(role, "");
+                    },
+                    [done](const std::exception_ptr &e) { done("", describeError(e)); });
+            },
+            [done](const std::exception_ptr &e) { done("", describeError(e)); });
+    };
+
     // Проверка сессии до маршрутизации: один раз на запрос, роль зависит от метода и пути.
     if (authEnabled) {
         app().registerPreRoutingAdvice(
-            [db, &unauthorized, &forbidden](const HttpRequestPtr &req, AdviceCallback &&respond,
-                                            AdviceChainCallback &&next) {
+            [db, authMode, proxyAuth, proxyHeader, proxyTrusted, resolveProxyUser, &unauthorized, &forbidden](
+                const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
                 const rep::Role need = rep::requiredRole(std::string(req->methodString()), req->path());
                 if (need == rep::Role::Public) {
                     next();
+                    return;
+                }
+                if (proxyAuth) {
+                    const std::string peer = req->peerAddr().toIp();
+                    if (!rep::isTrustedPeer(peer, proxyTrusted)) {
+                        respond(forbidden("запрос не от доверенного прокси (" + peer + ")"));
+                        return;
+                    }
+                    std::string login = req->getHeader(proxyHeader);
+                    while (!login.empty() && (login.front() == ' ' || login.front() == '\t')) login.erase(login.begin());
+                    while (!login.empty() && (login.back() == ' ' || login.back() == '\t')) login.pop_back();
+                    if (login.empty()) {
+                        respond(unauthorized("прокси не передал имя пользователя в заголовке " + proxyHeader));
+                        return;
+                    }
+                    if (!rep::isValidProxyLogin(login)) {
+                        respond(unauthorized("некорректное имя пользователя от прокси"));
+                        return;
+                    }
+                    resolveProxyUser(
+                        login,
+                        [req, need, login, &forbidden, respond, next](const std::string &role,
+                                                                     const std::string &err) {
+                            if (!err.empty()) {
+                                respond(forbidden(err));
+                                return;
+                            }
+                            if (!rep::roleAtLeast(role, need)) {
+                                respond(forbidden("недостаточно прав: роль " + role + " не подходит для действия"));
+                                return;
+                            }
+                            req->attributes()->insert("session_role", role);
+                            req->attributes()->insert("session_login", login);
+                            req->attributes()->insert("session_source", std::string("proxy"));
+                            next();
+                        });
                     return;
                 }
                 const std::string token = req->getCookie("rep_session");
@@ -1044,10 +1150,15 @@ int main() {
 
     app().registerHandler(
         "/api/auth/login",
-        [db, authEnabled, sessionTtlHours](const HttpRequestPtr &req,
-                                           std::function<void(const HttpResponsePtr &)> &&cb) {
-            if (!authEnabled) {
+        [db, authMode, sessionTtlHours](const HttpRequestPtr &req,
+                                        std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (authMode == rep::AuthMode::Off) {
                 sendError(cb, k404NotFound, "AUTH_DISABLED", "аутентификация выключена (REP_AUTH=0)");
+                return;
+            }
+            if (authMode == rep::AuthMode::Proxy) {
+                sendError(cb, k400BadRequest, "AUTH_ON_PROXY",
+                          "вход выполняет реверс-прокси: приложение получает имя пользователя в заголовке");
                 return;
             }
             const auto body = req->getJsonObject();
@@ -1108,7 +1219,11 @@ int main() {
 
     app().registerHandler(
         "/api/auth/logout",
-        [db, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [db, authMode](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (authMode == rep::AuthMode::Proxy) {
+                sendError(cb, k400BadRequest, "AUTH_ON_PROXY", "выход выполняет реверс-прокси");
+                return;
+            }
             const std::string token = req->getCookie("rep_session");
             auto finish = [cb]() {
                 Cookie cookie("rep_session", "");
@@ -1120,7 +1235,7 @@ int main() {
                 resp->addCookie(cookie);
                 cb(resp);
             };
-            if (!authEnabled || token.empty()) {
+            if (authMode == rep::AuthMode::Off || token.empty()) {
                 finish();
                 return;
             }
@@ -1132,11 +1247,42 @@ int main() {
 
     app().registerHandler(
         "/api/auth/me",
-        [db, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            if (!authEnabled) {
+        [db, authMode, proxyHeader](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (authMode == rep::AuthMode::Off) {
                 Json::Value out;
                 out["auth"] = false;
                 cb(jsonResponse(out));
+                return;
+            }
+            if (authMode == rep::AuthMode::Proxy) {
+                // Путь /api/auth/** публичный (нужен странице входа), поэтому личность
+                // здесь берём из заголовка напрямую — прокси проверил её сам.
+                std::string login = req->getHeader(proxyHeader);
+                while (!login.empty() && (login.front() == ' ' || login.front() == '\t')) login.erase(login.begin());
+                while (!login.empty() && (login.back() == ' ' || login.back() == '\t')) login.pop_back();
+                if (!rep::isValidProxyLogin(login)) {
+                    sendError(cb, k401Unauthorized, "PROXY_USER_MISSING",
+                              "прокси не передал корректное имя пользователя в заголовке " + proxyHeader);
+                    return;
+                }
+                runQuery(
+                    db, "SELECT role FROM users WHERE login = $1 AND enabled", {login},
+                    [cb, login](const orm::Result &res) {
+                        if (res.empty()) {
+                            sendError(cb, k403Forbidden, "PROXY_USER_UNKNOWN",
+                                      "пользователь прокси не найден в справочнике или отключён");
+                            return;
+                        }
+                        Json::Value out;
+                        out["auth"] = true;
+                        out["mode"] = "proxy";
+                        out["login"] = login;
+                        out["role"] = res[0]["role"].as<std::string>();
+                        cb(jsonResponse(out));
+                    },
+                    [cb](const std::exception_ptr &e) {
+                        sendError(cb, k500InternalServerError, "AUTH_FAILED", describeError(e));
+                    });
                 return;
             }
             const std::string token = req->getCookie("rep_session");
@@ -2395,16 +2541,18 @@ int main() {
 
     app().registerHandler(
         "/api/health",
-        [db, maxRows, &dbRo](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [db, maxRows, authMode, &dbRo](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
             runQuery(
                 db, "SELECT 1", {},
-                [cb, maxRows, &dbRo](const orm::Result &res) {
+                [cb, maxRows, authMode, &dbRo](const orm::Result &res) {
                     Json::Value body;
                     body["status"] = "ok";
                     body["schemaVersion"] = 1;
                     body["db"] = !res.empty();
                     body["maxRows"] = static_cast<Json::UInt64>(maxRows);
                     body["readOnlyRole"] = static_cast<bool>(dbRo);
+                    body["authMode"] = authMode == rep::AuthMode::Proxy ? "proxy"
+                                       : authMode == rep::AuthMode::Session ? "session" : "off";
                     cb(jsonResponse(body));
                 },
                 [cb](const std::exception_ptr &eptr) {

@@ -132,4 +132,61 @@ bool validateUserInput(const std::string &login, const std::string &role, const 
     return true;
 }
 
+AuthMode parseAuthMode(const std::string &value) {
+    if (value == "proxy") return AuthMode::Proxy;
+    if (value == "1" || value == "session" || value == "true") return AuthMode::Session;
+    return AuthMode::Off;
+}
+
+bool isValidProxyLogin(const std::string &login) {
+    if (login.empty() || login.size() > 128) return false;
+    for (unsigned char ch : login) {
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
+                        ch == '.' || ch == '_' || ch == '-' || ch == '@' || ch == '\\' || ch == '+' ||
+                        ch == '$' || ch == '~' || ch == ':';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+std::vector<std::string> parseTrustedProxies(const std::string &value) {
+    std::vector<std::string> out;
+    std::string item;
+    const auto flush = [&out, &item]() {
+        const auto first = item.find_first_not_of(" \t");
+        const auto last = item.find_last_not_of(" \t");
+        if (first != std::string::npos) out.push_back(item.substr(first, last - first + 1));
+        item.clear();
+    };
+    for (char ch : value) {
+        if (ch == ',') {
+            flush();
+        } else {
+            item.push_back(ch);
+        }
+    }
+    flush();
+    return out;
+}
+
+bool isTrustedPeer(const std::string &peer, const std::vector<std::string> &trusted) {
+    if (peer.empty()) return false;
+    const auto same = [&peer](const std::string &candidate) {
+        if (peer == candidate) return true;
+        // dual-stack сокет отдаёт IPv4 как ::ffff:a.b.c.d
+        static const std::string kMapped = "::ffff:";
+        if (candidate.compare(0, kMapped.size(), kMapped) != 0 && peer.compare(0, kMapped.size(), kMapped) == 0) {
+            return peer.substr(kMapped.size()) == candidate;
+        }
+        if (peer.compare(0, kMapped.size(), kMapped) != 0 && candidate.compare(0, kMapped.size(), kMapped) == 0) {
+            return candidate.substr(kMapped.size()) == peer;
+        }
+        return false;
+    };
+    for (const auto &candidate : trusted) {
+        if (same(candidate)) return true;
+    }
+    return false;
+}
+
 } // namespace rep

@@ -88,6 +88,7 @@
       <a href="spike.html">Песочница рендерера</a> ·
       <a :href="`${API_BASE}/api/reports`">{{ API_BASE }}/api/reports</a> ·
       <a :href="`${API_BASE}/api/health`">{{ API_BASE }}/api/health</a>
+      <span v-if="authLabel" class="auth">· {{ authLabel }}</span>
     </footer>
   </div>
 </template>
@@ -97,6 +98,16 @@
 // Данные — GET /api/reports (title, description, folder, tags, params).
 import { computed, onMounted, ref, watch } from 'vue'
 import { API_BASE, api } from '../api/client.js'
+
+const props = defineProps({
+  session: { type: Object, default: () => ({}) }
+})
+
+const authLabel = computed(() => {
+  const s = props.session || {}
+  if (!s.auth || !s.login) return ''
+  return s.mode === 'proxy' ? `вход через прокси: ${s.login} (${s.role})` : `вход: ${s.login} (${s.role})`
+})
 
 const reports = ref([])
 const loading = ref(true)

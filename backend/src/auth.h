@@ -4,6 +4,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace rep {
 
@@ -14,6 +15,26 @@ struct Session {
 };
 
 enum class Role { Public = 0, Viewer = 1, Author = 2, Admin = 3 };
+
+// Режим аутентификации (ADR-54): выключена, сессии в cookie (ADR-34) или
+// личность приходит от реверс-прокси в HTTP-заголовке.
+enum class AuthMode { Off = 0, Session = 1, Proxy = 2 };
+
+// REP_AUTH: "0"/"" → Off, "1"/"session" → Session, "proxy" → Proxy.
+AuthMode parseAuthMode(const std::string &value);
+
+// Логин из заголовка прокси: печатные ASCII без пробелов и управляющих символов,
+// не длиннее 128 символов. Заголовок идёт от прокси, но проверять всё равно надо:
+// доверенный прокси может пробросить что угодно, а логин попадает в SQL и журнал.
+bool isValidProxyLogin(const std::string &login);
+
+// "127.0.0.1, ::1" → список адресов; пробелы и пустые элементы отбрасываются.
+std::vector<std::string> parseTrustedProxies(const std::string &value);
+
+// Адрес запроса входит в список доверенных прокси. Loopback сравнивается
+// в обеих формах (127.0.0.1 и ::ffff:127.0.0.1), иначе IPv4-запрос с
+// dual-stack сокета не прошёл бы проверку.
+bool isTrustedPeer(const std::string &peer, const std::vector<std::string> &trusted);
 
 bool roleAtLeast(const std::string &role, Role needed);
 

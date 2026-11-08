@@ -72,3 +72,44 @@ TEST_CASE("данные пользователя из админки прове�
     REQUIRE(rep::validateUserInput("analyst_1", "viewer", "", false, err)); // «не менять»
 }
 
+
+TEST_CASE("режим аутентификации разбирается из REP_AUTH") {
+    REQUIRE(rep::parseAuthMode("") == rep::AuthMode::Off);
+    REQUIRE(rep::parseAuthMode("0") == rep::AuthMode::Off);
+    REQUIRE(rep::parseAuthMode("1") == rep::AuthMode::Session);
+    REQUIRE(rep::parseAuthMode("session") == rep::AuthMode::Session);
+    REQUIRE(rep::parseAuthMode("proxy") == rep::AuthMode::Proxy);
+}
+
+TEST_CASE("логин от прокси проверяется по безопасному набору символов") {
+    REQUIRE(rep::isValidProxyLogin("ivanov"));
+    REQUIRE(rep::isValidProxyLogin("petrov.a@corp.local"));
+    REQUIRE(rep::isValidProxyLogin("CORP\\\\petrov"));
+    REQUIRE(rep::isValidProxyLogin("user-1_2"));
+
+    REQUIRE_FALSE(rep::isValidProxyLogin(""));
+    REQUIRE_FALSE(rep::isValidProxyLogin("ivan petrov"));
+    REQUIRE_FALSE(rep::isValidProxyLogin("ivan\r\nX-Admin: 1"));
+    REQUIRE_FALSE(rep::isValidProxyLogin("ivan;drop"));
+    REQUIRE_FALSE(rep::isValidProxyLogin("кириллица"));
+    REQUIRE_FALSE(rep::isValidProxyLogin(std::string(129, 'a')));
+}
+
+TEST_CASE("доверенные прокси: разбор списка и сравнение адресов") {
+    const auto trusted = rep::parseTrustedProxies(" 127.0.0.1 , ::1 ,,10.0.0.5 ");
+    REQUIRE(trusted.size() == 3);
+    REQUIRE(trusted[0] == "127.0.0.1");
+    REQUIRE(trusted[1] == "::1");
+    REQUIRE(trusted[2] == "10.0.0.5");
+
+    REQUIRE(rep::isTrustedPeer("127.0.0.1", trusted));
+    REQUIRE(rep::isTrustedPeer("::1", trusted));
+    REQUIRE(rep::isTrustedPeer("10.0.0.5", trusted));
+    // dual-stack: IPv4 приходит как ::ffff:a.b.c.d
+    REQUIRE(rep::isTrustedPeer("::ffff:127.0.0.1", trusted));
+    REQUIRE(rep::isTrustedPeer("127.0.0.1", rep::parseTrustedProxies("::ffff:127.0.0.1")));
+
+    REQUIRE_FALSE(rep::isTrustedPeer("192.168.0.9", trusted));
+    REQUIRE_FALSE(rep::isTrustedPeer("", trusted));
+    REQUIRE_FALSE(rep::isTrustedPeer("127.0.0.1", rep::parseTrustedProxies("")));
+}

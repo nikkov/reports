@@ -21,6 +21,8 @@ const port = Number(arg('port', '5180'))
 const prefix = arg('prefix', '/reports').replace(/\/$/, '')
 const api = arg('api', 'http://127.0.0.1:8080').replace(/\/$/, '')
 const root = resolve(arg('root', defaultRoot))
+// Эмуляция проверки на прокси: имя пользователя, которое прокси передаёт приложению.
+const authHeader = arg('header', '')
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -37,6 +39,10 @@ const TYPES = {
 async function proxy(req, res, path) {
   const target = api + path
   const headers = { ...req.headers, host: new URL(api).host }
+  if (authHeader) {
+    const [name, ...rest] = authHeader.split(':')
+    headers[name.trim().toLowerCase()] = rest.join(':').trim()
+  }
   delete headers['accept-encoding'] // SSE и chunked проще без сжатия
   let upstream
   try {
@@ -122,5 +128,8 @@ const server = createServer(async (req, res) => {
 })
 
 server.listen(port, '127.0.0.1', () => {
-  console.log(`фронтенд под ${prefix}/ на http://127.0.0.1:${port}${prefix}/ , API → ${api}`)
+  console.log(
+    `фронтенд под ${prefix}/ на http://127.0.0.1:${port}${prefix}/ , API → ${api}` +
+      (authHeader ? `, заголовок прокси: ${authHeader}` : '')
+  )
 })

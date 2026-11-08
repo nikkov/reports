@@ -238,3 +238,17 @@ REP_CI_DB=my_ci ./scripts/ci-e2e.sh  # другая база — если report
 - проверить без nginx можно стендом: `node scripts/serve-subpath.mjs --port 5180 --prefix /reports`
   (по умолчанию отдаёт `frontend/dist-reports`, `--root` — другой каталог);
 - обычная сборка (без переменных) остаётся корневой и используется стендом и e2e.
+
+## Режимы входа
+
+| `REP_AUTH` | Как входит пользователь | Что отвечает сервер отчётов |
+|---|---|---|
+| не задан | входа нет (стенд, локальная демонстрация) | всё доступно |
+| `1` | логин и пароль, cookie `rep_session` (ADR-34) | `users`/`sessions`, вход и выход на `/api/auth/*` |
+| `proxy` | вход выполняет реверс-прокси (basic, SSO) | логин из заголовка `X-Remote-User`, роль из `users` |
+
+Режим прокси: `REP_AUTH=proxy`, `REP_AUTH_PROXY_HEADER` (по умолчанию `X-Remote-User`),
+`REP_AUTH_PROXY_TRUSTED` (адреса прокси, по умолчанию `127.0.0.1,::1`),
+`REP_AUTH_PROXY_AUTOCREATE=1` (заводить неизвестных с ролью `REP_AUTH_PROXY_ROLE`).
+Заголовку верим только с доверенных адресов; проверка — `./scripts/check-proxy-auth.sh`.
+Пример nginx — `deploy/nginx-reports.conf`.

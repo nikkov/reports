@@ -21,6 +21,12 @@ if [ -f "$REP_ROOT/backend/.env" ]; then
   set +a
 fi
 
+# Режим аутентификации (ADR-54): пусто — выключена, 1 — сессии, proxy — личность от прокси.
+export REP_AUTH="${REP_AUTH:-}"
+export REP_AUTH_PROXY_HEADER="${REP_AUTH_PROXY_HEADER:-X-Remote-User}"
+# Кому верим: адрес, с которого пришёл запрос. Остальным заголовок не читается вовсе.
+export REP_AUTH_PROXY_TRUSTED="${REP_AUTH_PROXY_TRUSTED:-127.0.0.1,::1}"
+
 export PGHOST="${PGHOST:-192.168.0.3}"
 export PGPORT="${PGPORT:-32770}"
 export PGUSER="${PGUSER:-postgres}"
