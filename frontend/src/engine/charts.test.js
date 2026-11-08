@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildGaugeModel, buildSankeyModel } from './charts.js'
+import { buildBandModel, buildGaugeModel, buildSankeyModel } from './charts.js'
 
 const rows = [
   { category: 'Ноутбуки', region: 'Восток', amount: 100 },
@@ -213,5 +213,45 @@ describe('gauge: цветовые зоны по четырём границам'
     expect(model.zones[0]).toEqual({ from: 0, to: 2, color: '#c62828' })
     // зона p3…p4 обрезана верхом шкалы: она жёлтая, и красная зона «выше p4» в шкалу не попадает
     expect(model.zones[model.zones.length - 1]).toEqual({ from: 18, to: 20, color: '#f9a825' })
+  })
+})
+
+describe('band: значение и коридор между границами', () => {
+  const rows = [
+    { day: '2026-03-01', v: 202, lo: 127, hi: 277 },
+    { day: '2026-03-02', v: 365, lo: 290, hi: 440 },
+    { day: '2026-03-03', v: 164.7, lo: 53, hi: 423 }
+  ]
+  const fields = { xField: 'day', yField: 'v', lowField: 'lo', highField: 'hi' }
+
+  it('раскладывает три числа по рядам', () => {
+    const model = buildBandModel(rows, fields)
+    expect(model.categories).toEqual(['2026-03-01', '2026-03-02', '2026-03-03'])
+    expect(model.values).toEqual([202, 365, 164.7])
+    expect(model.lows).toEqual([127, 290, 53])
+    expect(model.highs).toEqual([277, 440, 423])
+    expect(model.band).toEqual([150, 150, 370])
+  })
+
+  it('перепутанные границы не дают отрицательной полосы', () => {
+    const model = buildBandModel([{ day: 'd', v: 5, lo: 90, hi: 10 }], fields)
+    expect(model.highs[0]).toBe(90)
+    expect(model.band[0]).toBe(0)
+  })
+
+  it('строка без границ остаётся точкой без полосы', () => {
+    const model = buildBandModel([{ day: 'd', v: 5, lo: null, hi: null }], fields)
+    expect(model.values).toEqual([5])
+    expect(model.band).toEqual([null])
+  })
+
+  it('дубли категории не дублируются (линия не идёт назад)', () => {
+    const model = buildBandModel([{ day: 'd', v: 1, lo: 0, hi: 2 }, { day: 'd', v: 9, lo: 0, hi: 2 }], fields)
+    expect(model.values).toEqual([1])
+  })
+
+  it('строка без категории пропускается', () => {
+    const model = buildBandModel([{ day: '', v: 1, lo: 0, hi: 2 }, { day: 'd', v: 2, lo: 0, hi: 3 }], fields)
+    expect(model.categories).toEqual(['d'])
   })
 })

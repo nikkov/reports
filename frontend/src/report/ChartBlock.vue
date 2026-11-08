@@ -11,7 +11,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import RU from 'echarts/i18n/langRU'
 import { aggregateSeries } from '../engine/group.js'
-import { buildGaugeModel, buildSankeyModel } from '../engine/charts.js'
+import { buildBandModel, buildGaugeModel, buildSankeyModel } from '../engine/charts.js'
 
 echarts.registerLocale('RU', RU)
 
@@ -88,6 +88,85 @@ function buildOption() {
             formatter: (v) => `${nf.format(Math.round(v * 100) / 100)}${model.unit}`
           },
           data: [{ value: model.value, name: model.name }]
+        }
+      ]
+    }
+  }
+
+  // band: значение плюс верхняя и нижняя границы, диапазон закрашен (ADR-58)
+  if (type === 'band') {
+    const model = buildBandModel(props.rows, {
+      xField: props.block.xField,
+      yField: props.block.yField,
+      lowField: props.block.lowField,
+      highField: props.block.highField
+    })
+    const raw = props.block.bandColor || '#2e7d32'
+    const bandColor = props.styles?.palette?.[raw] || raw
+    return {
+      animation: false,
+      textStyle: textStyle(),
+      grid: { left: 70, right: 24, top: 32, bottom: 56, containLabel: false },
+      legend: { data: ['Значение'], top: 0, right: 8, textStyle: textStyle() },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (items) => {
+          const i = items?.[0]?.dataIndex ?? 0
+          const fmt1 = (v) => (v === null || v === undefined ? '—' : fmt(v))
+          return [
+            `<b>${model.categories[i]}</b>`,
+            `значение: ${fmt1(model.values[i])}`,
+            `нижняя: ${fmt1(model.lows[i])}`,
+            `верхняя: ${fmt1(model.highs[i])}`
+          ].join('<br/>')
+        }
+      },
+      xAxis: {
+        type: 'category',
+        data: model.categories,
+        axisLabel: {
+          rotate: model.categories.length > 20 ? 45 : model.categories.length > 8 ? 30 : 0,
+          // много точек (месяц дней) — подписи через одну-две, иначе они наезжают друг на друга
+          interval: Math.max(0, Math.ceil(model.categories.length / 12) - 1),
+          color: textStyle()?.color
+        }
+      },
+      yAxis: { type: 'value', axisLabel: { formatter: fmt, color: textStyle()?.color } },
+      series: [
+        // невидимая нижняя граница — основание полосы
+        {
+          name: '__band_low',
+          type: 'line',
+          stack: 'band',
+          data: model.lows,
+          symbol: 'none',
+          lineStyle: { opacity: 0 },
+          areaStyle: { opacity: 0 },
+          silent: true,
+          tooltip: { show: false },
+          legendHoverLink: false
+        },
+        // разница «верх − низ», закрашенная цветом полосы
+        {
+          name: '__band_fill',
+          type: 'line',
+          stack: 'band',
+          data: model.band,
+          symbol: 'none',
+          lineStyle: { opacity: 0 },
+          areaStyle: { color: bandColor, opacity: 0.22 },
+          silent: true,
+          tooltip: { show: false },
+          legendHoverLink: false
+        },
+        {
+          name: 'Значение',
+          type: 'line',
+          data: model.values,
+          symbol: 'circle',
+          symbolSize: 5,
+          connectNulls: false,
+          lineStyle: { width: 2 }
         }
       ]
     }

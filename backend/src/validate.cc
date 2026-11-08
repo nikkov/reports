@@ -241,11 +241,11 @@ void checkTableBlock(ValidationResult &r,
 }
 
 void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::string &base) {
-    static const std::vector<std::string> types = {"bar", "line", "pie", "area", "scatter", "gauge", "sankey"};
+    static const std::vector<std::string> types = {"bar", "line", "pie", "area", "scatter", "gauge", "sankey", "band"};
     const std::string type = asString(block["chartType"]);
     if (!isOneOf(type, types)) {
         addError(r, base + ".chartType",
-                 "chartType должен быть одним из: bar, line, pie, area, scatter, gauge, sankey");
+                 "chartType должен быть одним из: bar, line, pie, area, scatter, gauge, sankey, band");
         // для неизвестного вида поля всё равно проверяем: сообщений об опечатках должно быть больше одного
         if (asString(block["xField"]).empty()) addError(r, base + ".xField", "xField обязателен");
         if (asString(block["yField"]).empty()) addError(r, base + ".yField", "yField обязателен");
@@ -306,6 +306,22 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
                 }
             }
         }
+    } else if (type == "band") {
+        // значение и две границы полосы (ADR-58)
+        need("xField");
+        need("yField");
+        need("lowField");
+        need("highField");
+        forbid("seriesField", "в полосе одна серия значений");
+        const std::string lo = asString(block["lowField"]);
+        const std::string hi = asString(block["highField"]);
+        const std::string y = asString(block["yField"]);
+        if (!lo.empty() && lo == hi) {
+            addError(r, base + ".highField", "lower и upper — разные поля");
+        }
+        if (!y.empty() && (y == lo || y == hi)) {
+            addError(r, base + ".yField", "значение должно быть отдельным полем, не границей");
+        }
     } else if (type == "sankey") {
         need("sourceField");
         need("targetField");
@@ -324,6 +340,9 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
         need("yField");
         if (!block["sourceField"].isNull() || !block["targetField"].isNull() || !block["valueField"].isNull()) {
             addError(r, base + ".chartType", "sourceField/targetField/valueField допустимы только для sankey");
+        }
+        if (!block["lowField"].isNull() || !block["highField"].isNull()) {
+            addError(r, base + ".chartType", "lowField/highField допустимы только для band");
         }
     }
 }

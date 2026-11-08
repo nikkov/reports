@@ -964,6 +964,41 @@ test('drill-through с диаграммы: клик по столбцу откр
   await expect(page.locator('.meta')).toContainText('строк')
 })
 
+test('band: значение и закрашенный коридор между границами', async ({ page }) => {
+  await page.goto('/report.html?report=ops-band&from=2026-03-01&to=2026-03-31')
+  await expect(page.locator('.meta')).toContainText('шаблон v2')
+
+  const band = await page.evaluate(() => {
+    const entry = (window.__charts || []).find((c) => c.type === 'band')
+    const option = entry?.instance?.getOption()
+    const series = option?.series || []
+    const fill = series.find((s) => s.areaStyle?.color)
+    const value = series.find((s) => s.name === 'Значение')
+    return {
+      count: series.length,
+      points: value?.data?.length ?? 0,
+      bandPoints: fill?.data?.length ?? 0,
+      color: fill?.areaStyle?.color,
+      opacity: fill?.areaStyle?.opacity,
+      stack: fill?.stack,
+      firstCategory: option?.xAxis?.[0]?.data?.[0],
+      firstBand: fill?.data?.[0],
+      firstLow: series.find((s) => s.name === '__band_low')?.data?.[0]
+    }
+  })
+
+  expect(band.count).toBe(3)                       // нижняя граница, заливка, значение
+  expect(band.points).toBe(31)                     // 31 день марта
+  expect(band.bandPoints).toBe(31)
+  expect(band.stack).toBe('band')                  // заливка строится стеком
+  expect(band.color).toBe('#2e7d32')
+  expect(band.opacity).toBeCloseTo(0.22, 2)
+  expect(band.firstCategory).toBe('2026-03-01')
+  expect(band.firstLow).toBe(127)                  // минимум по сервисам
+  expect(band.firstBand).toBe(150)                 // 277 − 127
+  await expect(page.locator('.chart-box').first()).toContainText('значение и коридор')
+})
+
 test('gauge с четырьмя границами: пять цветовых зон и цвет указателя', async ({ page }) => {
   await page.goto('/report.html?report=margin-zones&from=2026-03-01&to=2026-03-10')
   await expect(page.locator('.meta')).toContainText('шаблон v2')

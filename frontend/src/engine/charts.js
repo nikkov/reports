@@ -86,6 +86,36 @@ export function buildGaugeModel(
   return model
 }
 
+// Полоса (band, ADR-58): у каждой точки три числа — значение и две границы.
+// Возвращает ряды для ECharts: значение отдельно, границы — для закрашенного диапазона.
+export function buildBandModel(rows, { xField, yField, lowField, highField } = {}) {
+  const categories = []
+  const values = []
+  const lows = []
+  const highs = []
+  const seen = new Set()
+
+  for (const row of rows || []) {
+    const x = row?.[xField]
+    if (isNullKey(x)) continue
+    const key = String(x)
+    if (seen.has(key)) continue // категория один раз: иначе линия пойдёт назад
+    seen.add(key)
+
+    const value = num(row?.[yField])
+    const low = num(row?.[lowField])
+    const high = num(row?.[highField])
+    // границы могут отсутствовать: тогда точка есть, а полосы под ней нет
+    categories.push(key)
+    values.push(value)
+    lows.push(low)
+    highs.push(high !== null && low !== null && high < low ? low : high) // перепутанные границы не ломают полосу
+  }
+
+  const band = highs.map((h, i) => (h === null || lows[i] === null ? null : Number((h - lows[i]).toFixed(6))))
+  return { categories, values, lows, highs, band }
+}
+
 // Потоки для sankey: пары «источник → приёмник» со агрегированным весом.
 export function buildSankeyModel(rows, { sourceField, targetField, valueField, aggregate = 'sum' } = {}) {
   const order = []

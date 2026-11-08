@@ -1035,6 +1035,249 @@
         "blocks.1.thresholds",
         "blocks.1.zoneColors"
       ]
+    },
+    {
+      "name": "band: значение и две границы",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "x",
+            "highField": "z"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "band без highField",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "z"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.highField"
+      ]
+    },
+    {
+      "name": "band: границы совпадают",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "z",
+            "highField": "z"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.highField"
+      ]
+    },
+    {
+      "name": "band: значение совпадает с границей",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "z",
+            "lowField": "x",
+            "highField": "z"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.yField"
+      ]
+    },
+    {
+      "name": "band: seriesField не используется",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "x",
+            "highField": "z",
+            "seriesField": "y"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.seriesField"
+      ]
+    },
+    {
+      "name": "lowField у линии недопустим",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "line",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "x"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.chartType"
+      ]
     }
   ]
 }

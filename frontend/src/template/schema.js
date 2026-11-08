@@ -435,7 +435,8 @@ export default {
             "area",
             "scatter",
             "gauge",
-            "sankey"
+            "sankey",
+            "band"
           ]
         },
         "xField": {
@@ -470,6 +471,17 @@ export default {
         "unit": {
           "type": "string",
           "maxLength": 8
+        },
+        "lowField": {
+          "type": "string",
+          "minLength": 1
+        },
+        "highField": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bandColor": {
+          "$ref": "#/$defs/color"
         },
         "thresholds": {
           "type": "array",

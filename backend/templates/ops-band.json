@@ -1,0 +1,115 @@
+{
+  "version": 2,
+  "id": "ops-band",
+  "title": "Время ответа: значение и коридор",
+  "description": "Линия со значением и закрашенным коридором: у каждой точки три числа — среднее, минимум и максимум по сервисам за день.",
+  "folder": "Примеры",
+  "tags": [
+    "band",
+    "коридор",
+    "пример"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "service",
+      "type": "select",
+      "label": "Сервис",
+      "required": false,
+      "default": "",
+      "source": {
+        "kind": "lookup",
+        "sql": "SELECT DISTINCT service AS value, service AS label FROM ops ORDER BY service"
+      }
+    }
+  ],
+  "datasets": {
+    "days": {
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "service": "$service"
+      },
+      "sql": "SELECT o.day, round(avg(o.avg_ms)::numeric, 1) AS value_ms, round(min(o.avg_ms)::numeric, 1) AS low_ms, round(max(o.avg_ms)::numeric, 1) AS high_ms, sum(o.requests) AS requests FROM ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) GROUP BY o.day ORDER BY o.day"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Каждая точка — день. Значение — среднее время ответа по сервисам, коридор — от минимума до максимума за тот же день. Заливка между границами задаётся полем bandColor."
+    },
+    {
+      "type": "chart",
+      "chartType": "band",
+      "dataKey": "days",
+      "xField": "day",
+      "yField": "value_ms",
+      "lowField": "low_ms",
+      "highField": "high_ms",
+      "bandColor": "#2e7d32",
+      "title": "Время ответа, мс: значение и коридор min…max",
+      "width": "full"
+    },
+    {
+      "type": "table",
+      "dataKey": "days",
+      "title": "Дни под графиком",
+      "width": "full",
+      "grandTotal": false,
+      "columns": [
+        {
+          "field": "day",
+          "title": "День",
+          "type": "date"
+        },
+        {
+          "field": "value_ms",
+          "title": "Среднее, мс",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "low_ms",
+          "title": "Минимум, мс",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "high_ms",
+          "title": "Максимум, мс",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "requests",
+          "title": "Запросов",
+          "format": "number",
+          "type": "int",
+          "align": "right"
+        }
+      ]
+    }
+  ],
+  "styles": {
+    "preset": "default"
+  }
+}

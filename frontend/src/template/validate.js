@@ -550,6 +550,24 @@ function checkGaugeZones(block, base, errors) {
             message: 'countDistinct на одном показателе даёт 1 — вероятно, нужен count или sum'
           })
         }
+      } else if (type === 'band') {
+        // полоса: значение и две границы, между которыми закрашивается диапазон (ADR-58)
+        need('xField')
+        need('yField')
+        need('lowField')
+        need('highField')
+        forbid('seriesField', 'в полосе одна серия значений')
+        const names = [block.lowField, block.highField].filter(Boolean)
+        if (names.length === 2 && block.lowField === block.highField) {
+          errors.push({ path: `${base}.highField`, message: 'lower и upper — разные поля' })
+        }
+        if (block.lowField && block.highField && block.yField &&
+            [block.lowField, block.highField].includes(block.yField)) {
+          errors.push({ path: `${base}.yField`, message: 'значение должно быть отдельным полем, не границей' })
+        }
+        if (block.sourceField !== undefined || block.targetField !== undefined || block.valueField !== undefined) {
+          errors.push({ path: `${base}.chartType`, message: 'sourceField/targetField/valueField допустимы только для sankey' })
+        }
       } else if (type === 'sankey') {
         need('sourceField')
         need('targetField')
@@ -575,6 +593,9 @@ function checkGaugeZones(block, base, errors) {
             message: 'sourceField/targetField/valueField допустимы только для sankey'
           })
         }
+        if (block.lowField !== undefined || block.highField !== undefined) {
+          errors.push({ path: `${base}.chartType`, message: 'lowField/highField допустимы только для band' })
+        }
         if (type === 'pie' && block.seriesField) {
           warnings.push({ path: `${base}.seriesField`, message: 'круговая диаграмма показывает одну серию' })
         }
@@ -592,7 +613,7 @@ function checkGaugeZones(block, base, errors) {
       const cols = (columnsByDataKey[block.dataKey] || []).map((c) => c.col)
       const known = new Set(cols.map((c) => c.field).filter(Boolean))
       if (known.size) {
-        for (const field of ['xField', 'yField', 'sourceField', 'targetField', 'valueField']) {
+        for (const field of ['xField', 'yField', 'sourceField', 'targetField', 'valueField', 'lowField', 'highField']) {
           if (!block[field]) continue
           if (!known.has(block[field])) {
             // диаграмма читает сырые строки набора и не обязана совпадать с колонками таблицы,
