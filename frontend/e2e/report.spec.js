@@ -1394,6 +1394,51 @@ test('аудит: действия попадают в журнал и видн�
   await expect(page.locator('tr[data-audit="user.create"]').first()).toContainText(login)
 })
 
+// ADR-67: ретеншен удаляет журнал безвозвратно, значит архив нужно уметь снимать.
+test('журнал: выгрузка CSV с фильтрами и запись о самой выгрузке', async ({ page, request }) => {
+  const res = await request.get('/api/admin/audit/export.csv?action=auth.login')
+  expect(res.ok()).toBeTruthy()
+  expect(res.headers()['content-type']).toContain('text/csv')
+
+  const body = Buffer.from(await res.body())
+  // по умолчанию — RFC 4180: без BOM, запятая, CRLF
+  expect(body.slice(0, 3).toString('hex')).not.toBe('efbbbf')
+  const text = body.toString('utf8')
+  const lines = text.trim().split('\r\n')
+  expect(lines[0]).toBe('at,actor,action,object_type,object_id,details,ip')
+  expect(lines.length).toBeGreaterThan(1)
+  expect(lines.slice(1).every((line) => line.includes('auth.login'))).toBe(true)
+
+  // excel=1: BOM и точка с запятой, чтобы файл открывался двойным щелчком
+  const excel = await request.get('/api/admin/audit/export.csv?action=auth.login&excel=1')
+  const excelBody = Buffer.from(await excel.body())
+  expect(excelBody.slice(0, 3).toString('hex')).toBe('efbbbf')
+  expect(excelBody.toString('utf8')).toContain('at;actor;action')
+
+  // предел строк — честная ошибка, а не молча обрезанный архив
+  const small = await request.get('/api/admin/audit/export.csv?limit=1')
+  expect(small.status()).toBe(422)
+  expect((await small.json()).error.code).toBe('AUDIT_LIMIT')
+
+  // фильтр по периоду и плохая дата
+  const period = await request.get('/api/admin/audit/export.csv?from=2026-11-08&to=2026-11-08')
+  expect(period.ok()).toBeTruthy()
+  expect((await request.get('/api/admin/audit/export.csv?from=08.11.2026')).status()).toBe(422)
+
+  // сама выгрузка — тоже действие журнала
+  const audit = await (await request.get('/api/admin/audit?action=audit.export&limit=5')).json()
+  expect(audit.total).toBeGreaterThan(0)
+  expect(audit.items[0].details).toHaveProperty('rows')
+
+  // на странице кнопки выгрузки несут текущие фильтры
+  await page.goto('/audit.html')
+  const csvLink = page.locator('a[data-export="csv"]')
+  await expect(csvLink).toHaveAttribute('href', /\/api\/admin\/audit\/export\.csv/)
+  await page.locator('select').selectOption('auth.login')
+  await expect(csvLink).toHaveAttribute('href', /action=auth\.login/)
+  await expect(page.locator('a[data-export="excel"]')).toHaveAttribute('href', /excel=1/)
+})
+
 test('версия шаблона: старый мигрируется, слишком новый отклоняется', async ({ request }) => {
   const v1 = {
     version: 1,

@@ -18,7 +18,17 @@
         Пользователь
         <input v-model="actor" placeholder="admin, system…" @input="onActorInput" />
       </label>
+      <label>
+        С
+        <input v-model="from" type="date" @change="reload" />
+      </label>
+      <label>
+        по
+        <input v-model="to" type="date" @change="reload" />
+      </label>
       <button type="button" class="tool" @click="reload">Обновить</button>
+      <a class="tool" :href="exportUrl(false)" download="audit-log.csv" data-export="csv">Выгрузить CSV</a>
+      <a class="tool" :href="exportUrl(true)" download="audit-log.csv" data-export="excel">Excel</a>
       <span class="muted small">всего записей: {{ total }}</span>
     </div>
 
@@ -64,6 +74,8 @@ const items = ref([])
 const total = ref(0)
 const action = ref('')
 const actor = ref('')
+const from = ref('')
+const to = ref('')
 const error = ref(null)
 const loading = ref(false)
 const pageSize = 50
@@ -98,11 +110,30 @@ function details(value) {
     .join(' · ')
 }
 
+// Выгрузка идёт по тем же фильтрам, что и список (ADR-67): архив должен совпадать с тем,
+// что человек видит на экране. Отдельная вкладка не нужна — обычная ссылка с download.
+function exportUrl(excel) {
+  return api.auditExportUrl({
+    action: action.value,
+    actor: actor.value.trim(),
+    from: from.value,
+    to: to.value,
+    excel
+  })
+}
+
 async function fetchPage(offset) {
   loading.value = true
   error.value = null
   try {
-    const page = await api.audit({ action: action.value, actor: actor.value.trim(), limit: pageSize, offset })
+    const page = await api.audit({
+      action: action.value,
+      actor: actor.value.trim(),
+      from: from.value,
+      to: to.value,
+      limit: pageSize,
+      offset
+    })
     items.value = offset ? [...items.value, ...page.items] : page.items
     total.value = page.total
   } catch (e) {

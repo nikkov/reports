@@ -2628,16 +2628,32 @@ int main() {
             const std::string offsetText = req->getParameter("offset").empty() ? "0" : req->getParameter("offset");
             const std::string action = req->getParameter("action");
             const std::string actor = req->getParameter("actor");
+            const std::string from = req->getParameter("from");
+            const std::string to = req->getParameter("to");
+            const auto isDate = [](const std::string &s) {
+                return s.size() == 10 && s[4] == '-' && s[7] == '-' &&
+                       std::all_of(s.begin(), s.end(), [](char c) {
+                           return std::isdigit(static_cast<unsigned char>(c)) || c == '-';
+                       });
+            };
+            if ((!from.empty() && !isDate(from)) || (!to.empty() && !isDate(to))) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                          "from и to — даты в формате ГГГГ-ММ-ДД");
+                return;
+            }
 
-            const char *values[] = {limitText.c_str(), offsetText.c_str(), action.c_str(), actor.c_str()};
+            const char *values[] = {limitText.c_str(), offsetText.c_str(), action.c_str(), actor.c_str(),
+                                    from.c_str(), to.c_str()};
             PGresult *res = PQexecParams(
                 conn,
                 "SELECT id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), actor, action,"
                 " object_type, object_id, details::text, coalesce(ip, ''), count(*) OVER ()"
                 " FROM audit_log"
                 " WHERE ($3 = '' OR action = $3) AND ($4 = '' OR actor = $4)"
+                "   AND ($5 = '' OR at >= $5::date) AND ($6 = '' OR at < ($6::date + 1))"
                 " ORDER BY at DESC, id DESC LIMIT LEAST($1::int, 200) OFFSET $2::int",
-                4, nullptr, values, nullptr, nullptr, 0);
+                6, nullptr, values, nullptr, nullptr, 0);
             if (PQresultStatus(res) != PGRES_TUPLES_OK) {
                 const std::string msg = PQerrorMessage(conn);
                 PQclear(res);
@@ -2674,6 +2690,120 @@ int main() {
             cb(jsonResponse(out));
         },
         {Get});
+    // Выгрузка журнала (ADR-67): ретеншен удаляет записи безвозвратно, поэтому архив
+    // должен сниматься заранее. Формат — RFC 4180: UTF-8 без BOM, запятая, CRLF,
+    // ISO-8601 в UTC; `excel=1` переключает на BOM + «;» для открытия двойным щелчком.
+    // Порядок — по возрастанию времени: так файл удобно дописывать и сравнивать.
+    app().registerHandler(
+        "/api/admin/audit/export.csv",
+        [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            const std::string from = req->getParameter("from");
+            const std::string to = req->getParameter("to");
+            const auto isDate = [](const std::string &s) {
+                return s.size() == 10 && s[4] == '-' && s[7] == '-' &&
+                       std::all_of(s.begin(), s.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) || c == '-'; });
+            };
+            if ((!from.empty() && !isDate(from)) || (!to.empty() && !isDate(to))) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                          "from и to — даты в формате ГГГГ-ММ-ДД");
+                return;
+            }
+            std::string limitText = req->getParameter("limit");
+            if (limitText.empty()) limitText = "100000";
+            const long long limit = std::strtoll(limitText.c_str(), nullptr, 10);
+            if (limit < 1 || limit > 200000) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "limit: 1…200000");
+                return;
+            }
+            const std::string action = req->getParameter("action");
+            const std::string actor = req->getParameter("actor");
+            const bool excel = req->getParameter("excel") == "1";
+            const char sep = excel ? ';' : ',';
+
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            const char *values[] = {from.c_str(), to.c_str(), action.c_str(), actor.c_str(), limitText.c_str()};
+            PGresult *res = PQexecParams(
+                conn,
+                "SELECT to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), actor, action,"
+                " object_type, coalesce(object_id, ''), coalesce(details::text, '{}'), coalesce(ip, ''), count(*) OVER ()"
+                " FROM audit_log"
+                " WHERE ($1 = '' OR at >= $1::date) AND ($2 = '' OR at < ($2::date + 1))"
+                "   AND ($3 = '' OR action = $3) AND ($4 = '' OR actor = $4)"
+                " ORDER BY at ASC, id ASC LIMIT $5::int",
+                5, nullptr, values, nullptr, nullptr, 0);
+            if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                sendError(cb, k500InternalServerError, "QUERY_FAILED", msg);
+                return;
+            }
+
+            const int count = PQntuples(res);
+            long long total = 0;
+            if (count > 0) total = std::strtoll(PQgetvalue(res, count - 1, 7), nullptr, 10);
+            if (total > limit) {
+                PQclear(res);
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "AUDIT_LIMIT",
+                          "в журнале " + std::to_string(total) + " записей, лимит " + std::to_string(limit) +
+                              " — сузьте период или фильтр");
+                return;
+            }
+
+            const auto esc = [sep](const std::string &value) {
+                const bool need = value.find(sep) != std::string::npos || value.find('"') != std::string::npos ||
+                                  value.find('\n') != std::string::npos || value.find('\r') != std::string::npos;
+                if (!need) return value;
+                std::string out = "\"";
+                for (char c : value) {
+                    if (c == '"') out += "\"\"";
+                    else out += c;
+                }
+                out += '"';
+                return out;
+            };
+
+            std::string csv;
+            if (excel) csv += "\xEF\xBB\xBF"; // BOM: Excel иначе читает UTF-8 как одну байтовую кодировку
+            csv += "at" + std::string(1, sep) + "actor" + sep + "action" + sep + "object_type" + sep +
+                   "object_id" + sep + "details" + sep + "ip\r\n";
+            for (int i = 0; i < count; ++i) {
+                std::string line;
+                for (int c = 0; c < 7; ++c) {
+                    if (c > 0) line += sep;
+                    line += esc(PQgetvalue(res, i, c));
+                }
+                csv += line;
+                csv += "\r\n";
+            }
+            PQclear(res);
+            PQfinish(conn);
+
+            auditEvent(requestActor(req), "audit.export", "audit_log", "",
+                       "{\"rows\":" + std::to_string(count) + ",\"from\":\"" + from + "\",\"to\":\"" + to +
+                           "\",\"action\":\"" + action + "\",\"actorFilter\":\"" + actor + "\"}",
+                       requestIp(req));
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setContentTypeString("text/csv; charset=utf-8");
+            resp->addHeader("Content-Disposition", "attachment; filename=\"audit-log.csv\"");
+            resp->addHeader("X-Audit-Rows", std::to_string(count));
+            resp->setBody(csv);
+            cb(resp);
+        },
+        {Get});
+
 
     // SSE: сервер сам сообщает об изменении шаблона (ADR-44).
     app().registerHandler(

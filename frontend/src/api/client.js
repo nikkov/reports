@@ -131,13 +131,26 @@ export const api = {
   deleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
 
   // журнал действий (ADR-52)
-  audit: ({ action = '', actor = '', limit = 50, offset = 0 } = {}) => {
+  audit: ({ action = '', actor = '', from = '', to = '', limit = 50, offset = 0 } = {}) => {
     const qs = new URLSearchParams()
     if (action) qs.set('action', action)
     if (actor) qs.set('actor', actor)
+    if (from) qs.set('from', from)
+    if (to) qs.set('to', to)
     qs.set('limit', String(limit))
     qs.set('offset', String(offset))
     return request(`/api/admin/audit?${qs.toString()}`)
+  },
+
+  // выгрузка журнала (ADR-67): те же фильтры, что у списка
+  auditExportUrl: ({ action = '', actor = '', from = '', to = '', excel = false } = {}) => {
+    const qs = new URLSearchParams()
+    if (action) qs.set('action', action)
+    if (actor) qs.set('actor', actor)
+    if (from) qs.set('from', from)
+    if (to) qs.set('to', to)
+    if (excel) qs.set('excel', '1')
+    return `${API_BASE}/api/admin/audit/export.csv?${qs.toString()}`
   },
   // сырой шаблон для редактора: с SQL справочников, в отличие от публичного /api/reports/{id}
   adminTemplate: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`),
