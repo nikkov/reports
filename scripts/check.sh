@@ -18,6 +18,13 @@ if [ -f "$ROOT/frontend/package.json" ]; then
   echo "node $(node -v)"
 fi
 
+step "Реестр ADR (docs/adr.md из PLAN.md)"
+if command -v node >/dev/null 2>&1 && [ -f "$ROOT/scripts/adr.mjs" ]; then
+  node "$ROOT/scripts/adr.mjs" --check || fail "docs/adr.md устарел: node scripts/adr.mjs"
+else
+  echo "skip (нет node или scripts/adr.mjs)"
+fi
+
 step "Версия (VERSION, README, CHANGELOG, package.json)"
 "$ROOT/scripts/version.sh" --check || fail "версия расходится между файлами"
 
