@@ -3589,6 +3589,11 @@ int main() {
     {
         const int probe = ::socket(AF_INET, SOCK_STREAM, 0);
         if (probe >= 0) {
+            // SO_REUSEADDR — как у drogon: без него после остановки сервера сокет
+            // простаивает в TIME_WAIT и наша же проверка ложно сообщает «порт занят»,
+            // хотя перезапуск возможен.
+            const int one = 1;
+            ::setsockopt(probe, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
             sockaddr_in addr{};
             addr.sin_family = AF_INET;
             addr.sin_port = htons(static_cast<uint16_t>(port));
