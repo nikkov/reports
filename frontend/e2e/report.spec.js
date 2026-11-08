@@ -366,9 +366,11 @@ test('все шаблоны из списка открываются и отда
     await expect(page.locator('h1')).toHaveText(r.title)
     await expect(page.locator('.error')).toHaveCount(0)
     await expect(page.locator('.meta')).toContainText('строк')
-    // ни одна колонка не остаётся без данных на всех видимых строках подряд
+    // Отчёт считается живым, если показал либо строки таблицы, либо диаграмму:
+    // у отчёта из одних диаграмм таблицы может не быть вовсе (sales-flow, ADR-56).
     const cells = await page.locator('.rt-table tbody tr:not(.spacer) td').count()
-    expect(cells).toBeGreaterThan(0)
+    const charts = await page.locator('.chart-box canvas').count()
+    expect(cells + charts).toBeGreaterThan(0)
   }
 })
 
@@ -960,6 +962,40 @@ test('drill-through с диаграммы: клик по столбцу откр
   // целевой отчёт действительно открылся на этих данных
   await expect(page.locator('.rt-table')).toBeVisible()
   await expect(page.locator('.meta')).toContainText('строк')
+})
+
+test('диаграммы gauge и sankey: спидометр и потоки рисуются из своих наборов', async ({ page }) => {
+  await page.goto('/report.html?report=sales-flow&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('шаблон v2')
+  await expect(page.locator('.chart-box h2')).toHaveCount(2)
+
+  // обе диаграммы инициализированы (по канвасу на каждую)
+  await expect(page.locator('.chart canvas')).toHaveCount(2)
+
+  const charts = await page.evaluate(() =>
+    (window.__charts || []).map(({ type, instance }) => {
+      const s = instance.getOption().series?.[0]
+      return {
+        type,
+        series: s?.type,
+        nodes: s?.data?.length ?? null,
+        links: s?.links?.length ?? null,
+        value: s?.type === 'gauge' ? s.data?.[0]?.value : null,
+        min: s?.type === 'gauge' ? s.min : null,
+        max: s?.type === 'gauge' ? s.max : null
+      }
+    })
+  )
+
+  // sankey читает свой набор данных (dataKey=flows), а не первый из шаблона
+  expect(charts.find((c) => c.type === 'sankey')).toMatchObject({ series: 'sankey', nodes: 9, links: 20 })
+
+  // gauge: маржа за 1–10 марта 2026 = 20.54 % при шкале 0…100
+  const gauge = charts.find((c) => c.type === 'gauge')
+  expect(gauge.series).toBe('gauge')
+  expect(gauge.value).toBeCloseTo(20.54, 2)
+  expect([gauge.min, gauge.max]).toEqual([0, 100])
+  await expect(page.locator('.chart-box').first()).toContainText('Маржа за период')
 })
 
 test('аудит: действия попадают в журнал и видны на странице', async ({ page, request }) => {

@@ -11,6 +11,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import RU from 'echarts/i18n/langRU'
 import { aggregateSeries } from '../engine/group.js'
+import { buildGaugeModel, buildSankeyModel } from '../engine/charts.js'
 
 echarts.registerLocale('RU', RU)
 
@@ -37,14 +38,83 @@ let chart = null
 const nf = new Intl.NumberFormat('ru-RU')
 
 function buildOption() {
+  const type = props.block.chartType
+  const fmt = (v) => (typeof v === 'number' ? nf.format(Math.round(v * 100) / 100) : v)
+
+  // gauge: одно число, шкала и подпись (ADR-56)
+  if (type === 'gauge') {
+    const model = buildGaugeModel(props.rows, {
+      yField: props.block.yField,
+      aggregate: props.block.aggregate || 'sum',
+      min: props.block.min,
+      max: props.block.max,
+      unit: props.block.unit || '',
+      name: props.block.title || props.block.yField
+    })
+    const accent = props.styles?.palette?.accent || props.styles?.colors?.accent || '#17427f'
+    return {
+      animation: false,
+      textStyle: textStyle(),
+      series: [
+        {
+          type: 'gauge',
+          min: model.min,
+          max: model.max,
+          startAngle: 210,
+          endAngle: -30,
+          progress: { show: true, width: 12, itemStyle: { color: accent } },
+          axisLine: { lineStyle: { width: 12, color: [[1, '#e6ebf2']] } },
+          axisTick: { show: false },
+          splitLine: { length: 10, lineStyle: { color: '#c3ccd8' } },
+          axisLabel: { color: textStyle()?.color, fontSize: 11, distance: 14 },
+          pointer: { width: 4, itemStyle: { color: accent } },
+          title: { show: !!model.name, offsetCenter: [0, '72%'], fontSize: 12, color: textStyle()?.color },
+          detail: {
+            valueAnimation: false,
+            offsetCenter: [0, '42%'],
+            fontSize: 26,
+            color: textStyle()?.color,
+            formatter: (v) => `${nf.format(Math.round(v * 100) / 100)}${model.unit}`
+          },
+          data: [{ value: model.value, name: model.name }]
+        }
+      ]
+    }
+  }
+
+  // sankey: потоки между узлами (ADR-56)
+  if (type === 'sankey') {
+    const model = buildSankeyModel(props.rows, {
+      sourceField: props.block.sourceField,
+      targetField: props.block.targetField,
+      valueField: props.block.valueField,
+      aggregate: props.block.aggregate || 'sum'
+    })
+    return {
+      animation: false,
+      textStyle: textStyle(),
+      tooltip: { trigger: 'item', valueFormatter: fmt },
+      series: [
+        {
+          type: 'sankey',
+          data: model.nodes,
+          links: model.links,
+          emphasis: { focus: 'adjacency' },
+          nodeGap: 12,
+          nodeWidth: 14,
+          lineStyle: { color: 'gradient', curveness: 0.5, opacity: 0.42 },
+          label: { color: textStyle()?.color, fontSize: 12 }
+        }
+      ]
+    }
+  }
+
   const { categories, series } = aggregateSeries(props.rows, {
     xField: props.block.xField,
     seriesField: props.block.seriesField,
     yField: props.block.yField,
     aggregate: props.block.aggregate || 'sum'
   })
-
-  const fmt = (v) => (typeof v === 'number' ? nf.format(Math.round(v * 100) / 100) : v)
 
   if (props.block.chartType === 'pie') {
     const first = series[0] || { data: [] }
@@ -79,10 +149,13 @@ function buildOption() {
     textStyle: textStyle(),
     series: series.map((s) => ({
       name: s.name,
-      type: props.block.chartType,
+      // ECharts не знает типа «area»: это линия с заливкой до оси
+      type: props.block.chartType === 'area' ? 'line' : props.block.chartType,
+      areaStyle: props.block.chartType === 'area' ? { opacity: 0.25 } : undefined,
       data: s.data,
       smooth: props.block.smooth === true,
       barMaxWidth: 42,
+      symbolSize: props.block.chartType === 'scatter' ? 9 : undefined,
       emphasis: { focus: 'series' }
     }))
   }
@@ -92,6 +165,16 @@ function buildOption() {
 // у круговой — только подпись сектора.
 function onPointClick(event) {
   if (!props.drill?.report) return
+  // sankey: в событии приходит сам поток {source, target, value}
+  if (props.block.chartType === 'sankey' && event.data && event.data.source) {
+    emit('drill', { spec: props.drill, x: event.data.source ?? null, series: event.data.target ?? null })
+    return
+  }
+  // gauge: одна точка без категории — в параметры ничего не подставляется
+  if (props.block.chartType === 'gauge') {
+    emit('drill', { spec: props.drill, x: null, series: null })
+    return
+  }
   emit('drill', {
     spec: props.drill,
     x: event.name ?? null,
@@ -99,14 +182,18 @@ function onPointClick(event) {
   })
 }
 
+// Реестр инстансов для e2e: window.__chart — последняя диаграмма (обратная совместимость),
+// window.__charts — все отрисованные на странице (gauge, sankey и остальные).
+function registerChart() {
+  window.__chart = { type: props.block.chartType, series: chart.getOption().series?.length ?? 0, instance: chart }
+  window.__charts = (window.__charts || []).filter((c) => c.instance !== chart)
+  window.__charts.push({ type: props.block.chartType, block: props.block, instance: chart })
+}
+
 function render() {
   if (!chart) return
   chart.setOption(buildOption(), true)
-  window.__chart = {
-    type: props.block.chartType,
-    series: chart.getOption().series?.length ?? 0,
-    instance: chart
-  }
+  registerChart()
 }
 
 onMounted(async () => {
@@ -120,6 +207,7 @@ onMounted(async () => {
 watch(() => [props.rows, props.block], render, { deep: false })
 
 onBeforeUnmount(() => {
+  window.__charts = (window.__charts || []).filter((c) => c.instance !== chart)
   chart?.dispose()
   chart = null
 })

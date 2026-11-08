@@ -64,7 +64,7 @@
         <ChartBlock
           v-else-if="block.type === 'chart'"
           :block="block"
-          :rows="rows"
+          :rows="rowsFor(block)"
           :styles="stylesFor(block)"
           :drill="block.drill || null"
           @drill="onChartDrill"
@@ -173,9 +173,12 @@ async function load() {
     const loaded = {}
     for (const key of keys) {
       const block = blocks.find((b) => (b.dataKey || '') === key)
-      // блок с aggregate считает GROUP BY на сервере, остальные получают строки как есть
-      loaded[key] = block?.aggregate
-        ? (await api.aggregate(reportId, { ...paramValues }, block.aggregate, controller.signal, key)).rows
+      // Группировку на сервере задаёт блок с aggregate-объектом {groupBy, measures} (ADR-37).
+      // У диаграмм aggregate — строка ('sum', 'avg'…), это клиентская агрегация: такие блоки
+      // получают сырые строки, иначе сервер отвечал 422 «нужен хотя бы один groupBy».
+      const serverAgg = block?.aggregate && typeof block.aggregate === 'object' ? block.aggregate : null
+      loaded[key] = serverAgg
+        ? (await api.aggregate(reportId, { ...paramValues }, serverAgg, controller.signal, key)).rows
         : (await api.data(reportId, { ...paramValues }, controller.signal, key)).rows
     }
     dataByKey.value = loaded

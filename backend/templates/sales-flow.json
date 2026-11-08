@@ -1,0 +1,123 @@
+{
+  "version": 2,
+  "id": "sales-flow",
+  "title": "Продажи: маржа и потоки",
+  "description": "Gauge показывает маржу за период одним числом, Sankey — как сумма продаж распределяется из категорий по регионам.",
+  "folder": "Продажи",
+  "tags": [
+    "диаграммы",
+    "gauge",
+    "sankey"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "margin": {
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT sum(s.profit)::float8 / nullif(sum(s.amount), 0) * 100 AS margin_pct, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS deals FROM sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date"
+    },
+    "flows": {
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT s.category, s.region, s.amount FROM sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date AND s.category IS NOT NULL AND s.region IS NOT NULL"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Маржа считается в PostgreSQL как отношение прибыли к сумме продаж; потоки — сумма amount по парам «категория → регион»."
+    },
+    {
+      "type": "chart",
+      "chartType": "gauge",
+      "dataKey": "margin",
+      "yField": "margin_pct",
+      "aggregate": "max",
+      "min": 0,
+      "max": 100,
+      "unit": "%",
+      "title": "Маржа за период",
+      "width": "half"
+    },
+    {
+      "type": "table",
+      "dataKey": "flows",
+      "title": "Тот же поток числами (GROUP BY в PostgreSQL)",
+      "width": "full",
+      "aggregate": {
+        "groupBy": [
+          "category",
+          "region"
+        ],
+        "measures": [
+          {
+            "field": "amount",
+            "agg": "sum"
+          }
+        ]
+      },
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "aggregate": "sum",
+          "format": "number",
+          "type": "int"
+        }
+      ],
+      "grandTotal": true
+    },
+    {
+      "type": "chart",
+      "chartType": "sankey",
+      "dataKey": "flows",
+      "sourceField": "category",
+      "targetField": "region",
+      "valueField": "amount",
+      "aggregate": "sum",
+      "title": "Категория → регион, сумма продаж",
+      "width": "full"
+    }
+  ],
+  "styles": {
+    "preset": "default",
+    "palette": {
+      "accent": "#17427f"
+    }
+  }
+}

@@ -299,7 +299,9 @@ export function validateTemplate(template) {
     if (!block.drill.report) {
       errors.push({ path: `blocks.${i}.drill.report`, message: 'drill.report обязателен' })
     }
-    const allowed = isChart ? ['x', 'series'] : []
+    // у gauge нет ни категории, ни серии: подставлять нечего (ADR-56)
+    const gauge = isChart && block.chartType === 'gauge'
+    const allowed = isChart && !gauge ? ['x', 'series'] : []
     for (const [name, ref] of Object.entries(block.drill.params || {})) {
       if (typeof ref !== 'string' || !ref) {
         errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'значение должно быть строкой' })
@@ -311,6 +313,13 @@ export function validateTemplate(template) {
       }
       const known =
         ref.startsWith('param.') || allowed.includes(ref) || (isTable && ref.startsWith('group.'))
+      if (gauge && (ref === 'x' || ref === 'series')) {
+        errors.push({
+          path: `blocks.${i}.drill.params.${name}`,
+          message: 'у диаграммы gauge нет x и series: подставляйте param.<name> или литерал'
+        })
+        continue
+      }
       if (!known && /^(group\.|x$|series$)/.test(ref)) {
         errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'в диаграмме допустимы только x, series, param.<name> или литерал' })
       }
@@ -474,10 +483,77 @@ export function validateTemplate(template) {
     }
 
     if (block.type === 'chart') {
-    const cols = (columnsByDataKey[block.dataKey] || []).map((c) => c.col)
-    const known = new Set(cols.map((c) => c.field).filter(Boolean))
+      // Состав полей зависит от вида диаграммы (ADR-56): линия/столбцы/точки/круг —
+      // категория + значение, gauge — одно значение, sankey — пара узлов и вес потока.
+      const type = block.chartType
+      const need = (field) => {
+        if (typeof block[field] !== 'string' || !block[field]) {
+          errors.push({
+            path: `${base}.${field}`,
+            message: `для диаграммы «${type}» обязательно поле ${field}`
+          })
+        }
+      }
+      const forbid = (field, why) => {
+        if (block[field] !== undefined) {
+          errors.push({ path: `${base}.${field}`, message: `для диаграммы «${type}» ${field} не используется: ${why}` })
+        }
+      }
+
+      if (type === 'gauge') {
+        need('yField')
+        forbid('xField', 'значение одно, категории нет')
+        forbid('seriesField', 'значение одно, серий нет')
+        if (typeof block.min === 'number' && typeof block.max === 'number' && block.max <= block.min) {
+          errors.push({ path: `${base}.max`, message: 'max должен быть больше min' })
+        }
+        if (block.aggregate === 'countDistinct') {
+          warnings.push({
+            path: `${base}.aggregate`,
+            message: 'countDistinct на одном показателе даёт 1 — вероятно, нужен count или sum'
+          })
+        }
+      } else if (type === 'sankey') {
+        need('sourceField')
+        need('targetField')
+        need('valueField')
+        forbid('xField', 'узлы задаются sourceField и targetField')
+        forbid('yField', 'вес потока задаётся valueField')
+        const names = [block.sourceField, block.targetField, block.valueField].filter(Boolean)
+        if (new Set(names).size !== names.length) {
+          errors.push({
+            path: `${base}.targetField`,
+            message: 'sourceField, targetField и valueField должны быть разными полями'
+          })
+        }
+        if (block.aggregate && !['sum', 'avg', 'min', 'max', 'count'].includes(block.aggregate)) {
+          errors.push({ path: `${base}.aggregate`, message: 'для sankey агрегат: sum, avg, min, max, count' })
+        }
+      } else {
+        need('xField')
+        need('yField')
+        if (block.sourceField !== undefined || block.targetField !== undefined || block.valueField !== undefined) {
+          errors.push({
+            path: `${base}.chartType`,
+            message: 'sourceField/targetField/valueField допустимы только для sankey'
+          })
+        }
+        if (type === 'pie' && block.seriesField) {
+          warnings.push({ path: `${base}.seriesField`, message: 'круговая диаграмма показывает одну серию' })
+        }
+      }
+
+      if (block.min !== undefined || block.max !== undefined || block.unit !== undefined) {
+        if (type !== 'gauge') {
+          warnings.push({ path: `${base}.chartType`, message: 'min/max/unit учитываются только у gauge' })
+        }
+      }
+
+      const cols = (columnsByDataKey[block.dataKey] || []).map((c) => c.col)
+      const known = new Set(cols.map((c) => c.field).filter(Boolean))
       if (known.size) {
-        for (const field of ['xField', 'yField']) {
+        for (const field of ['xField', 'yField', 'sourceField', 'targetField', 'valueField']) {
+          if (!block[field]) continue
           if (!known.has(block[field])) {
             // диаграмма читает сырые строки набора и не обязана совпадать с колонками таблицы,
             // поэтому это предупреждение (опечатка), а не ошибка

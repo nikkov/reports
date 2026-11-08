@@ -417,9 +417,7 @@ export default {
       "required": [
         "type",
         "dataKey",
-        "chartType",
-        "xField",
-        "yField"
+        "chartType"
       ],
       "properties": {
         "type": {
@@ -433,7 +431,11 @@ export default {
           "enum": [
             "line",
             "bar",
-            "pie"
+            "pie",
+            "area",
+            "scatter",
+            "gauge",
+            "sankey"
           ]
         },
         "xField": {
@@ -446,6 +448,28 @@ export default {
         },
         "seriesField": {
           "type": "string"
+        },
+        "sourceField": {
+          "type": "string",
+          "minLength": 1
+        },
+        "targetField": {
+          "type": "string",
+          "minLength": 1
+        },
+        "valueField": {
+          "type": "string",
+          "minLength": 1
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "maxLength": 8
         },
         "aggregate": {
           "enum": [

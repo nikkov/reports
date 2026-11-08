@@ -292,12 +292,76 @@
 
 | Поле | Смысл |
 |---|---|
-| `chartType` | `line`, `bar`, `pie` |
+| `chartType` | `line`, `bar`, `pie`, `area`, `scatter`, `gauge`, `sankey` (см. таблицу ниже) |
 | `xField` / `yField` | категория и значение; проверяются на наличие в наборе данных |
 | `seriesField` | необязательное разбиение на серии (см. ниже) |
-| `aggregate` | агрегат по `yField` перед построением (`sum` по умолчанию) |
-| `title` | заголовок блока |
+| `sourceField` / `targetField` / `valueField` | узлы и вес потока — только для `sankey` |
+| `min` / `max` / `unit` | шкала и суффикс подписи — только для `gauge` |
+| `aggregate` | агрегат: у `line`/`bar`/`pie`/`area`/`scatter` — по `yField`, у `sankey` — по `valueField`, у `gauge` — по единственному значению (`sum` по умолчанию) |
+| `title` | заголовок блока (у `gauge` он же подпись под шкалой) |
 | `width` | `full` / `half` |
+
+Обязательные поля зависят от вида: `line`, `bar`, `pie`, `area`, `scatter` требуют `xField` и
+`yField`; `gauge` — только `yField` (и не принимает `xField`/`seriesField`); `sankey` —
+`sourceField`, `targetField`, `valueField` (и не принимает `xField`/`yField`), причём это три разных поля.
+
+### Какие виды диаграмм поддерживаются
+
+| `chartType` | Что рисует | Нужны поля |
+|---|---|---|
+| `line` | линия по категориям, `seriesField` даёт несколько линий | `xField`, `yField` |
+| `bar` | столбцы, `seriesField` — группы столбцов | `xField`, `yField` |
+| `pie` | круговая по категориям (одна серия) | `xField`, `yField` |
+| `area` | линия с заливкой до оси | `xField`, `yField` |
+| `scatter` | точки без соединения | `xField`, `yField` |
+| `gauge` | спидометр: одно число на шкале | `yField`; необязательно `min`, `max`, `unit` |
+| `sankey` | потоки между узлами (категория → регион и т. п.) | `sourceField`, `targetField`, `valueField` |
+
+`gauge` без `min`/`max` сам подбирает верх шкалы выше значения (низ — 0). Отрицательные и нулевые
+потоки `sankey` не рисуются и отбрасываются; строки с пустым источником или приёмником
+пропускаются, поэтому диаграмма не падает на «грязных» данных.
+
+### Пример: gauge — одно число
+
+```json
+{
+  "type": "chart",
+  "dataKey": "margin",
+  "chartType": "gauge",
+  "yField": "margin_pct",
+  "aggregate": "max",
+  "min": 0,
+  "max": 100,
+  "unit": "%",
+  "title": "Маржа за период"
+}
+```
+
+Набор `margin` возвращает одну строку с посчитанной в SQL маржой; `aggregate: "max"` берёт это
+значение как есть. Для выборки из многих строк годятся `sum`, `avg`, `min`, `max`, `count`.
+
+### Пример: sankey — потоки между узлами
+
+```json
+{
+  "type": "chart",
+  "dataKey": "flows",
+  "chartType": "sankey",
+  "sourceField": "category",
+  "targetField": "region",
+  "valueField": "amount",
+  "aggregate": "sum",
+  "title": "Категория → регион, сумма продаж"
+}
+```
+
+Сервер отдаёт строки как есть, пары «источник → приёмник» и суммы по ним считает клиент.
+Узлы нумеруются в порядке появления, поэтому диаграмма стабильна между обновлениями.
+
+Drill из `sankey` подставляет источник в `x`, приёмник — в `series`; у `gauge` ни `x`, ни `series` нет —
+ссылки на них валидатор считает ошибкой (можно `param.<name>` и литералы).
+
+Диаграммы не попадают ни в Excel, ни в печать — это записано в `docs/dod.md`.
 
 ## styles — оформление таблицы
 

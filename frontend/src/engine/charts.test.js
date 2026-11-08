@@ -1,0 +1,157 @@
+import { describe, expect, it } from 'vitest'
+import { buildGaugeModel, buildSankeyModel } from './charts.js'
+
+const rows = [
+  { category: 'Ноутбуки', region: 'Восток', amount: 100 },
+  { category: 'Ноутбуки', region: 'Запад', amount: 50 },
+  { category: 'Мониторы', region: 'Восток', amount: 25 },
+  { category: 'Мониторы', region: '', amount: 10 } // пустой приёмник — поток отбрасывается
+]
+
+describe('gauge: одно число из выборки', () => {
+  it('sum по умолчанию', () => {
+    expect(buildGaugeModel(rows, { yField: 'amount' }).value).toBe(185)
+  })
+
+  it('avg, min, max, count', () => {
+    expect(buildGaugeModel(rows, { yField: 'amount', aggregate: 'avg' }).value).toBeCloseTo(46.25)
+    expect(buildGaugeModel(rows, { yField: 'amount', aggregate: 'min' }).value).toBe(10)
+    expect(buildGaugeModel(rows, { yField: 'amount', aggregate: 'max' }).value).toBe(100)
+    expect(buildGaugeModel(rows, { yField: 'amount', aggregate: 'count' }).value).toBe(4)
+  })
+
+  it('countDistinct считает разные значения', () => {
+    const dup = [{ v: 1 }, { v: 1 }, { v: 2 }]
+    expect(buildGaugeModel(dup, { yField: 'v', aggregate: 'countDistinct' }).value).toBe(2)
+  })
+
+  it('нечисловые и пустые значения не ломают расчёт', () => {
+    const messy = [{ v: '10' }, { v: null }, { v: 'нет' }, { v: 5 }]
+    const model = buildGaugeModel(messy, { yField: 'v' })
+    expect(model.value).toBe(15)
+    expect(model.rows).toBe(2)
+  })
+
+  it('шкала: min по умолчанию 0, max подбирается выше значения', () => {
+    const model = buildGaugeModel(rows, { yField: 'amount' })
+    expect(model.min).toBe(0)
+    expect(model.max).toBeGreaterThan(model.value)
+  })
+
+  it('явные min/max сохраняются, unit и name прокидываются', () => {
+    const model = buildGaugeModel(rows, { yField: 'amount', min: 0, max: 200, unit: '%', name: 'Выполнение' })
+    expect([model.min, model.max, model.unit, model.name]).toEqual([0, 200, '%', 'Выполнение'])
+  })
+
+  it('пустая выборка даёт нулевую шкалу, а не деление на ноль', () => {
+    const model = buildGaugeModel([], { yField: 'amount', min: 5 })
+    expect(model.value).toBe(0)
+    expect(model.max).toBeGreaterThan(model.min)
+  })
+})
+
+describe('sankey: потоки между узлами', () => {
+  it('суммирует вес по паре источник → приёмник', () => {
+    const model = buildSankeyModel(rows, {
+      sourceField: 'category',
+      targetField: 'region',
+      valueField: 'amount'
+    })
+    expect(model.links).toEqual([
+      { source: 'Ноутбуки', target: 'Восток', value: 100 },
+      { source: 'Ноутбуки', target: 'Запад', value: 50 },
+      { source: 'Мониторы', target: 'Восток', value: 25 }
+    ])
+    expect(model.nodes.map((n) => n.name)).toEqual(['Ноутбуки', 'Восток', 'Запад', 'Мониторы'])
+    expect(model.dropped).toBe(1)
+  })
+
+  it('avg даёт средний вес пары', () => {
+    const model = buildSankeyModel(rows, {
+      sourceField: 'category',
+      targetField: 'region',
+      valueField: 'amount',
+      aggregate: 'avg'
+    })
+    const monitors = model.links.find((l) => l.source === 'Мониторы')
+    expect(monitors.value).toBe(25) // одна строка в паре
+  })
+
+  it('нерисуемые потоки (0 и отрицательные) отбрасываются', () => {
+    const withZero = [
+      { a: 'A', b: 'B', v: 0 },
+      { a: 'A', b: 'C', v: -5 },
+      { a: 'A', b: 'D', v: 7 }
+    ]
+    const model = buildSankeyModel(withZero, { sourceField: 'a', targetField: 'b', valueField: 'v' })
+    expect(model.links).toEqual([{ source: 'A', target: 'D', value: 7 }])
+  })
+
+  it('пустые имена узлов пропускаются целиком', () => {
+    const model = buildSankeyModel(
+      [{ a: '', b: 'B', v: 1 }, { a: 'A', b: null, v: 2 }, { a: 'A', b: 'B', v: 3 }],
+      { sourceField: 'a', targetField: 'b', valueField: 'v' }
+    )
+    expect(model.links).toEqual([{ source: 'A', target: 'B', value: 3 }])
+    expect(model.nodes.map((n) => n.name)).toEqual(['A', 'B'])
+  })
+
+  it('вырожденный поток «узел в себя» остаётся в модели', () => {
+    const model = buildSankeyModel([{ a: 'A', b: 'A', v: 4 }], {
+      sourceField: 'a',
+      targetField: 'b',
+      valueField: 'v'
+    })
+    expect(model.links).toEqual([{ source: 'A', target: 'A', value: 4 }])
+    expect(model.nodes).toEqual([{ name: 'A' }])
+  })
+})
+
+describe('sankey: остальные агрегаты веса', () => {
+  const many = [
+    { a: 'A', b: 'B', v: 4 },
+    { a: 'A', b: 'B', v: 10 }
+  ]
+
+  it('min и max берут границы пары', () => {
+    expect(buildSankeyModel(many, { sourceField: 'a', targetField: 'b', valueField: 'v', aggregate: 'min' }).links[0].value).toBe(4)
+    expect(buildSankeyModel(many, { sourceField: 'a', targetField: 'b', valueField: 'v', aggregate: 'max' }).links[0].value).toBe(10)
+  })
+
+  it('count считает строки пары', () => {
+    expect(buildSankeyModel(many, { sourceField: 'a', targetField: 'b', valueField: 'v', aggregate: 'count' }).links[0].value).toBe(2)
+  })
+
+  it('неизвестный агрегат работает как sum', () => {
+    expect(buildSankeyModel(many, { sourceField: 'a', targetField: 'b', valueField: 'v', aggregate: 'median' }).links[0].value).toBe(14)
+  })
+})
+
+describe('gauge: крайние случаи шкалы', () => {
+  it('значение ниже min не даёт шкалу нулевой длины', () => {
+    const model = buildGaugeModel([{ v: 1 }], { yField: 'v', min: 10 })
+    expect(model.max).toBe(11)
+  })
+
+  it('max равный значению сохраняется как задан', () => {
+    const model = buildGaugeModel([{ v: 50 }], { yField: 'v', max: 50 })
+    expect(model.max).toBe(50)
+  })
+
+  it('неизвестный агрегат считается суммой', () => {
+    expect(buildGaugeModel([{ v: 2 }, { v: 3 }], { yField: 'v', aggregate: 'median' }).value).toBe(5)
+  })
+
+  it('пустые строки и отсутствие поля не ломают модель', () => {
+    expect(buildGaugeModel([{}, { v: null }], { yField: 'v' }).value).toBe(0)
+    expect(buildSankeyModel([], { sourceField: 'a', targetField: 'b', valueField: 'v' })).toEqual({ nodes: [], links: [], dropped: 0 })
+  })
+})
+
+describe('пустая выборка для каждого агрегата gauge', () => {
+  for (const aggregate of ['avg', 'min', 'max', 'count', 'countDistinct']) {
+    it(`${aggregate} без строк даёт 0, а не NaN`, () => {
+      expect(buildGaugeModel([], { yField: 'v', aggregate }).value).toBe(0)
+    })
+  }
+})

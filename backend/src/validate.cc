@@ -71,6 +71,8 @@ void checkDrill(ValidationResult &r, const Json::Value &block, const std::string
         addError(r, base + ".drill.params", "drill.params должен быть объектом");
         return;
     }
+    // у gauge нет ни категории, ни серии: подставлять нечего (ADR-56)
+    const bool gauge = isChart && asString(block["chartType"]) == "gauge";
     for (const auto &name : drill["params"].getMemberNames()) {
         const std::string ref = asString(drill["params"][name]);
         const std::string path = base + ".drill.params." + name;
@@ -78,12 +80,16 @@ void checkDrill(ValidationResult &r, const Json::Value &block, const std::string
             addError(r, path, "значение должно быть строкой");
             continue;
         }
+        if (gauge && (ref == "x" || ref == "series")) {
+            addError(r, path, "у диаграммы gauge нет x и series: подставляйте param.<name> или литерал");
+            continue;
+        }
         if (ref[0] == '$') {
             addError(r, path, std::string("неизвестная ссылка: используйте ") +
                                   (isChart ? "x, series, " : "group.<field>, ") + "param.<name> или строку");
             continue;
         }
-        const bool known = ref.rfind("param.", 0) == 0 || (isChart && (ref == "x" || ref == "series")) ||
+        const bool known = ref.rfind("param.", 0) == 0 || (isChart && !gauge && (ref == "x" || ref == "series")) ||
                            (isTable && ref.rfind("group.", 0) == 0);
         if (!known && (ref.rfind("group.", 0) == 0 || ref == "x" || ref == "series")) {
             addError(r, path, "в диаграмме допустимы только x, series, param.<name> или литерал");
@@ -235,13 +241,56 @@ void checkTableBlock(ValidationResult &r,
 }
 
 void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::string &base) {
-    static const std::vector<std::string> types = {"bar", "line", "pie", "area", "scatter"};
-    if (!isOneOf(asString(block["chartType"]), types)) {
-        addError(r, base + ".chartType", "chartType должен быть одним из: bar, line, pie, area, scatter");
+    static const std::vector<std::string> types = {"bar", "line", "pie", "area", "scatter", "gauge", "sankey"};
+    const std::string type = asString(block["chartType"]);
+    if (!isOneOf(type, types)) {
+        addError(r, base + ".chartType",
+                 "chartType должен быть одним из: bar, line, pie, area, scatter, gauge, sankey");
+        // для неизвестного вида поля всё равно проверяем: сообщений об опечатках должно быть больше одного
+        if (asString(block["xField"]).empty()) addError(r, base + ".xField", "xField обязателен");
+        if (asString(block["yField"]).empty()) addError(r, base + ".yField", "yField обязателен");
+        return;
     }
-    for (const auto &field : {"xField", "yField"}) {
+
+    // Состав полей зависит от вида диаграммы (ADR-56); правила зеркалят клиентский валидатор.
+    const auto need = [&](const char *field) {
         if (asString(block[field]).empty()) {
-            addError(r, base + "." + field, std::string(field) + " обязателен");
+            addError(r, base + "." + field, std::string("для диаграммы «") + type + "» обязательно поле " + field);
+        }
+    };
+    const auto forbid = [&](const char *field, const char *why) {
+        if (!block[field].isNull()) {
+            addError(r, base + "." + field, std::string("для диаграммы «") + type + "» " + field +
+                                                " не используется: " + why);
+        }
+    };
+
+    if (type == "gauge") {
+        need("yField");
+        forbid("xField", "значение одно, категории нет");
+        forbid("seriesField", "значение одно, серий нет");
+        if (block["min"].isNumeric() && block["max"].isNumeric() &&
+            block["max"].asDouble() <= block["min"].asDouble()) {
+            addError(r, base + ".max", "max должен быть больше min");
+        }
+    } else if (type == "sankey") {
+        need("sourceField");
+        need("targetField");
+        need("valueField");
+        forbid("xField", "узлы задаются sourceField и targetField");
+        forbid("yField", "вес потока задаётся valueField");
+        const std::string s = asString(block["sourceField"]);
+        const std::string t = asString(block["targetField"]);
+        const std::string v = asString(block["valueField"]);
+        if (!s.empty() && !t.empty() && !v.empty() && (s == t || s == v || t == v)) {
+            addError(r, base + ".targetField",
+                     "sourceField, targetField и valueField должны быть разными полями");
+        }
+    } else {
+        need("xField");
+        need("yField");
+        if (!block["sourceField"].isNull() || !block["targetField"].isNull() || !block["valueField"].isNull()) {
+            addError(r, base + ".chartType", "sourceField/targetField/valueField допустимы только для sankey");
         }
     }
 }
