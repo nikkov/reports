@@ -4,7 +4,8 @@
 // и в корне, и под /reports/ за реверс-прокси.
 import { API_BASE } from '../api/client.js'
 
-const LOGIN_PAGE = `${import.meta.env.BASE_URL}login.html`
+// абсолютный адрес страницы входа: работает и в корне, и под любым префиксом
+const LOGIN_PAGE = new URL('login.html', document.baseURI).href
 
 export async function me() {
   try {

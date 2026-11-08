@@ -1,7 +1,29 @@
 // Тонкий клиент API отчётов. Все запросы отменяемы (AbortController), ошибки типизированы.
-// Префикс API. Пусто — тот же хост и корень (стенд); за реверс-прокси
-// под /reports обычно задаётся VITE_API_BASE=/reports при сборке (ADR-53).
-export const API_BASE = import.meta.env.VITE_API_BASE || ''
+// Префикс API определяется во время выполнения (ADR-53), поэтому сборку можно
+// копировать на другой хост и в другой каталог без пересборки:
+//   1) явное переопределение — <meta name="rep-api-base" content="/reports"> или window.REP_API_BASE
+//      (или VITE_API_BASE при сборке, если так удобнее);
+//   2) иначе API считается там же, где лежит приложение: /reports/report.html → /reports/api,
+//      корень → /api.
+function resolveApiBase() {
+  const meta =
+    typeof document !== 'undefined' ? document.querySelector('meta[name="rep-api-base"]') : null
+  const explicit =
+    (typeof window !== 'undefined' && window.REP_API_BASE) ||
+    (meta && meta.getAttribute('content')) ||
+    import.meta.env.VITE_API_BASE ||
+    ''
+  if (explicit) {
+    let value = String(explicit).replace(/\/+$/, '')
+    // допускаем и «префикс приложения», и полный адрес API: /reports и /reports/api
+    if (value.endsWith('/api')) value = value.slice(0, -'/api'.length)
+    return value
+  }
+  const dir = new URL('.', document.baseURI).pathname.replace(/\/+$/, '')
+  return dir === '' ? '' : dir
+}
+
+export const API_BASE = resolveApiBase()
 const BASE = API_BASE
 
 async function request(path, options = {}) {

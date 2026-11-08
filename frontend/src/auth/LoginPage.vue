@@ -60,7 +60,9 @@ onMounted(async () => {
 
 function nextUrl() {
   const next = new URLSearchParams(location.search).get('next')
-  if (!next || !next.startsWith('/') || next.startsWith('//')) return import.meta.env.BASE_URL
+  if (!next || !next.startsWith('/') || next.startsWith('//')) {
+    return new URL('.', document.baseURI).pathname
+  }
   return next
 }
 

@@ -2,16 +2,17 @@
 // Стенд «как за реверс-прокси»: отдаёт собранный фронтенд под префиксом (/reports)
 // и проксирует <префикс>/api на бэкенд. Нужен для проверки ADR-53 без nginx.
 //
-// Сначала сборка под префикс: ./scripts/build-subpath.sh (в frontend/dist-reports).
+// Сборка переносимая: ./scripts/build.sh кладёт frontend/dist, который можно отдавать
+// из любого каталога (префикс задаётся только здесь, при запуске стенда).
 //
 //   node scripts/serve-subpath.mjs --port 5180 --prefix /reports --api http://127.0.0.1:8080
-//   node scripts/serve-subpath.mjs --root frontend/dist-reports
+//   node scripts/serve-subpath.mjs --port 5181 --prefix /portal/x --api http://127.0.0.1:8082
 import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const defaultRoot = resolve(fileURLToPath(new URL('../frontend/dist-reports', import.meta.url)))
+const defaultRoot = resolve(fileURLToPath(new URL('../frontend/dist', import.meta.url)))
 const args = process.argv.slice(2)
 const arg = (name, fallback) => {
   const i = args.indexOf(`--${name}`)
@@ -73,14 +74,14 @@ async function proxy(req, res, path) {
   res.end()
 }
 
-// ловушка: обычный dist собран под корень, его ассеты под префиксом дают 404
+// ловушка: сборка с абсолютными путями (/assets/…) под префиксом даёт 404
 try {
   const index = await readFile(join(root, 'index.html'), 'utf8')
-  if (!index.includes(`${prefix}/assets/`)) {
-    console.warn(`внимание: ${root} собран без префикса ${prefix}/ — запустите ./scripts/build-subpath.sh`)
+  if (/["']\/assets\//.test(index)) {
+    console.warn(`внимание: ${root} собран с абсолютными путями к ассетам — под префиксом будут 404, пересоберите`)
   }
 } catch {
-  console.warn(`внимание: в ${root} нет index.html — запустите ./scripts/build-subpath.sh`)
+  console.warn(`внимание: в ${root} нет index.html — запустите ./scripts/build.sh`)
 }
 
 const server = createServer(async (req, res) => {

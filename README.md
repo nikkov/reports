@@ -220,24 +220,27 @@ REP_CI_DB=my_ci ./scripts/ci-e2e.sh  # другая база — если report
 отправлял рассылку, входил в систему. API — `GET /api/admin/audit?action=&actor=&limit=&offset=`,
 только чтение: подчистить журнал через интерфейс нельзя (ADR-52).
 
-## За реверс-прокси (префикс /reports)
+## За реверс-прокси: сборка переносимая
 
-Сборка под префикс — те же скрипты с двумя переменными:
+Собирается один раз, копируется куда угодно — ни пересборки, ни правки настроек:
 
 ```bash
-./scripts/build-subpath.sh                 # /reports/, отдельный каталог frontend/dist-reports
+./scripts/build.sh          # frontend/dist
 ```
 
-Скрипт не трогает обычный `dist`: сборка под префикс кладётся в `frontend/dist-reports`
-(переопределяется `REP_BASE=`, `VITE_API_BASE=`, `OUT=`).
-
-- страницы и ассеты уходят под `/reports/`, все запросы — в `/reports/api`;
+- ссылки на ассеты в `dist` относительные (`./assets/…`), поэтому каталог можно отдать
+  и из корня, и из `/reports/`, и из `/portal/x/`;
+- адрес API вычисляется во время выполнения: по умолчанию это каталог приложения
+  (`/reports/report.html` → `/reports/api`, корень → `/api`). Если API живёт не там,
+  префикс задаётся без пересборки — `<meta name="rep-api-base" content="/reports">` в HTML
+  или `window.REP_API_BASE = '/reports'` перед скриптами (полная форма `/reports/api` тоже
+  принимается);
+- в бандле нет ни имени хоста, ни порта: `grep -l '127.0.0.1\|localhost\|:8080' dist/assets/*.js` пуст;
 - прокси должен снимать префикс: `/reports/api/… → http://127.0.0.1:8080/api/…`
   (готовый пример — `deploy/nginx-reports.conf`, включая отдельный блок для SSE
   с `proxy_buffering off`);
-- проверить без nginx можно стендом: `node scripts/serve-subpath.mjs --port 5180 --prefix /reports`
-  (по умолчанию отдаёт `frontend/dist-reports`, `--root` — другой каталог);
-- обычная сборка (без переменных) остаётся корневой и используется стендом и e2e.
+- проверить без nginx: `node scripts/serve-subpath.mjs --port 5180 --prefix /reports`
+  (тот же `dist`, префикс задаётся только при запуске стенда).
 
 ## Режимы входа
 
