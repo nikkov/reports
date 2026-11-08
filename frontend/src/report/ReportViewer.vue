@@ -58,6 +58,7 @@
           :height="460"
           :styles="stylesFor(block)"
           :print-mode="printMode"
+          :load-group="(pathKey, spec) => loadGroupDetails(block, pathKey, spec)"
           @drill="onDrill"
         />
 
@@ -152,6 +153,13 @@ function missingRequired() {
 
 // Несколько наборов данных (ADR-36): каждый табличный блок читает свой dataKey.
 const dataByKey = ref({})
+
+// Раскрытие группы серверной агрегации (ADR-65): детали берутся тем же набором данных
+// и с теми же параметрами, что и агрегат. Строк — не больше limit сервера (200).
+async function loadGroupDetails(block, pathKey, spec) {
+  const key = block?.dataKey || ''
+  return api.group(reportId, { ...paramValues }, { ...spec, dataset: key || undefined })
+}
 
 function rowsFor(block) {
   const key = block?.dataKey || ''

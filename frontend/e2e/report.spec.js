@@ -255,6 +255,81 @@ test('при прокрутке под шапкой нет пустой поло
   }
 })
 
+// Дефект стенда: ширины колонок считались по строкам, попавшим в окно виртуализации, —
+// при появлении строки итога («Итого …») колонка скачком расширялась, а при уходе сужалась.
+test('ширины колонок не меняются при прокрутке и не выезжают за контейнер', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  await waitRows(page)
+
+  const measure = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector('.rt')
+      const table = sc.querySelector('table')
+      return {
+        cols: [...table.querySelectorAll('colgroup col')].map((c) => Math.round(c.getBoundingClientRect().width)),
+        tableW: Math.round(table.getBoundingClientRect().width),
+        clientW: sc.clientWidth,
+        scrollW: sc.scrollWidth,
+        subtotals: sc.querySelectorAll('tbody tr.subtotal, tbody tr.grandtotal').length
+      }
+    })
+
+  const start = await measure()
+  const seen = new Set([start.cols.join('/')])
+  let sawSubtotal = start.subtotals > 0
+
+  // Идём вниз до первой строки итога в окне: до неё ширины детальных строк, после —
+  // они же плюс широкая подпись «Итого …», из-за которой колонка и «дышала».
+  const positions = []
+  for (let top = 1000; top <= 24000 && !sawSubtotal; top += 1000) positions.push(top)
+  positions.push(
+    ...positions.slice(-3).map((top) => top + 500),
+    ...positions.slice(-2).map((top) => top + 1200)
+  )
+  for (const top of positions) {
+    await page.locator('.rt').evaluate((el, y) => {
+      el.scrollTop = y
+      el.dispatchEvent(new Event('scroll'))
+    }, top)
+    await page.waitForTimeout(120)
+    const m = await measure()
+    seen.add(m.cols.join('/'))
+    sawSubtotal = sawSubtotal || m.subtotals > 0
+    expect(m.scrollW, `таблица выехала за контейнер при scrollTop=${top}`).toBeLessThanOrEqual(m.clientW + 1)
+  }
+
+  expect(sawSubtotal, 'в окно так и не попала строка итога — тест ничего не проверил').toBe(true)
+  expect([...seen], 'ширины колонок менялись при прокрутке').toHaveLength(1)
+})
+
+// Дефект стенда: разрез объединения рисовал границу — в групповой колонке появлялась
+// линия на месте разреза, хотя группа продолжается.
+test('на разрезе объединения нет линии, групповые ячейки её не рисуют', async ({ page }) => {
+  await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
+  await waitRows(page)
+  await page.locator('.rt').evaluate((el) => {
+    el.scrollTop = 2000
+    el.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForTimeout(250)
+
+  const result = await page.evaluate(() => {
+    const sc = document.querySelector('.rt')
+    const phantom = [...sc.querySelectorAll('tbody td.phantom')]
+    return {
+      phantoms: phantom.length,
+      borders: phantom.map((td) => getComputedStyle(td).borderBottomColor),
+      empty: phantom.every((td) => !td.textContent.trim())
+    }
+  })
+  // разрез объединения обязателен: строка выше окна остаётся прозрачной ячейкой
+  expect(result.phantoms).toBeGreaterThan(0)
+  expect(result.empty).toBe(true)
+  for (const color of result.borders) {
+    expect(['rgba(0, 0, 0, 0)', 'transparent'], `линия на разрезе объединения: ${color}`).toContain(color)
+  }
+})
+
 test('«свернуть всё» после прокрутки не оставляет пустоты и показывает итоги', async ({ page }) => {
   await page.goto(`${BASE}&from=2026-03-01&to=2026-03-10`)
   await waitRows(page)
@@ -281,6 +356,65 @@ test('«свернуть всё» после прокрутки не остав�
   expect(measured.scrollTop).toBe(0)
   expect(measured.gap).toBeLessThanOrEqual(1)
   expect(measured.kinds.every((k) => k === 'subtotal' || k === 'grandtotal')).toBe(true)
+})
+
+// Дефект стенда: в отчёте «Продажи: агрегация на сервере» группы раскрывались «в пустоту» —
+// сервер отдаёт одну строку на категорию, деталей в модели нет. Теперь раскрытие подгружает
+// строки группы с сервера, а итог группы остаётся серверным (ADR-65).
+test('раскрытие группы серверной агрегации подгружает детальные строки', async ({ page }) => {
+  await page.goto('/report.html?report=sales-aggregate&from=2026-03-01&to=2026-03-10')
+  await waitRows(page)
+  // ждём именно агрегированную витрину: 5 групп с шевронами
+  await expect(page.locator('.rt-table tbody tr .chev')).toHaveCount(5)
+
+  const detailCount = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector('.rt')
+      const ids = [...sc.querySelectorAll('tbody tr.detail')]
+      return { window: ids.length, height: sc.scrollHeight }
+    })
+
+  const collapsed = await detailCount()
+  expect(collapsed.window).toBe(5) // 5 групп-агрегатов
+
+  // раскрываем первую группу: сначала сворачиваем, затем разворачиваем — так chevron
+  // достоверно уходит за деталями, а не показывает уже имеющуюся единственную строку
+  await page.locator('.rt-table tbody tr .chev').first().click()
+  await expect(page.locator('.rt-table tbody tr.subtotal').first()).toContainText('Итого')
+  await page.waitForTimeout(300) // даём перерисовать строку итога, иначе клик уйдёт в прежнюю
+  await page.locator('.rt-table tbody tr .chev').first().click()
+
+  // детали пришли с сервера: высота таблицы выросла в разы, строки перестали быть агрегатами
+  await expect
+    .poll(async () => (await detailCount()).height, { timeout: 15000 })
+    .toBeGreaterThan(collapsed.height * 3)
+
+  const amounts = await page.evaluate(() => {
+    const sc = document.querySelector('.rt')
+    return [...sc.querySelectorAll('tbody tr.detail')]
+      .map((tr) => (tr.children[1]?.textContent || '').trim())
+      .filter(Boolean)
+  })
+  expect(amounts.length).toBeGreaterThan(5)
+
+  // итог группы — серверный, общий итог не пересчитан по загруженной части
+  await page.locator('.rt').evaluate((el) => {
+    el.scrollTop = 17600
+    el.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForTimeout(300)
+  const sums = await page.evaluate(() => {
+    const sc = document.querySelector('.rt')
+    const subtotal = sc.querySelector('tbody tr.subtotal')
+    const grand = [...sc.querySelectorAll('tbody tr.grandtotal')].pop()
+    // суммы приходят с неразрывными пробелами — сравниваем через обычные
+    const norm = (s) => s.replace(/[\s\u00a0\u202f]+/g, ' ').trim()
+    const cells = (tr) => (tr ? [...tr.children].map((c) => norm(c.textContent)) : [])
+    return { subtotal: cells(subtotal), grand: cells(grand) }
+  })
+  expect(sums.subtotal[0]).toContain('Итого')
+  expect(sums.subtotal[1]).toBe('37 634 100')
+  expect(sums.grand[1]).toBe('150 977 000')
 })
 
 test('диаграмма получает агрегаты из того же движка', async ({ page }) => {

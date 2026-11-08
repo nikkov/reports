@@ -3,6 +3,7 @@
     <button type="button" @click="collapseAll">Свернуть всё</button>
     <button type="button" @click="expandAll">Развернуть всё</button>
     <span class="tv-info">{{ collapsed.size }} свёрнуто</span>
+    <span v-if="loadedNote" class="tv-info">{{ loadedNote }}</span>
   </div>
   <p v-if="brokenExpr.size" class="tv-broken">
     Ошибка в вычисляемых колонках:
@@ -59,6 +60,9 @@ const props = defineProps({
   height: { type: Number, default: 460 },
   // разрешённые стили шаблона (ADR-23): undefined = вид версии 1.0
   styles: { type: Object, default: null },
+  // раскрытие группы серверной агрегации подгружает детали (ADR-65):
+  // async (pathKey: string, spec: {field, value}) => {rows, total}
+  loadGroup: { type: Function, default: null },
   // печать: весь отчёт без виртуализации (ADR-28)
   virtual: { type: Boolean, default: true },
   printMode: { type: Boolean, default: false }
@@ -67,8 +71,50 @@ const props = defineProps({
 import { columnFormat, formatCell } from './format.js'
 import { ruleStyleFor } from './rules.js'
 const collapsed = ref(new Set())
+// Детали групп, подгруженные по требованию: путь группы → { rows, total }
+const details = ref(new Map())
+const loading = ref(new Set())
 
-watch(() => props.rows, () => { collapsed.value = new Set() })
+watch(() => props.rows, () => {
+  collapsed.value = new Set()
+  details.value = new Map()
+  loading.value = new Set()
+})
+
+const GROUP_SEP = '\u0001'
+
+// Детали имеет смысл подгружать только там, где сервер отдал агрегат: в модели одна
+// строка на группу, раскрывать нечего (ADR-37). Признак — объект aggregate у блока.
+const serverAggregated = computed(() => Boolean(props.block.aggregate && typeof props.block.aggregate === 'object'))
+
+// Ключ группы → сырые значения её групповых колонок (в модели они нормализованы
+// в подписи, а серверу нужно исходное значение, включая NULL).
+const rawGroupKeys = computed(() => {
+  const map = new Map()
+  if (!serverAggregated.value) return map
+  const groupCols = leafCols.value.filter((c) => c.group)
+  if (!groupCols.length) return map
+  const nullLabel = props.block.nullText || '(пусто)'
+  for (const row of props.rows) {
+    const path = groupCols.map((c) => {
+      const raw = row[c.field]
+      return raw === null || raw === undefined || raw === '' ? nullLabel : String(raw)
+    })
+    map.set(path.join(GROUP_SEP), { path, row, cols: groupCols })
+  }
+  return map
+})
+
+const loadedNote = computed(() => {
+  let shown = 0
+  let total = 0
+  for (const item of details.value.values()) {
+    shown += item.rows?.length || 0
+    total += Number(item.total) || 0
+  }
+  if (!shown || total <= shown) return ''
+  return `в группах показано ${shown} из ${total} строк`
+})
 
 // Листья колонок: заголовки-группы (children) разворачиваются в path для thead,
 // данные и агрегаты считаются только по листьям.
@@ -154,7 +200,8 @@ function groupedView() {
   const model = buildTableModel(props.rows, leafCols.value, {
     collapsed: collapsed.value.size ? collapsed.value : undefined,
     grandTotal: props.block.grandTotal !== false,
-    nullLabel: props.block.nullText || '(пусто)'
+    nullLabel: props.block.nullText || '(пусто)',
+    details: details.value.size ? details.value : undefined
   })
   const ids = new Set()
   for (const row of model.rows) {
@@ -236,8 +283,36 @@ function expandAll() {
   collapsed.value = new Set()
 }
 
-function toggle(path) {
+async function loadDetails(id) {
+  if (details.value.has(id) || loading.value.has(id)) return
+  const entry = rawGroupKeys.value.get(id)
+  if (!entry || !props.loadGroup) return
+  const groupCol = entry.cols[entry.path.length - 1]
+  if (!groupCol) return
+  loading.value = new Set(loading.value).add(id)
+  try {
+    const result = await props.loadGroup(id, {
+      field: groupCol.field,
+      value: entry.row[groupCol.field] ?? null
+    })
+    const next = new Map(details.value)
+    next.set(id, { rows: result?.rows || [], total: result?.total ?? result?.rowCount ?? 0 })
+    details.value = next
+  } catch (e) {
+    // не молчим: без деталей группа останется свёрнутой, а текст ошибки уйдёт в консоль
+    console.error('[report] не удалось загрузить детали группы', e)
+  } finally {
+    const rest = new Set(loading.value)
+    rest.delete(id)
+    loading.value = rest
+  }
+}
+
+async function toggle(path) {
   const id = path.join('\u0001')
+  const wasCollapsed = collapsed.value.has(id)
+  // раскрываем группу серверной агрегации — сначала подгружаем её строки
+  if (wasCollapsed && serverAggregated.value && props.loadGroup) await loadDetails(id)
   const next = new Set(collapsed.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)

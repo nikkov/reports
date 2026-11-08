@@ -67,7 +67,7 @@
 | `layout.*Height` | 16…120 | высоты зон |
 | `layout.borders` | `none`, `horizontal`, `grid` | |
 | `layout.zebra`, `layout.stripeColor` | bool, цвет | |
-| `layout.tableLayout` | `auto`, `fixed` | `fixed` при заданных ширинах |
+| `layout.tableLayout` | `auto`, `fixed` | **не влияет**: раскладка всегда `fixed` с ширинами, вычисленными по модели (ADR-64); поле принимается для совместимости |
 | `columns[].width` | `120` (px) или `"20%"` | 40…2000 px / 1…100 % |
 | `columns[].minWidth`, `maxWidth` | px | ≤ `maxWidth` ≥ `minWidth` |
 

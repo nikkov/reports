@@ -1457,6 +1457,152 @@ int main() {
         {Get});
 
 
+    // Детали одной группы для серверной агрегации (ADR-65): раскрытие группы подгружает
+    // её строки из того же набора, а не отправляет пользователя в другой отчёт.
+    // Поле фильтра берётся из groupBy блока и проверяется как идентификатор; значение
+    // уходит параметром, SQL набора — в подзапрос, без интерполяции.
+    app().registerHandler(
+        "/api/report/group",
+        [dataDb, &templates, &templatesMutex](const HttpRequestPtr &req,
+                                              std::function<void(const HttpResponsePtr &)> &&cb) {
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string reportId = (*body).get("reportId", "").asString();
+            if (reportId.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
+                return;
+            }
+            const std::string field = (*body).get("field", "").asString();
+            if (!rep::validIdentifier(field)) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                          "поле группы должно быть идентификатором");
+                return;
+            }
+
+            std::string datasetSql;
+            std::map<std::string, std::string> datasetParams;
+            {
+                std::lock_guard<std::mutex> lock(templatesMutex);
+                const auto it = templates.find(reportId);
+                if (it == templates.end()) {
+                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
+                    return;
+                }
+                const auto &all = it->second.datasets;
+                if (all.empty()) {
+                    datasetSql = it->second.datasetSql;
+                    datasetParams = it->second.datasetParams;
+                } else {
+                    const std::string key = (*body).get("dataset", "").asString();
+                    const auto ds = all.find(key.empty() ? all.begin()->first : key);
+                    if (ds == all.end()) {
+                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
+                                  "в шаблоне нет набора '" + key + "'");
+                        return;
+                    }
+                    datasetSql = ds->second.sql;
+                    datasetParams = ds->second.params;
+                }
+            }
+            if (datasetSql.empty()) {
+                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
+                          "в шаблоне не задан datasets.<key>.sql");
+                return;
+            }
+
+            rep::ParamBag bag;
+            const Json::Value &rawParams = (*body)["params"];
+            if (rawParams.isObject()) {
+                for (auto it = rawParams.begin(); it != rawParams.end(); ++it) {
+                    if (it->isString() || it->isInt64() || it->isUInt64() || it->isDouble() || it->isBool()) {
+                        bag.set(it.name(), it->asString());
+                    }
+                }
+            }
+
+            rep::DatasetQuery query;
+            std::string err;
+            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+
+            // Сколько строк группы показывать: по умолчанию 5000 (столько же, сколько
+            // печатается), потолок 5000. Остаток виден по total и подсказке в блоке.
+            int limit = (*body).get("limit", 5000).asInt();
+            if (limit < 1) limit = 1;
+            if (limit > 5000) limit = 5000;
+
+            std::vector<std::string> values = query.values;
+            std::string sql = "SELECT count(*) OVER () AS __group_total, d.* FROM (" + query.sql + ") AS d WHERE d." +
+                              field;
+            const Json::Value &value = (*body)["value"];
+            if (value.isNull() || !value.isString()) {
+                sql += " IS NULL";
+            } else {
+                values.push_back(value.asString());
+                sql += " = $" + std::to_string(values.size());
+            }
+            sql += " LIMIT " + std::to_string(limit);
+
+            static const std::map<std::string, std::string> noDeclared;
+            runQuery(
+                dataDb, sql, values,
+                [cb](const orm::Result &res) {
+                    Json::Value columns(Json::arrayValue);
+                    const auto ncols = static_cast<size_t>(res.columns());
+                    std::vector<std::string> names;
+                    std::vector<std::string> types;
+                    for (size_t c = 0; c < ncols; ++c) {
+                        names.emplace_back(res.columnName(static_cast<unsigned long>(c)));
+                        types.push_back(columnType(names.back(), noDeclared, res));
+                        if (names.back() == "__group_total") continue; // служебная колонка
+                        Json::Value col;
+                        col["name"] = names.back();
+                        col["type"] = types.back();
+                        columns.append(col);
+                    }
+                    Json::Value rows(Json::arrayValue);
+                    long long total = 0;
+                    for (const auto &row : res) {
+                        if (total == 0 && ncols > 0) {
+                            for (size_t c = 0; c < ncols; ++c) {
+                                if (names[c] == "__group_total") {
+                                    total = std::strtoll(row[c].c_str(), nullptr, 10);
+                                }
+                            }
+                        }
+                        Json::Value obj(Json::objectValue);
+                        for (size_t c = 0; c < ncols; ++c) {
+                            if (names[c] == "__group_total") continue;
+                            obj[names[c]] = fieldToJson(row[c], types[c]);
+                        }
+                        rows.append(obj);
+                    }
+                    Json::Value out;
+                    out["columns"] = columns;
+                    out["rows"] = rows;
+                    out["rowCount"] = static_cast<Json::UInt64>(res.size());
+                    out["total"] = static_cast<Json::Int64>(total);
+                    cb(jsonResponse(out));
+                },
+                [cb](const std::exception_ptr &e) {
+                    std::string msg = "group details failed";
+                    try {
+                        if (e) std::rethrow_exception(e);
+                    } catch (const std::exception &ex) {
+                        msg = ex.what();
+                    }
+                    sendError(cb, msg.find("does not exist") != std::string::npos ? k422UnprocessableEntity
+                                                                                 : k500InternalServerError,
+                              "GROUP_FAILED", msg);
+                });
+        },
+        {Post});
+
     // Серверная агрегация (ADR-37): GROUP BY поверх выбранного набора данных.
     // Клиент получает уже сгруппированные строки — на 2 746 строках это 5 вместо тысяч.
     app().registerHandler(

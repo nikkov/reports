@@ -1,7 +1,7 @@
 <template>
   <div class="rt-wrap">
   <div class="rt rt-screen" :class="['b-' + layout.borders, { zebra: layout.zebra }]" :style="rootStyle" ref="scroller" @scroll="onScroll">
-    <table class="rt-table" :style="{ tableLayout: layout.tableLayout }">
+    <table class="rt-table" :style="{ tableLayout: 'fixed' }">
         <colgroup>
           <col v-for="(c, ci) in columns" :key="c.field || ci" :style="colWidth(ci)" />
         </colgroup>
@@ -39,7 +39,8 @@
                   ctr: columns[cell.col]?.align === 'center',
                   total: row.kind !== 'detail',
                   inherit: cell.inherit,
-                  cont: cell.continued
+                  cont: cell.continued,
+                  phantom: cell.hidden
                 }"
               >
                 <span v-if="cell.toggle" class="chev"            @click.stop="handleToggle(cell.toggle)">{{
@@ -123,7 +124,7 @@ function pretty(value) {
 // Свой рендерер таблицы отчёта (ADR-20): нативная <table>, объединения из модели.
 // Стили (ADR-23) приходят разрешёнными из шаблона и уходят в CSS-переменные:
 // inline-стили на ячейках — только для переопределений конкретной колонки.
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DEFAULTS, rowHeightFor, zoneVars } from '../template/styles.js'
 
 const props = defineProps({
@@ -162,6 +163,25 @@ const emit = defineEmits(['toggle', 'drill'])
 
 const scroller = ref(null)
 const scrollTop = ref(0)
+// Ширина окна таблицы: нужна, чтобы вычисленные ширины колонок вписывались в контейнер
+// (иначе таблица перерастает его и появляется горизонтальная прокрутка — заметный «скачок»).
+const containerWidth = ref(0)
+let widthObserver = null
+onMounted(() => {
+  if (!scroller.value) return
+  containerWidth.value = scroller.value.clientWidth
+  if (typeof ResizeObserver !== 'undefined') {
+    widthObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect?.width
+      if (width) containerWidth.value = width
+    })
+    widthObserver.observe(scroller.value)
+  }
+})
+onBeforeUnmount(() => {
+  if (widthObserver) widthObserver.disconnect()
+  widthObserver = null
+})
 
 const layout = computed(() => props.styles.layout)
 
@@ -298,11 +318,86 @@ const firstVisible = computed(() => lowerBound(offsets.value, scrollTop.value))
 
 const windowRows = computed(() => props.rows.slice(start.value, end.value))
 
-// Ширина и границы колонки: px-число или «N%»; min/max — только если заданы.
+// Ширины колонок считаются ПО МОДЕЛИ, а не по попавшим в окно строкам (ADR-64).
+// При table-layout: auto ширину задаёт видимый набор строк: пока в окне детальные строки,
+// колонка узкая, а как только в окно попадает строка итога с более длинной подписью
+// («Итого …»), колонка скачком расширяется, таблица выходит за контейнер и появляется
+// горизонтальная прокрутка. Окно меняется на каждом шаге прокрутки — таблица «дышит».
+// Поэтому: измеряем самый длинный текст каждой колонки по всей модели (кэш по модели и
+// стилям), подставляем ширины в <colgroup> и раскладываем таблицу fixed.
+const colWidths = computed(() => {
+  const cols = props.columns
+  const styles = props.styles
+  const rows = props.rows
+  const fontOf = (zone) =>
+    `${zone?.font?.style || 'normal'} ${zone?.font?.weight || 400} ${zone?.font?.size || 13}px ` +
+    `${zone?.font?.family || 'system-ui'}, system-ui, sans-serif`
+  const fonts = {
+    header: fontOf(styles.header),
+    detail: fontOf(styles.body),
+    subtotal: fontOf(styles.subtotal),
+    grandtotal: fontOf(styles.grandtotal)
+  }
+  const padOf = (padding) => {
+    const parts = String(padding || '2px 8px').split(' ')
+    const h = parts.length > 1 ? parseFloat(parts[1]) : parseFloat(parts[0]) || 8
+    return (Number.isFinite(h) ? h : 8) * 2
+  }
+  // кандидаты: шапка + самые длинные тексты зон; измеряем только их, а не все строки
+  const step = rows.length > 20000 ? Math.ceil(rows.length / 20000) : 1
+  const candidates = cols.map((col) => {
+    const long = []
+    const push = (text, font) => {
+      if (text) long.push({ len: text.length, text, font })
+    }
+    push(String(col.title ?? ''), fonts.header)
+    for (let i = 0; i < rows.length; i += step) {
+      const row = rows[i]
+      const font = row.kind === 'grandtotal' ? fonts.grandtotal
+        : row.kind === 'subtotal' ? fonts.subtotal : fonts.detail
+      push(pretty(props.cellText(row, col.field)), font)
+    }
+    return long.sort((a, b) => b.len - a.len).slice(0, 12)
+  })
+
+  const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : null
+  const ctx = canvas ? canvas.getContext('2d') : null
+  const natural = cols.map((col, index) => {
+    if (!ctx) return 120
+    let textWidth = 0
+    for (const item of candidates[index]) {
+      ctx.font = item.font
+      textWidth = Math.max(textWidth, ctx.measureText(item.text).width)
+    }
+    const groupCol = index < (props.groupCount || 0)
+    const padding = padOf(styles.body.padding)
+    // +1 px на границу, +16 px на шеврон у групповой колонки, +4 px запас на округление
+    return Math.ceil(textWidth) + padding + 1 + (groupCol ? 16 : 0) + 4
+  })
+
+  // Явные ширины из шаблона не трогаем; остальные сжимаем пропорционально, если сумма
+  // не влезает в контейнер. Так таблица не «выезжает» и не появляется горизонтальная
+  // прокрутка при смене модели (например, после «Свернуть всё»).
+  const pinned = cols.map((col, index) => {
+    const override = styles.columns?.[col?.columnKey] || {}
+    const width = override.width ?? col?.width
+    return typeof width === 'number' ? width : null
+  })
+  const pinnedSum = pinned.reduce((acc, w) => acc + (w || 0), 0)
+  const free = cols.reduce((acc, _, index) => acc + (pinned[index] ? 0 : natural[index]), 0)
+  const available = containerWidth.value - pinnedSum
+  if (containerWidth.value > 0 && available > 0 && free > available) {
+    const factor = available / free
+    return natural.map((w, index) => (pinned[index] ? w : Math.max(60, Math.floor(w * factor))))
+  }
+  return natural
+})
+
+// Ширина и границы колонки: явная из шаблона (px-число или «N%») главнее вычисленной.
 function colWidth(index) {
   const col = props.columns[index]
   const override = props.styles.columns?.[col?.columnKey] || {}
-  const width = override.width ?? col?.width
+  const width = override.width ?? col?.width ?? colWidths.value[index]
   const style = { minWidth: override.minWidth ? override.minWidth + 'px' : undefined,
                   maxWidth: override.maxWidth ? override.maxWidth + 'px' : undefined }
   if (typeof width === 'number') style.width = width + 'px'
@@ -546,7 +641,7 @@ function cellsAt(index) {
       render: true,
       rowspan: tailAbs - labelAbs,
       colspan: 1,
-      continued: labelAbs > headAbs,
+      continued: false,
       // ячейка группы-предка в строке итога: фон и начертание как у обычных строк
       inherit: row.kind === 'subtotal' && col < row.level,
       text: props.cellText(headRow, props.columns[col].field),
@@ -685,6 +780,13 @@ function cellsAt(index) {
 .rt-table td.cont {
   color: color-mix(in srgb, var(--rt-b-color, #8a94a3) 55%, transparent);
   font-style: italic;
+}
+/* Прозрачная часть разрезанного объединения: держит выравнивание колонок, но не рисует
+   границу — иначе на месте разреза появляется линия, читаемая как граница группы,
+   хотя группа продолжается (дефект: «линия сверху при прокрутке»). */
+.rt-table td.phantom {
+  border-bottom-color: transparent;
+  background: transparent;
 }
 /* Печатный слой: на экране скрыт, в печати заменяет экранную таблицу целиком. */
 .rt-print {

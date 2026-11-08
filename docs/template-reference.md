@@ -240,7 +240,7 @@
 |---|---|
 | `dataKey` | имя набора из `datasets` (обязательно) |
 | `title` | подпись блока; в экспорте становится именем листа Excel |
-| `aggregate` | агрегация на сервере: `{ groupBy: [...], measures: [{ field, agg }] }` (ADR-37, ниже) |
+| `aggregate` | агрегация на сервере: `{ groupBy: [...], measures: [{ field, agg }] }` (ADR-37, ниже). Группу можно раскрыть — детали подгружаются маршрутом `POST /api/report/group` (ADR-65), не больше 5000 строк на группу |
 | `collapsible` | разрешить сворачивание групп (шеврон в ячейке групповой колонки) |
 | `grandTotal` | печатать строку общего итога |
 | `nullText` | текст для пустых значений (по умолчанию `(пусто)`) |
@@ -445,7 +445,7 @@ Drill из `sankey` подставляет источник в `x`, приёмн
 | `preset` | `default`, `compact`, `print`, `dark` — встроенные наборы |
 | `font` | `family` (allowlist), `size` 8…32, `weight` 300…800, `style`, `lineHeight` 1…2 |
 | `colors` | `text`, `background`, `border` — `#rgb`, `#rrggbb`, `transparent` |
-| `layout` | `rowHeight`, `headerHeight`, `subtotalHeight`, `grandtotalHeight` (16…120), `cellPadding`, `borders` (`none`/`horizontal`/`grid`), `zebra`, `stripeColor`, `tableLayout` (`auto`/`fixed`) |
+| `layout` | `rowHeight`, `headerHeight`, `subtotalHeight`, `grandtotalHeight` (16…120), `cellPadding`, `borders` (`none`/`horizontal`/`grid`), `zebra`, `stripeColor`, `tableLayout` (принимается для совместимости, на раскладку не влияет — см. ADR-64) |
 | `header` / `body` / `subtotal` / `grandtotal` | стиль зоны: `font`, `colors`, `align`, `verticalAlign`, `padding` |
 | `columns.<field>` | `width` (px или `"20%"`), `minWidth`, `maxWidth`, `align`, `headerAlign`, `font`, `colors`, `padding`, `format` |
 | `layout.numericAlign` | выравнивание числовых колонок по умолчанию: `right` (по умолчанию), `left`, `center`, `inherit` |

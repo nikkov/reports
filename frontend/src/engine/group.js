@@ -173,6 +173,27 @@ export function buildTableModel(rows, columns, opts = {}) {
     const isLeaf = node.children.size === 0
     const childrenVisible = visible && isOpen(node.path)
 
+    // Детали, подгруженные по требованию (ADR-65): у серверной агрегации в модели одна
+    // строка на группу, раскрывать нечего. Загруженные строки показываем как детальные,
+    // а итог группы берём из серверной строки — он посчитан по всем строкам, а не по
+    // загруженной части (она может быть обрезана лимитом).
+    const lazy = isLeaf && opts.details ? opts.details.get(node.path.join(SEP)) : null
+    if (lazy && lazy.rows?.length) {
+      const open = isOpen(node.path)
+      if (visible && open) {
+        for (const r of lazy.rows) flat.push(makeRow('detail', groupFields.length, node, null, r, null))
+        const serverRow = node.details[0] || {}
+        const labelIndex = columns.findIndex((c) => c.group && c.field === groupFields[node.level])
+        const row = makeRow('subtotal', node.level, node, null, serverRow, -1)
+        for (let i = 0; i < node.level; i++) row.values[i] = node.path[i]
+        row.values[labelIndex >= 0 ? labelIndex : 0] = `Итого ${node.key}`
+        flat.push(row)
+      } else if (visible) {
+        pushSubtotal(node)
+      }
+      return
+    }
+
     if (isLeaf) {
       const open = isOpen(node.path)
       if (visible && open) {

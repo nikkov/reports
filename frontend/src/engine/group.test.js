@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTableModel, computeMerges, evaluateRowExpression } from './group.js'
+import { aggregateSeries, buildTableModel, computeMerges, evaluateRowExpression } from './group.js'
 
 //             0          1           2          3        4        5
 const columns = [
@@ -18,6 +18,87 @@ const rows = [
   { region: 'Юг', category: 'А', product: 'p4', amount: 250, profit: 25 },
   { region: null, category: 'А', product: 'p5', amount: 10, profit: 1 }
 ]
+
+// Серверная агрегация (ADR-37): в модели одна строка на группу. Детали, подгруженные
+// по клику (ADR-65), показываются как детальные строки, а итог группы остаётся серверным.
+describe('buildTableModel: детали группы, подгруженные по требованию', () => {
+  const aggColumns = [
+    { field: 'category', title: 'Категория', group: true },
+    { field: 'amount', title: 'Сумма', aggregate: 'sum' },
+    { field: 'profit', title: 'Прибыль', aggregate: 'sum' }
+  ]
+  const aggRows = [
+    { category: 'Мебель', amount: 1000, profit: 200 },
+    { category: 'Свет', amount: 500, profit: 100 }
+  ]
+  const details = new Map([
+    ['Мебель', { rows: [{ category: 'Мебель', amount: 20, profit: 4 }, { category: 'Мебель', amount: 30, profit: 6 }], total: 2 }]
+  ])
+
+  it('в свёрнутом виде деталей нет, есть только итог', () => {
+    const m = buildTableModel(aggRows, aggColumns, { grandTotal: true, details, collapsed: new Set(['Мебель']) })
+    expect(m.rows.map((r) => r.kind)).toEqual(['subtotal', 'detail', 'grandtotal'])
+    expect(m.rows[0].values[1]).toBe(1000) // серверный итог, не 50 из загруженной части
+  })
+
+  it('раскрытая группа показывает загруженные строки, итог — серверный', () => {
+    const m = buildTableModel(aggRows, aggColumns, { grandTotal: true, details })
+    const kinds = m.rows.map((r) => r.kind)
+    expect(kinds).toEqual(['detail', 'detail', 'subtotal', 'detail', 'grandtotal'])
+
+    const detailAmounts = m.rows.filter((r) => r.kind === 'detail' && r.groupPath[0] === 'Мебель').map((r) => r.values[1])
+    expect(detailAmounts).toEqual([20, 30])
+
+    const subtotal = m.rows.find((r) => r.kind === 'subtotal')
+    expect(subtotal.values[0]).toBe('Итого Мебель')
+    expect(subtotal.values[1]).toBe(1000) // серверная сумма по ВСЕЙ группе, а не 50
+    expect(m.rows.at(-1).values[1]).toBe(1500) // общий итог из серверных строк
+  })
+
+  it('без загруженных деталей поведение прежнее', () => {
+    const m = buildTableModel(aggRows, aggColumns, { grandTotal: true })
+    expect(m.rows.filter((r) => r.kind === 'detail')).toHaveLength(2)
+  })
+})
+
+// Покрытие всех агрегатов: avg/count/countDistinct и неизвестная функция (даёт null).
+describe('buildTableModel: агрегаты', () => {
+  const cols = [
+    { field: 'region', title: 'Регион', group: true },
+    { field: 'amount', title: 'Среднее', aggregate: 'avg' },
+    { field: 'amount', title: 'Количество', aggregate: 'count' },
+    { field: 'amount', title: 'Разных', aggregate: 'countDistinct' },
+    { field: 'amount', title: 'Неизвестный', aggregate: 'median' }
+  ]
+
+  it('считает avg, count, countDistinct и null для неизвестной функции', () => {
+    const m = buildTableModel(rows, cols, { grandTotal: true })
+    const grand = m.rows.at(-1)
+    expect(grand.values[1]).toBeCloseTo(102) // (100+100+50+250+10)/5
+    expect(grand.values[2]).toBe(5)
+    expect(grand.values[3]).toBe(4) // 100, 50, 250, 10
+    expect(grand.values[4]).toBe(null)
+  })
+})
+
+describe('aggregateSeries', () => {
+  it('avg/count/min/max по категориям и сумма по умолчанию', () => {
+    const series = [
+      { x: 'A', y: 10, s: 'a' }, { x: 'A', y: 20, s: 'a' },
+      { x: 'B', y: 5, s: 'a' }
+    ]
+    const avg = aggregateSeries(series, { xField: 'x', seriesField: 's', yField: 'y', aggregate: 'avg' })
+    expect(avg.series[0].data).toEqual([15, 5])
+    const count = aggregateSeries(series, { xField: 'x', seriesField: 's', yField: 'y', aggregate: 'count' })
+    expect(count.series[0].data).toEqual([2, 1])
+    const min = aggregateSeries(series, { xField: 'x', seriesField: 's', yField: 'y', aggregate: 'min' })
+    expect(min.series[0].data).toEqual([10, 5])
+    const max = aggregateSeries(series, { xField: 'x', seriesField: 's', yField: 'y', aggregate: 'max' })
+    expect(max.series[0].data).toEqual([20, 5])
+    const sum = aggregateSeries(series, { xField: 'x', seriesField: 's', yField: 'y' })
+    expect(sum.series[0].data).toEqual([30, 5])
+  })
+})
 
 describe('buildTableModel', () => {
   it('строит дерево и подытог на каждый регион', () => {

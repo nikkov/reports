@@ -89,8 +89,11 @@ Role requiredRole(const std::string &method, const std::string &path) {
     // админские маршруты: список, полный шаблон, история, откат
     if (path.rfind("/api/admin/", 0) == 0) return Role::Admin;
 
-    // чтение данных — всем авторизованным
-    if (path == "/api/report/data") return Role::Viewer;
+    // чтение данных — всем авторизованным: данные, агрегация, экспорт, поток изменений.
+    // Раньше в списке был только /api/report/data, и все остальные маршруты чтения
+    // проваливались в «неизвестные пути требуют admin»: viewer получал 403 на агрегацию
+    // (отчёт «Продажи: агрегация на сервере» показывал одно ИТОГО), на экспорт и на SSE.
+    if (path.rfind("/api/report/", 0) == 0) return Role::Viewer;
     if (get && path.rfind("/api/reports", 0) == 0) return Role::Viewer;
 
     // публикация, правка и удаление отчёта — только админ

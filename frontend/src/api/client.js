@@ -77,6 +77,21 @@ export const api = {
       signal
     }),
 
+  // детали одной группы серверной агрегации (ADR-65): field — колонка groupBy, value — ключ
+  group: (reportId, params, spec, signal) =>
+    request('/api/report/group', {
+      method: 'POST',
+      body: JSON.stringify({
+        reportId,
+        params,
+        field: spec.field,
+        value: spec.value === undefined ? null : spec.value,
+        ...(spec.dataset ? { dataset: spec.dataset } : {}),
+        ...(spec.limit ? { limit: spec.limit } : {})
+      }),
+      signal
+    }),
+
   // dataset — ключ из datasets шаблона (ADR-36); без него сервер отдаёт первый набор
   data: (reportId, params, signal, dataset) =>
     request('/api/report/data', {
