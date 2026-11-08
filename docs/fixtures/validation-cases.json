@@ -1489,6 +1489,339 @@
    "errors": [
     "blocks.1.height"
    ]
+  },
+  {
+   "name": "band: два коридора допустимы",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "band",
+      "xField": "a",
+      "yField": "v",
+      "bands": [
+       {
+        "lowField": "b",
+        "highField": "c"
+       },
+       {
+        "lowField": "c",
+        "highField": "d"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": []
+  },
+  {
+   "name": "band: bands вместе с lowField",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "band",
+      "xField": "a",
+      "yField": "v",
+      "bands": [
+       {
+        "lowField": "b",
+        "highField": "c"
+       }
+      ],
+      "lowField": "b"
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.lowField"
+   ]
+  },
+  {
+   "name": "band: в коридоре нет highField",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "band",
+      "xField": "a",
+      "yField": "v",
+      "bands": [
+       {
+        "lowField": "b"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.bands.0.highField"
+   ]
+  },
+  {
+   "name": "band: границы коридора совпадают",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "band",
+      "xField": "a",
+      "yField": "v",
+      "bands": [
+       {
+        "lowField": "b",
+        "highField": "b"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.bands.0.highField"
+   ]
+  },
+  {
+   "name": "band: значение не может быть границей коридора",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "band",
+      "xField": "a",
+      "yField": "v",
+      "bands": [
+       {
+        "lowField": "v",
+        "highField": "c"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.bands.0.lowField"
+   ]
+  },
+  {
+   "name": "bands у линии недопустимы",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "line",
+      "xField": "a",
+      "yField": "v",
+      "bands": [
+       {
+        "lowField": "b",
+        "highField": "c"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.bands"
+   ]
+  },
+  {
+   "name": "band: пять коридоров — много",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "band",
+      "xField": "a",
+      "yField": "v",
+      "bands": [
+       {
+        "lowField": "b",
+        "highField": "c"
+       },
+       {
+        "lowField": "b",
+        "highField": "c"
+       },
+       {
+        "lowField": "b",
+        "highField": "c"
+       },
+       {
+        "lowField": "b",
+        "highField": "c"
+       },
+       {
+        "lowField": "b",
+        "highField": "c"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.bands"
+   ]
   }
  ]
 }

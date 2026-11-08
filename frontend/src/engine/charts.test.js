@@ -52,6 +52,48 @@ describe('sankey: цепочка уровней', () => {
   })
 })
 
+// Несколько коридоров в band (ADR-69): каждая пара границ даёт свой закрашенный диапазон.
+describe('band: несколько коридоров', () => {
+  const rows = [
+    { day: '1', v: 200, lo: 120, hi: 280, sdLo: 170, sdHi: 230 },
+    { day: '2', v: 210, lo: 150, hi: 260, sdLo: 180, sdHi: 240 }
+  ]
+
+  it('два коридора дают два набора полос', () => {
+    const model = buildBandModel(rows, {
+      xField: 'day',
+      yField: 'v',
+      bands: [
+        { lowField: 'lo', highField: 'hi' },
+        { lowField: 'sdLo', highField: 'sdHi' }
+      ]
+    })
+    expect(model.categories).toEqual(['1', '2'])
+    expect(model.values).toEqual([200, 210])
+    expect(model.corridors).toHaveLength(2)
+    expect(model.corridors[0].band).toEqual([160, 110])
+    expect(model.corridors[1].band).toEqual([60, 60])
+    // первый коридор продублирован в плоских полях — прежние шаблоны читают их
+    expect(model.lows).toEqual([120, 150])
+    expect(model.band).toEqual([160, 110])
+  })
+
+  it('пара lowField/highField работает как раньше', () => {
+    const model = buildBandModel(rows, { xField: 'day', yField: 'v', lowField: 'lo', highField: 'hi' })
+    expect(model.corridors).toHaveLength(1)
+    expect(model.band).toEqual([160, 110])
+  })
+
+  it('перепутанные границы вырождают полосу в ноль, отсутствующие — оставляют точку', () => {
+    const model = buildBandModel(
+      [{ day: '1', v: 10, lo: 30, hi: 20 }, { day: '2', v: 5 }],
+      { xField: 'day', yField: 'v', bands: [{ lowField: 'lo', highField: 'hi' }, { lowField: 'lo', highField: 'hi' }] }
+    )
+    expect(model.corridors[0].band[0]).toBe(0)
+    expect(model.corridors[0].band[1]).toBe(null)
+  })
+})
+
 describe('gauge: одно число из выборки', () => {
   it('sum по умолчанию', () => {
     expect(buildGaugeModel(rows, { yField: 'amount' }).value).toBe(185)

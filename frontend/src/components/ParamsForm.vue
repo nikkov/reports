@@ -28,7 +28,9 @@
         :required="p.required"
         @change="onSelect(p, $event)"
       >
-        <option v-if="!p.multiple" value="" disabled>—</option>
+        <!-- пустой вариант выбираем, если параметр необязательный: иначе браузер
+             показывает первый пункт списка, хотя в запрос уходит пустая строка -->
+        <option v-if="!p.multiple" value="" :disabled="p.required">—</option>
         <option
           v-for="o in optionsFor(p)"
           :key="o.value"

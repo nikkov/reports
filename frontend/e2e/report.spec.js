@@ -509,6 +509,20 @@ test('демо параметров: мультивыбор-дропдаун с 
   await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThanOrEqual(rowsFiltered)
 })
 
+// Каталог отдаёт по 10 карточек (ADR-41): догружаем, пока не наберём total.
+// Один клик «Показать ещё» больше не гарантирует всё — отчётов стало больше двух страниц.
+async function loadAllCards(page, total) {
+  for (let guard = 0; guard < 10 && (await page.locator('.card').count()) < total; guard += 1) {
+    const more = page.getByRole('button', { name: /Показать ещё/ })
+    if ((await more.count()) === 0) break
+    const before = await page.locator('.card').count()
+    await more.click()
+    await expect
+      .poll(async () => page.locator('.card').count(), { message: 'карточки догружаются' })
+      .toBeGreaterThan(before)
+  }
+}
+
 test('список отчётов: карточки, поиск, переход в отчёт', async ({ page, request }) => {
   const list = await (await request.get('/api/reports')).json()
   const total = list.length
@@ -518,10 +532,8 @@ test('список отчётов: карточки, поиск, переход 
   // каталог отдаёт страницы по 10 (ADR-41)
   await expect(page.locator('.card')).toHaveCount(Math.min(10, total))
   await expect(page.locator('.count')).toHaveText(`${Math.min(10, total)} из ${total}`)
-  if (total > 10) {
-    await page.getByRole('button', { name: /Показать ещё/ }).click()
-    await expect(page.locator('.card')).toHaveCount(total)
-  }
+  if (total > 10) await loadAllCards(page, total)
+  await expect(page.locator('.card')).toHaveCount(total)
 
   // состав параметров виден на карточке
   const badges = await page.locator('[data-report=params-demo] .badge').allInnerTexts()
@@ -537,10 +549,8 @@ test('список отчётов: карточки, поиск, переход 
   await expect(page.locator('.muted')).toContainText('не найдено')
   await page.locator('.tools input').fill('')
   await expect(page.locator('.card')).toHaveCount(Math.min(10, total))
-  if (total > 10) {
-    await page.getByRole('button', { name: /Показать ещё/ }).click()
-    await expect(page.locator('.card')).toHaveCount(total)
-  }
+  if (total > 10) await loadAllCards(page, total)
+  await expect(page.locator('.card')).toHaveCount(total)
 
   // переход в отчёт
   await page.locator('[data-report=sales-summary] .open').click()
@@ -887,10 +897,8 @@ test('каталог: папки, теги и избранное', async ({ page
   await page.goto('/')
   // каталог отдаёт страницы по 10: сначала первая, остальное — по кнопке
   await expect(page.locator('.card')).toHaveCount(Math.min(10, total))
-  if (total > 10) {
-    await page.getByRole('button', { name: /Показать ещё/ }).click()
-    await expect(page.locator('.card')).toHaveCount(total)
-  }
+  if (total > 10) await loadAllCards(page, total)
+  await expect(page.locator('.card')).toHaveCount(total)
   await expect(page.locator('.folder', { hasText: 'Финансы' })).toBeVisible()
 
   // папка
@@ -1239,14 +1247,14 @@ test('band: значение и закрашенный коридор между
       stack: fill?.stack,
       firstCategory: option?.xAxis?.[0]?.data?.[0],
       firstBand: fill?.data?.[0],
-      firstLow: series.find((s) => s.name === '__band_low')?.data?.[0]
+      firstLow: series.find((s) => s.name === '__band_low_0')?.data?.[0]
     }
   })
 
   expect(band.count).toBe(3)                       // нижняя граница, заливка, значение
   expect(band.points).toBe(31)                     // 31 день марта
   expect(band.bandPoints).toBe(31)
-  expect(band.stack).toBe('band')                  // заливка строится стеком
+  expect(band.stack).toBe('band-0')                // заливка строится стеком (номер коридора)
   expect(band.color).toBe('#2e7d32')
   expect(band.opacity).toBeCloseTo(0.22, 2)
   expect(band.firstCategory).toBe('2026-03-01')
@@ -1318,6 +1326,61 @@ test('диаграммы gauge и sankey: спидометр и потоки р�
   expect(gauge.value).toBeCloseTo(20.54, 2)
   expect([gauge.min, gauge.max]).toEqual([0, 100])
   await expect(page.locator('.chart-box').first()).toContainText('Маржа за период')
+})
+
+// ADR-69: несколько коридоров в band — каждая пара границ закрашивается своим цветом.
+test('band: два коридора на одном графике, подписи и подсказка', async ({ page }) => {
+  await page.goto('/report.html?report=ops-corridors&from=2026-03-01&to=2026-03-31')
+  await expect(page.locator('.chart canvas').first()).toBeVisible()
+  await expect(page.locator('.meta')).toContainText('строк: 31') // данные пришли до чтения модели
+
+  const model = await page.evaluate(() => {
+    const chart = (window.__charts || [])[0]
+    const series = chart.instance.getOption().series
+    return {
+      series: series.map((s) => ({ name: s.name, stack: s.stack || null })),
+      fills: series.filter((s) => s.areaStyle?.color).map((s) => s.areaStyle.color),
+      widths: series.map((s) => (s.name.startsWith('__band_fill') ? s.data[0] : null))
+    }
+  })
+
+  // два коридора = четыре служебных ряда (основание + заливка) и линия значения
+  expect(model.series.map((s) => s.name)).toEqual([
+    '__band_low_0', '__band_fill_0', '__band_low_1', '__band_fill_1', 'Значение'
+  ])
+  // стеки разные, иначе второй коридор начнётся от верха первого
+  expect(model.series.map((s) => s.stack)).toEqual(['band-0', 'band-0', 'band-1', 'band-1', null])
+  // цвета разные: иначе два диапазона не различить
+  expect(new Set(model.fills).size).toBe(2)
+  // первый день: разброс 277−127=150, среднее ± σ 253.2−150.8=102.4
+  expect(model.widths[1]).toBe(150)
+  expect(model.widths[3]).toBe(102.4)
+
+  const legend = page.locator('.chart-band-legend .band-key')
+  await expect(legend).toHaveCount(2)
+  await expect(legend.first()).toContainText('min…max по строкам дня')
+  await expect(legend.nth(1)).toContainText('среднее ± σ')
+})
+
+// Необязательный параметр-справочник: пустой выбор должен показываться как «—», а не первым пунктом списка
+test('параметр-справочник без значения показывает «—» и не фильтрует данные', async ({ page }) => {
+  await page.goto('/report.html?report=ops-corridors&from=2026-03-01&to=2026-03-31&service=')
+  await expect(page.locator('.meta')).toContainText('строк: 31')
+  const select = page.locator('select').first()
+  await expect(select).toHaveValue('')
+  await expect(select.locator('option:checked')).toHaveText('—')
+
+  await select.selectOption('api')
+  await expect(page.locator('.meta')).toContainText('строк: 5')
+  await expect(select).toHaveValue('api')
+})
+
+test('band: одна полоса остаётся без подписи коридоров', async ({ page }) => {
+  await page.goto('/report.html?report=ops-band&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.chart canvas').first()).toBeVisible()
+  await expect(page.locator('.chart-band-legend')).toHaveCount(0)
+  const stacks = await page.evaluate(() => (window.__charts || [])[0].instance.getOption().series.map((s) => s.name))
+  expect(stacks).toEqual(['__band_low_0', '__band_fill_0', 'Значение'])
 })
 
 // ADR-68: многоуровневый sankey — связи между соседними уровнями цепочки.

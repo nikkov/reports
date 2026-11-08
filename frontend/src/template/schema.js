@@ -464,6 +464,23 @@ export default {
           "maximum": 900,
           "description": "высота области диаграммы в px (по умолчанию 320); для многоуровневого sankey нужно больше"
         },
+        "bands": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["lowField", "highField"],
+            "properties": {
+              "lowField": { "type": "string", "minLength": 1 },
+              "highField": { "type": "string", "minLength": 1 },
+              "color": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 }
+            }
+          },
+          "description": "band: несколько коридоров {lowField, highField, color?, name?}"
+        },
         "levels": {
           "type": "array",
           "minItems": 2,

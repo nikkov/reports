@@ -2,12 +2,18 @@
   <div class="chart-box">
     <h2 v-if="block.title">{{ block.title }}</h2>
     <div ref="el" class="chart" :class="{ drillable: !!drill }" :style="{ height: height + 'px' }"></div>
+    <!-- несколько коридоров: цвет на графике нужно расшифровать (ADR-69) -->
+    <div v-if="bandLegend.length" class="chart-band-legend">
+      <span v-for="item in bandLegend" :key="item.name" class="band-key">
+        <i class="band-swatch" :style="{ background: item.color }"></i>{{ item.name }}
+      </span>
+    </div>
   </div>
 </template>
 
 <script setup>
 // Блок диаграммы (Ф3): данные берутся из того же движка агрегации, что и таблица.
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import RU from 'echarts/i18n/langRU'
 import { aggregateSeries } from '../engine/group.js'
@@ -31,6 +37,28 @@ const textStyle = () => {
   if (!font || !colors) return undefined
   return { color: colors.text, fontFamily: font.family, fontSize: font.size }
 }
+
+// Коридоры полосы (ADR-69): либо bands[], либо прежняя пара lowField/highField.
+// Цвет и подпись разрешаются здесь один раз — их читают и график, и подпись под ним.
+const BAND_DEFAULT_COLORS = ['#2e7d32', '#1565c0', '#ef6c00', '#6a1b9a']
+const bandSpecs = computed(() => {
+  if (props.block?.chartType !== 'band') return []
+  const list = Array.isArray(props.block.bands) && props.block.bands.length
+    ? props.block.bands
+    : [{ lowField: props.block.lowField, highField: props.block.highField, color: props.block.bandColor }]
+  const palette = props.styles?.palette || {}
+  return list.map((spec, i) => {
+    const raw = spec?.color || props.block.bandColor || BAND_DEFAULT_COLORS[i % BAND_DEFAULT_COLORS.length]
+    return {
+      lowField: spec?.lowField,
+      highField: spec?.highField,
+      color: palette[raw] || raw,
+      name: spec?.name || `коридор ${i + 1}`
+    }
+  })
+})
+// Подпись под графиком нужна, только когда коридоров больше одного: один цвет ясен и без неё
+const bandLegend = computed(() => (bandSpecs.value.length > 1 ? bandSpecs.value : []))
 
 const emit = defineEmits(['drill'])
 const el = ref(null)
@@ -93,16 +121,15 @@ function buildOption() {
     }
   }
 
-  // band: значение плюс верхняя и нижняя границы, диапазон закрашен (ADR-58)
+  // band: значение плюс верхняя и нижняя границы, диапазон закрашен (ADR-58).
+  // Коридоров может быть несколько (ADR-69): bands: [{lowField, highField, color?, name?}].
   if (type === 'band') {
     const model = buildBandModel(props.rows, {
       xField: props.block.xField,
       yField: props.block.yField,
-      lowField: props.block.lowField,
-      highField: props.block.highField
+      bands: bandSpecs.value
     })
-    const raw = props.block.bandColor || '#2e7d32'
-    const bandColor = props.styles?.palette?.[raw] || raw
+    const corridors = bandSpecs.value.map((spec, i) => ({ ...model.corridors[i], ...spec }))
     return {
       animation: false,
       textStyle: textStyle(),
@@ -113,12 +140,11 @@ function buildOption() {
         formatter: (items) => {
           const i = items?.[0]?.dataIndex ?? 0
           const fmt1 = (v) => (v === null || v === undefined ? '—' : fmt(v))
-          return [
-            `<b>${model.categories[i]}</b>`,
-            `значение: ${fmt1(model.values[i])}`,
-            `нижняя: ${fmt1(model.lows[i])}`,
-            `верхняя: ${fmt1(model.highs[i])}`
-          ].join('<br/>')
+          const lines = [`<b>${model.categories[i]}</b>`, `значение: ${fmt1(model.values[i])}`]
+          for (const c of corridors) {
+            lines.push(`${c.name}: ${fmt1(c.lows[i])} … ${fmt1(c.highs[i])}`)
+          }
+          return lines.join('<br/>')
         }
       },
       xAxis: {
@@ -133,32 +159,34 @@ function buildOption() {
       },
       yAxis: { type: 'value', axisLabel: { formatter: fmt, color: textStyle()?.color } },
       series: [
-        // невидимая нижняя граница — основание полосы
-        {
-          name: '__band_low',
-          type: 'line',
-          stack: 'band',
-          data: model.lows,
-          symbol: 'none',
-          lineStyle: { opacity: 0 },
-          areaStyle: { opacity: 0 },
-          silent: true,
-          tooltip: { show: false },
-          legendHoverLink: false
-        },
-        // разница «верх − низ», закрашенная цветом полосы
-        {
-          name: '__band_fill',
-          type: 'line',
-          stack: 'band',
-          data: model.band,
-          symbol: 'none',
-          lineStyle: { opacity: 0 },
-          areaStyle: { color: bandColor, opacity: 0.22 },
-          silent: true,
-          tooltip: { show: false },
-          legendHoverLink: false
-        },
+        // на каждый коридор — невидимое основание и закрашенная разница; стек свой,
+        // иначе второй коридор начнётся от верха первого
+        ...corridors.flatMap((c, i) => [
+          {
+            name: `__band_low_${i}`,
+            type: 'line',
+            stack: `band-${i}`,
+            data: c.lows,
+            symbol: 'none',
+            lineStyle: { opacity: 0 },
+            areaStyle: { opacity: 0 },
+            silent: true,
+            tooltip: { show: false },
+            legendHoverLink: false
+          },
+          {
+            name: `__band_fill_${i}`,
+            type: 'line',
+            stack: `band-${i}`,
+            data: c.band,
+            symbol: 'none',
+            lineStyle: { opacity: 0 },
+            areaStyle: { color: c.color, opacity: 0.22 },
+            silent: true,
+            tooltip: { show: false },
+            legendHoverLink: false
+          }
+        ]),
         {
           name: 'Значение',
           type: 'line',
@@ -334,5 +362,26 @@ onBeforeUnmount(() => {
 }
 .chart.drillable {
   cursor: pointer;
+}
+.chart-band-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 6px 0 0 8px;
+  font-size: 12px;
+  color: var(--rep-muted, #6b7684);
+}
+
+.band-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.band-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  opacity: 0.55;
 }
 </style>

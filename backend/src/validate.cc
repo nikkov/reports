@@ -315,21 +315,53 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
         if (!block["levels"].isNull()) {
             addError(r, base + ".levels", "levels допустимы только для sankey");
         }
+        if (!block["bands"].isNull()) {
+            addError(r, base + ".bands", "bands допустимы только для band");
+        }
     } else if (type == "band") {
-        // значение и две границы полосы (ADR-58)
+        // значение и одна или несколько пар границ (ADR-58, ADR-69)
         need("xField");
         need("yField");
-        need("lowField");
-        need("highField");
         forbid("seriesField", "в полосе одна серия значений");
-        const std::string lo = asString(block["lowField"]);
-        const std::string hi = asString(block["highField"]);
         const std::string y = asString(block["yField"]);
-        if (!lo.empty() && lo == hi) {
-            addError(r, base + ".highField", "lower и upper — разные поля");
-        }
-        if (!y.empty() && (y == lo || y == hi)) {
-            addError(r, base + ".yField", "значение должно быть отдельным полем, не границей");
+        if (!block["bands"].isNull()) {
+            const Json::Value &bands = block["bands"];
+            if (!bands.isArray() || bands.size() < 1 || bands.size() > 4) {
+                addError(r, base + ".bands", "bands: от 1 до 4 коридоров");
+            } else {
+                for (Json::ArrayIndex i = 0; i < bands.size(); ++i) {
+                    const Json::Value &corridor = bands[i];
+                    const std::string path = base + ".bands." + std::to_string(i);
+                    if (!corridor.isObject()) {
+                        addError(r, path, "коридор — объект { lowField, highField }");
+                        continue;
+                    }
+                    const std::string lo = asString(corridor["lowField"]);
+                    const std::string hi = asString(corridor["highField"]);
+                    if (lo.empty()) addError(r, path + ".lowField", "нужен lowField");
+                    if (hi.empty()) addError(r, path + ".highField", "нужен highField");
+                    if (!lo.empty() && lo == hi) {
+                        addError(r, path + ".highField", "границы коридора — разные поля");
+                    }
+                    if (!y.empty() && (y == lo || y == hi)) {
+                        addError(r, path + ".lowField", "значение должно быть отдельным полем, не границей");
+                    }
+                }
+                if (!block["lowField"].isNull() || !block["highField"].isNull()) {
+                    addError(r, base + ".lowField", "вместе с bands поля lowField/highField не задаются");
+                }
+            }
+        } else {
+            need("lowField");
+            need("highField");
+            const std::string lo = asString(block["lowField"]);
+            const std::string hi = asString(block["highField"]);
+            if (!lo.empty() && lo == hi) {
+                addError(r, base + ".highField", "lower и upper — разные поля");
+            }
+            if (!y.empty() && (y == lo || y == hi)) {
+                addError(r, base + ".yField", "значение должно быть отдельным полем, не границей");
+            }
         }
         if (!block["levels"].isNull()) {
             addError(r, base + ".levels", "levels допустимы только для sankey");
@@ -395,6 +427,9 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
         }
         if (!block["levels"].isNull()) {
             addError(r, base + ".levels", "levels допустимы только для sankey");
+        }
+        if (!block["bands"].isNull()) {
+            addError(r, base + ".bands", "bands допустимы только для band");
         }
     }
 }

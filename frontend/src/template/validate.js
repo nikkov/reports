@@ -560,19 +560,48 @@ function checkGaugeZones(block, base, errors) {
           })
         }
       } else if (type === 'band') {
-        // полоса: значение и две границы, между которыми закрашивается диапазон (ADR-58)
+        // полоса: значение и одна или несколько пар границ (ADR-58, ADR-69)
         need('xField')
         need('yField')
-        need('lowField')
-        need('highField')
         forbid('seriesField', 'в полосе одна серия значений')
-        const names = [block.lowField, block.highField].filter(Boolean)
-        if (names.length === 2 && block.lowField === block.highField) {
-          errors.push({ path: `${base}.highField`, message: 'lower и upper — разные поля' })
-        }
-        if (block.lowField && block.highField && block.yField &&
-            [block.lowField, block.highField].includes(block.yField)) {
-          errors.push({ path: `${base}.yField`, message: 'значение должно быть отдельным полем, не границей' })
+        if (block.bands !== undefined) {
+          if (!Array.isArray(block.bands) || block.bands.length < 1 || block.bands.length > 4) {
+            errors.push({ path: `${base}.bands`, message: 'bands: от 1 до 4 коридоров' })
+          } else {
+            block.bands.forEach((corridor, i) => {
+              const path = `${base}.bands.${i}`
+              if (!corridor || typeof corridor !== 'object' || Array.isArray(corridor)) {
+                errors.push({ path, message: 'коридор — объект { lowField, highField }' })
+                return
+              }
+              if (!corridor.lowField) errors.push({ path: `${path}.lowField`, message: 'нужен lowField' })
+              if (!corridor.highField) errors.push({ path: `${path}.highField`, message: 'нужен highField' })
+              if (corridor.lowField && corridor.highField && corridor.lowField === corridor.highField) {
+                errors.push({ path: `${path}.highField`, message: 'границы коридора — разные поля' })
+              }
+              const bounds = [corridor.lowField, corridor.highField].filter(Boolean)
+              if (block.yField && bounds.includes(block.yField)) {
+                errors.push({ path: `${path}.lowField`, message: 'значение должно быть отдельным полем, не границей' })
+              }
+            })
+            if (block.lowField !== undefined || block.highField !== undefined) {
+              errors.push({
+                path: `${base}.lowField`,
+                message: 'вместе с bands поля lowField/highField не задаются'
+              })
+            }
+          }
+        } else {
+          need('lowField')
+          need('highField')
+          const names = [block.lowField, block.highField].filter(Boolean)
+          if (names.length === 2 && block.lowField === block.highField) {
+            errors.push({ path: `${base}.highField`, message: 'lower и upper — разные поля' })
+          }
+          if (block.lowField && block.highField && block.yField &&
+              [block.lowField, block.highField].includes(block.yField)) {
+            errors.push({ path: `${base}.yField`, message: 'значение должно быть отдельным полем, не границей' })
+          }
         }
         if (block.sourceField !== undefined || block.targetField !== undefined || block.valueField !== undefined) {
           errors.push({ path: `${base}.chartType`, message: 'sourceField/targetField/valueField допустимы только для sankey' })
@@ -606,6 +635,9 @@ function checkGaugeZones(block, base, errors) {
         }
         forbid('xField', 'узлы задаются sourceField/targetField или levels')
         forbid('yField', 'вес потока задаётся valueField')
+        if (block.bands !== undefined) {
+          errors.push({ path: `${base}.bands`, message: 'bands допустимы только для band' })
+        }
         const names = (Array.isArray(block.levels)
           ? [...block.levels, block.valueField]
           : [block.sourceField, block.targetField, block.valueField]).filter(Boolean)
@@ -634,6 +666,9 @@ function checkGaugeZones(block, base, errors) {
         }
         if (block.levels !== undefined) {
           errors.push({ path: `${base}.levels`, message: 'levels допустимы только для sankey' })
+        }
+        if (block.bands !== undefined) {
+          errors.push({ path: `${base}.bands`, message: 'bands допустимы только для band' })
         }
         if (type === 'pie' && block.seriesField) {
           warnings.push({ path: `${base}.seriesField`, message: 'круговая диаграмма показывает одну серию' })

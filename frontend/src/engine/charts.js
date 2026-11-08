@@ -86,13 +86,17 @@ export function buildGaugeModel(
   return model
 }
 
-// Полоса (band, ADR-58): у каждой точки три числа — значение и две границы.
-// Возвращает ряды для ECharts: значение отдельно, границы — для закрашенного диапазона.
-export function buildBandModel(rows, { xField, yField, lowField, highField } = {}) {
+// Полоса (band, ADR-58, ADR-69): у точки значение и одна или несколько пар границ.
+// Возвращает категории и значение плюс по каждому коридору ряды {lows, highs, band}:
+// band — разница «верх − низ», ею и закрашивается диапазон.
+export function buildBandModel(rows, { xField, yField, lowField, highField, bands } = {}) {
+  const pairs = Array.isArray(bands) && bands.length
+    ? bands.map((b) => ({ lowField: b?.lowField, highField: b?.highField }))
+    : [{ lowField, highField }]
+
   const categories = []
   const values = []
-  const lows = []
-  const highs = []
+  const corpus = pairs.map(() => ({ lows: [], highs: [] }))
   const seen = new Set()
 
   for (const row of rows || []) {
@@ -102,18 +106,27 @@ export function buildBandModel(rows, { xField, yField, lowField, highField } = {
     if (seen.has(key)) continue // категория один раз: иначе линия пойдёт назад
     seen.add(key)
 
-    const value = num(row?.[yField])
-    const low = num(row?.[lowField])
-    const high = num(row?.[highField])
-    // границы могут отсутствовать: тогда точка есть, а полосы под ней нет
     categories.push(key)
-    values.push(value)
-    lows.push(low)
-    highs.push(high !== null && low !== null && high < low ? low : high) // перепутанные границы не ломают полосу
+    values.push(num(row?.[yField]))
+    pairs.forEach((pair, i) => {
+      const low = num(row?.[pair.lowField])
+      const high = num(row?.[pair.highField])
+      // границы могут отсутствовать: тогда точка есть, а полосы под ней нет.
+      // Перепутанные границы вырождают полосу в ноль, а не ломают график.
+      corpus[i].lows.push(low)
+      corpus[i].highs.push(high !== null && low !== null && high < low ? low : high)
+    })
   }
 
-  const band = highs.map((h, i) => (h === null || lows[i] === null ? null : Number((h - lows[i]).toFixed(6))))
-  return { categories, values, lows, highs, band }
+  const built = corpus.map(({ lows, highs }) => ({
+    lows,
+    highs,
+    band: highs.map((h, i) => (h === null || lows[i] === null ? null : Number((h - lows[i]).toFixed(6))))
+  }))
+
+  // Первый коридор дублируется в плоских полях — прежние шаблоны и тесты читают их
+  const first = built[0] || { lows: [], highs: [], band: [] }
+  return { categories, values, corridors: built, lows: first.lows, highs: first.highs, band: first.band }
 }
 
 // Потоки для sankey (ADR-56, ADR-68): пара «источник → приёмник» либо цепочка уровней

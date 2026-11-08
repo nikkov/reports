@@ -1,0 +1,116 @@
+{
+  "version": 2,
+  "id": "ops-corridors",
+  "title": "Время ответа: значение и два коридора",
+  "description": "Один график с двумя закрашенными диапазонами: полный разброс по сервисам и среднее ± стандартное отклонение.",
+  "folder": "Примеры",
+  "tags": [
+    "band",
+    "коридор",
+    "пример"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "service",
+      "type": "select",
+      "label": "Сервис",
+      "required": false,
+      "default": "",
+      "source": {
+        "kind": "lookup",
+        "sql": "SELECT DISTINCT service AS value, service AS label FROM ops ORDER BY service"
+      }
+    }
+  ],
+  "datasets": {
+    "days": {
+      "sql": "SELECT o.day, round(avg(o.avg_ms)::numeric, 1) AS value_ms, min(o.avg_ms) AS min_ms, max(o.avg_ms) AS max_ms, round((avg(o.avg_ms) - coalesce(stddev_pop(o.avg_ms), 0))::numeric, 1) AS sd_low_ms, round((avg(o.avg_ms) + coalesce(stddev_pop(o.avg_ms), 0))::numeric, 1) AS sd_high_ms, sum(o.requests) AS requests FROM ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) GROUP BY o.day ORDER BY o.day",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "service": "$service"
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Время ответа по дням. На каждый день в данных приходится шесть строк — две команды по три записи, поэтому коридоров два. Широкий — от минимума до максимума этих строк, узкий — среднее плюс-минус одно стандартное отклонение. Если значение выходит за узкий коридор, день нетипичен для своего уровня нагрузки."
+    },
+    {
+      "type": "chart",
+      "dataKey": "days",
+      "chartType": "band",
+      "xField": "day",
+      "yField": "value_ms",
+      "height": 460,
+      "bands": [
+        {
+          "lowField": "min_ms",
+          "highField": "max_ms",
+          "color": "#2e7d32",
+          "name": "min…max по строкам дня"
+        },
+        {
+          "lowField": "sd_low_ms",
+          "highField": "sd_high_ms",
+          "color": "#1565c0",
+          "name": "среднее ± σ"
+        }
+      ],
+      "title": "Время ответа, мс: значение и два коридора"
+    },
+    {
+      "type": "table",
+      "dataKey": "days",
+      "title": "Числа под графиком",
+      "grandTotal": false,
+      "columns": [
+        {
+          "field": "day",
+          "title": "День"
+        },
+        {
+          "field": "value_ms",
+          "title": "Среднее"
+        },
+        {
+          "field": "min_ms",
+          "title": "Низ разброса"
+        },
+        {
+          "field": "max_ms",
+          "title": "Верх разброса"
+        },
+        {
+          "field": "sd_low_ms",
+          "title": "Низ ± σ"
+        },
+        {
+          "field": "sd_high_ms",
+          "title": "Верх ± σ"
+        }
+      ]
+    }
+  ]
+}
