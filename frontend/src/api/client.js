@@ -87,7 +87,8 @@ export const api = {
         field: spec.field,
         value: spec.value === undefined ? null : spec.value,
         ...(spec.dataset ? { dataset: spec.dataset } : {}),
-        ...(spec.limit ? { limit: spec.limit } : {})
+        ...(spec.limit ? { limit: spec.limit } : {}),
+        ...(spec.offset ? { offset: spec.offset } : {})
       }),
       signal
     }),

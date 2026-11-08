@@ -4,6 +4,17 @@
     <button type="button" @click="expandAll">Развернуть всё</button>
     <span class="tv-info">{{ collapsed.size }} свёрнуто</span>
     <span v-if="loadedNote" class="tv-info">{{ loadedNote }}</span>
+    <!-- детали приходят страницами: остаток добираем той же кнопкой (ADR-70) -->
+    <button
+      v-for="item in pendingMore"
+      :key="item.id"
+      type="button"
+      class="tv-more"
+      :disabled="loading.has(item.id)"
+      @click="loadDetails(item.id, true)"
+    >
+      {{ loading.has(item.id) ? 'загрузка…' : `ещё ${item.left} · ${item.name}` }}
+    </button>
   </div>
   <p v-if="brokenExpr.size" class="tv-broken">
     Ошибка в вычисляемых колонках:
@@ -72,6 +83,9 @@ import { columnFormat, formatCell } from './format.js'
 import { ruleStyleFor } from './rules.js'
 const collapsed = ref(new Set())
 // Детали групп, подгруженные по требованию: путь группы → { rows, total }
+// Размер страницы деталей группы: 200 строк за запрос (потолок сервера — 5000).
+// Меньше 500: браузер рендерит страницу быстро, а остаток добирается кнопкой.
+const PAGE_SIZE = 200
 const details = ref(new Map())
 const loading = ref(new Set())
 
@@ -97,6 +111,24 @@ const rawGroupKeys = computed(() => {
     map.set(path.join(GROUP_SEP), { path, row, cols: groupCols })
   }
   return map
+})
+
+// Группы, у которых загружены не все строки: для каждой — своя кнопка с остатком.
+const pendingMore = computed(() => {
+  const out = []
+  for (const [id, item] of details.value) {
+    const shown = item.rows?.length || 0
+    const total = Number(item.total) || 0
+    if (total <= shown) continue
+    const entry = rawGroupKeys.value.get(id)
+    const col = entry?.cols?.[entry.path.length - 1]
+    // в строках группы значение её колонки пустое (ADR-63), поэтому берём ключ
+    // из модели, а не текст ячейки
+    const raw = col && entry?.row ? entry.row[col.field] : null
+    const name = raw === null || raw === undefined || raw === '' ? '(пусто)' : String(raw)
+    out.push({ id, left: total - shown, name })
+  }
+  return out
 })
 
 const loadedNote = computed(() => {
@@ -273,7 +305,19 @@ const allGroupIds = computed(() => {
 // группы «раскрытыми» (▾) при пустой таблице — обещание без данных: пользователь видит
 // шеврон «раскрыто», а вложенных строк нет. Поэтому такие группы стартуют свёрнутыми:
 // ▸ означает «раскрыть и подгрузить», что и происходит по клику.
+// Отпечаток набора строк: длиной и крайними строками ловим смену данных,
+// но не сбрасываем раскрытие, когда пришёл тот же набор (повторная загрузка).
+let rowsSig = null
+function signatureOf(rows) {
+  const list = rows || []
+  const edge = (row) => (row ? JSON.stringify(row) : '')
+  return `${list.length}|${edge(list[0])}|${edge(list.length > 1 ? list[list.length - 1] : null)}`
+}
+
 function resetGroupState() {
+  const sig = signatureOf(props.rows)
+  if (sig === rowsSig) return // те же строки: раскрытые группы и кэш деталей остаются
+  rowsSig = sig
   details.value = new Map()
   loading.value = new Set()
   collapsed.value = serverAggregated.value ? new Set(allGroupIds.value) : new Set()
@@ -295,20 +339,31 @@ async function expandAll() {
   collapsed.value = new Set()
 }
 
-async function loadDetails(id) {
-  if (details.value.has(id) || loading.value.has(id)) return
+// more = true — добрать следующую страницу уже загруженной группы (ADR-70).
+// Кэш живёт в details: свёрнутая и снова раскрытая группа второй раз не запрашивается.
+async function loadDetails(id, more = false) {
+  if (loading.value.has(id)) return
+  const loaded = details.value.get(id)
+  if (loaded && !more) return
   const entry = rawGroupKeys.value.get(id)
   if (!entry || !props.loadGroup) return
   const groupCol = entry.cols[entry.path.length - 1]
   if (!groupCol) return
   loading.value = new Set(loading.value).add(id)
   try {
+    const offset = more ? loaded?.rows?.length || 0 : 0
     const result = await props.loadGroup(id, {
       field: groupCol.field,
-      value: entry.row[groupCol.field] ?? null
+      value: entry.row[groupCol.field] ?? null,
+      offset,
+      limit: PAGE_SIZE
     })
+    const rows = result?.rows || []
     const next = new Map(details.value)
-    next.set(id, { rows: result?.rows || [], total: result?.total ?? result?.rowCount ?? 0 })
+    next.set(id, {
+      rows: more ? [...(loaded?.rows || []), ...rows] : rows,
+      total: result?.total ?? result?.rowCount ?? rows.length
+    })
     details.value = next
   } catch (e) {
     // не молчим: без деталей группа останется свёрнутой, а текст ошибки уйдёт в консоль
@@ -379,5 +434,20 @@ function cellText(row, key) {
 }
 .tv-info {
   font-variant-numeric: tabular-nums;
+}
+
+.tv-more {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid #c8d2de;
+  border-radius: 5px;
+  background: #fff;
+  color: #1f2d3d;
+  cursor: pointer;
+}
+
+.tv-more:disabled {
+  color: #8a96a3;
+  cursor: default;
 }
 </style>

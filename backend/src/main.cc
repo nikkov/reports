@@ -1531,11 +1531,13 @@ int main() {
                 return;
             }
 
-            // Сколько строк группы показывать: по умолчанию 5000 (столько же, сколько
-            // печатается), потолок 5000. Остаток виден по total и подсказке в блоке.
-            int limit = (*body).get("limit", 5000).asInt();
+            // Сколько строк группы отдавать за раз (ADR-70): страница 200, потолок 5000.
+            // Остаток клиент добирает тем же маршрутом с offset, total известен всегда.
+            int limit = (*body).get("limit", 200).asInt();
             if (limit < 1) limit = 1;
             if (limit > 5000) limit = 5000;
+            int offset = (*body).get("offset", 0).asInt();
+            if (offset < 0) offset = 0;
 
             std::vector<std::string> values = query.values;
             std::string sql = "SELECT count(*) OVER () AS __group_total, d.* FROM (" + query.sql + ") AS d WHERE d." +
@@ -1547,12 +1549,21 @@ int main() {
                 values.push_back(value.asString());
                 sql += " = $" + std::to_string(values.size());
             }
-            sql += " LIMIT " + std::to_string(limit);
+            // Страницы не должны пересекаться: если набор данных не задаёт порядок,
+            // сортируем по содержимому строки — иначе LIMIT/OFFSET по разным планам
+            // может вернуть одну строку дважды и потерять другую.
+            std::string lowered = query.sql;
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            if (lowered.find(" order by ") == std::string::npos) {
+                sql += " ORDER BY row_to_json(d)::text";
+            }
+            sql += " LIMIT " + std::to_string(limit) + " OFFSET " + std::to_string(offset);
 
             static const std::map<std::string, std::string> noDeclared;
             runQuery(
                 dataDb, sql, values,
-                [cb](const orm::Result &res) {
+                [cb, limit, offset](const orm::Result &res) {
                     Json::Value columns(Json::arrayValue);
                     const auto ncols = static_cast<size_t>(res.columns());
                     std::vector<std::string> names;
@@ -1588,6 +1599,9 @@ int main() {
                     out["rows"] = rows;
                     out["rowCount"] = static_cast<Json::UInt64>(res.size());
                     out["total"] = static_cast<Json::Int64>(total);
+                    out["offset"] = static_cast<Json::Int64>(offset);
+                    out["limit"] = static_cast<Json::Int64>(limit);
+                    out["hasMore"] = static_cast<Json::Int64>(offset) + static_cast<Json::Int64>(res.size()) < total;
                     cb(jsonResponse(out));
                 },
                 [cb](const std::exception_ptr &e) {

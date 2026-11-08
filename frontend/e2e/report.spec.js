@@ -1328,6 +1328,113 @@ test('диаграммы gauge и sankey: спидометр и потоки р�
   await expect(page.locator('.chart-box').first()).toContainText('Маржа за период')
 })
 
+// ADR-70: детали группы приходят страницами, остаток добирается кнопкой, кэш живёт до смены данных.
+// Свой шаблон без live: подписка на события перезагружает данные (и сбрасывает кэш деталей),
+// а проверяем мы порционную подгрузку, а не реакцию на публикацию.
+test('детали группы: страницы по 200, кнопка «ещё», повторное раскрытие без запроса', async ({ page, request }) => {
+  const id = 'agg-e2e'
+  await request.delete(`/api/reports/${id}`)
+  const created = await request.post('/api/reports', {
+    data: {
+      id,
+      body: {
+        version: 2,
+        id,
+        title: 'Агрегация e2e',
+        params: [
+          { name: 'from', type: 'date', label: 'с', required: true, default: '2026-03-01', source: { kind: 'date' } },
+          { name: 'to', type: 'date', label: 'по', required: true, default: '2026-03-10', source: { kind: 'date' } }
+        ],
+        datasets: {
+          sales: {
+            sql: 'SELECT s.category, s.amount, s.profit FROM sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date',
+            params: { from: '$from', to: '$to' }
+          }
+        },
+        blocks: [
+          {
+            type: 'table',
+            dataKey: 'sales',
+            title: 'Продажи',
+            aggregate: {
+              groupBy: ['category'],
+              measures: [{ field: 'amount', agg: 'sum' }, { field: 'profit', agg: 'sum' }]
+            },
+            grandTotal: true,
+            columns: [
+              // group: true делает из строки разрез с шевроном — без него детали некуда раскрывать
+              { field: 'category', title: 'Категория', group: true, width: 220 },
+              { field: 'amount', title: 'Сумма', format: 'integer', align: 'right', aggregate: 'sum', width: 150 },
+              { field: 'profit', title: 'Прибыль', format: 'integer', align: 'right', aggregate: 'sum', width: 150 }
+            ]
+          }
+        ]
+      }
+    }
+  })
+  expect(created.ok()).toBeTruthy()
+
+  // Страницы не должны ни терять, ни дублировать строки: мультимножество
+  // четырёх страниц обязано совпасть с полной выборкой группы.
+  const pageBody = (offset) => ({
+    reportId: id,
+    params: { from: '2026-03-01', to: '2026-03-10' },
+    field: 'category',
+    value: 'Электроника',
+    dataset: 'sales',
+    limit: 200,
+    offset
+  })
+  const paged = []
+  for (const offset of [0, 200, 400, 600]) {
+    const res = await request.post('/api/report/group', { data: pageBody(offset) })
+    expect(res.ok()).toBeTruthy()
+    paged.push(...(await res.json()).rows)
+  }
+  const all = await (await request.post('/api/report/group', { data: { ...pageBody(0), limit: 5000 } })).json()
+  const key = (row) => JSON.stringify(row)
+  expect(paged).toHaveLength(all.total)
+  expect(paged.map(key).sort()).toEqual(all.rows.map(key).sort())
+
+  const calls = []
+  page.on('request', (req) => {
+    if (req.url().includes('/api/report/group')) calls.push(JSON.parse(req.postData() || '{}'))
+  })
+
+  await page.goto(`/report.html?report=${id}&from=2026-03-01&to=2026-03-10`)
+  await expect(page.locator('.meta')).toContainText('строк: 5')
+
+  // раскрывает шеврон в строке группы (обработчик висит на нём, а не на всей ячейке)
+  await page.locator('.rt-table tr', { hasText: 'Итого Электроника' }).locator('.chev').first().click()
+  await expect(page.locator('.tv-info', { hasText: 'показано 200 из 689' })).toBeVisible()
+  const more = page.locator('.tv-more')
+  await expect(more).toHaveText(/ещё 489/)
+  expect(calls).toHaveLength(1)
+  expect(calls[0].offset ?? 0).toBe(0)
+  expect(calls[0].limit).toBe(200)
+
+  // добираем остаток страницами: каждый следующий запрос идёт со своим offset
+  await more.click()
+  await expect(page.locator('.tv-info', { hasText: 'показано 400 из 689' })).toBeVisible()
+  await expect(page.locator('.tv-more')).toHaveText(/ещё 289/)
+  await page.locator('.tv-more').click()
+  await expect(page.locator('.tv-info', { hasText: 'показано 600 из 689' })).toBeVisible()
+  await page.locator('.tv-more').click()
+  await expect(page.locator('.tv-info', { hasText: 'показано' })).toHaveCount(0)
+  await expect(page.locator('.tv-more')).toHaveCount(0)
+  expect(calls).toHaveLength(4)
+  expect(calls.map((c) => c.offset ?? 0)).toEqual([0, 200, 400, 600])
+
+  // сворачивание и повторное раскрытие берут строки из кэша — новых запросов нет
+  const chev = page.locator('.rt-table tr', { hasText: 'Электроника' }).locator('.chev').first()
+  await chev.click()
+  await chev.click()
+  await expect(page.locator('.tv-info', { hasText: 'показано' })).toHaveCount(0)
+  expect(calls).toHaveLength(4)
+
+  await request.delete(`/api/reports/${id}`)
+})
+
 // ADR-69: несколько коридоров в band — каждая пара границ закрашивается своим цветом.
 test('band: два коридора на одном графике, подписи и подсказка', async ({ page }) => {
   await page.goto('/report.html?report=ops-corridors&from=2026-03-01&to=2026-03-31')
