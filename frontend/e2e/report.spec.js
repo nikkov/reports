@@ -375,13 +375,14 @@ test('раскрытие группы серверной агрегации по
     })
 
   const collapsed = await detailCount()
-  expect(collapsed.window).toBe(5) // 5 групп-агрегатов
+  // Группы серверной агрегации стартуют СВЁРНУТЫМИ: строк в браузере нет, пока их не
+  // подгрузили, и шеврон «▾ раскрыто» при пустой группе — обещание без данных.
+  expect(collapsed.window).toBe(0)
+  expect(collapsed.height).toBeLessThan(400) // 5 строк-итогов, а не 5 агрегатов
+  const chevrons = await page.$$eval('.rt-table tbody tr .chev', (els) => els.map((e) => e.textContent.trim()))
+  expect(chevrons).toEqual(['▸', '▸', '▸', '▸', '▸'])
 
-  // раскрываем первую группу: сначала сворачиваем, затем разворачиваем — так chevron
-  // достоверно уходит за деталями, а не показывает уже имеющуюся единственную строку
-  await page.locator('.rt-table tbody tr .chev').first().click()
-  await expect(page.locator('.rt-table tbody tr.subtotal').first()).toContainText('Итого')
-  await page.waitForTimeout(300) // даём перерисовать строку итога, иначе клик уйдёт в прежнюю
+  // один клик по ▸ и подгружает детали, и раскрывает группу
   await page.locator('.rt-table tbody tr .chev').first().click()
 
   // детали пришли с сервера: высота таблицы выросла в разы, строки перестали быть агрегатами

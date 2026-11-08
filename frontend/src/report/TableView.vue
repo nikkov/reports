@@ -46,7 +46,7 @@
 
 <script setup>
 // Табличный блок отчёта: одна точка, где шаблон превращается в строки витрины.
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import ReportTable from '../components/ReportTable.vue'
 import { buildTableModel, evaluateRowExpression } from '../engine/group.js'
 import { analyzeExpression } from '../engine/expr.js'
@@ -74,12 +74,6 @@ const collapsed = ref(new Set())
 // Детали групп, подгруженные по требованию: путь группы → { rows, total }
 const details = ref(new Map())
 const loading = ref(new Set())
-
-watch(() => props.rows, () => {
-  collapsed.value = new Set()
-  details.value = new Map()
-  loading.value = new Set()
-})
 
 const GROUP_SEP = '\u0001'
 
@@ -275,11 +269,29 @@ const allGroupIds = computed(() => {
   return ids
 })
 
+// Серверная агрегация: строк группы в браузере нет, пока их не подгрузили. Показывать
+// группы «раскрытыми» (▾) при пустой таблице — обещание без данных: пользователь видит
+// шеврон «раскрыто», а вложенных строк нет. Поэтому такие группы стартуют свёрнутыми:
+// ▸ означает «раскрыть и подгрузить», что и происходит по клику.
+function resetGroupState() {
+  details.value = new Map()
+  loading.value = new Set()
+  collapsed.value = serverAggregated.value ? new Set(allGroupIds.value) : new Set()
+}
+
+watch([() => props.rows, serverAggregated], resetGroupState)
+onMounted(resetGroupState)
+
 function collapseAll() {
   collapsed.value = new Set(allGroupIds.value)
 }
 
-function expandAll() {
+async function expandAll() {
+  // «Развернуть всё» в агрегированном отчёте означает «подгрузить все группы»:
+  // по одному запросу на группу, каждый со своим пределом строк.
+  if (serverAggregated.value && props.loadGroup) {
+    await Promise.all([...allGroupIds.value].map((id) => loadDetails(id)))
+  }
   collapsed.value = new Set()
 }
 
