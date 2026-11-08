@@ -225,12 +225,16 @@ REP_CI_DB=my_ci ./scripts/ci-e2e.sh  # другая база — если report
 Сборка под префикс — те же скрипты с двумя переменными:
 
 ```bash
-REP_BASE=/reports/ VITE_API_BASE=/reports ./scripts/build.sh
+./scripts/build-subpath.sh                 # /reports/, отдельный каталог frontend/dist-reports
 ```
+
+Скрипт не трогает обычный `dist`: сборка под префикс кладётся в `frontend/dist-reports`
+(переопределяется `REP_BASE=`, `VITE_API_BASE=`, `OUT=`).
 
 - страницы и ассеты уходят под `/reports/`, все запросы — в `/reports/api`;
 - прокси должен снимать префикс: `/reports/api/… → http://127.0.0.1:8080/api/…`
   (готовый пример — `deploy/nginx-reports.conf`, включая отдельный блок для SSE
   с `proxy_buffering off`);
-- проверить без nginx можно стендом: `node scripts/serve-subpath.mjs --port 5180 --prefix /reports`;
+- проверить без nginx можно стендом: `node scripts/serve-subpath.mjs --port 5180 --prefix /reports`
+  (по умолчанию отдаёт `frontend/dist-reports`, `--root` — другой каталог);
 - обычная сборка (без переменных) остаётся корневой и используется стендом и e2e.

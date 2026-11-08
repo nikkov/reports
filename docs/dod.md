@@ -336,13 +336,14 @@ SQL наборов данных в шаблон.
 
 | Критерий | Подтверждение |
 |---|---|
-| Сборка под префикс | `REP_BASE=/reports/ VITE_API_BASE=/reports ./scripts/build.sh` → ассеты `/reports/assets/…` |
+| Сборка под префикс | `./scripts/build-subpath.sh` → `frontend/dist-reports`, ассеты `/reports/assets/…` |
 | Стенд без nginx | `scripts/serve-subpath.mjs`: статика `/reports/`, API `/reports/api` |
 | Вход под префиксом | `/reports/login.html` → редирект на `/reports/`, cookie работает |
 | Каталог и отчёт | 10 карточек, `строк: 5 · запрос: 20 мс · шаблон v2` |
 | Живые события | индикатор «обновление по событию», запросы `/reports/api/report/events` |
 | Админка и журнал | `/reports/admin.html`, `/reports/audit.html` (44 записи) |
-| Чисто | 0 ответов ≥ 400, 0 ошибок JS |
+| Чисто | 0 ответов ≥ 400 (кроме ожидаемого 401 у `auth/me` до входа), 0 ошибок JS |
+| Замечание приёмки | 05.11: стенд отдавал сборку без префикса (404 `/assets/…`) — исправлено в v1.25.1 отдельным каталогом `dist-reports` |
 | Пример прокси | `deploy/nginx-reports.conf` (снятие префикса, SSE без буферизации) |
 | Обычная сборка не сломана | `ALL CHECKS PASSED`: ctest 56, vitest 131, golden 15/15, e2e 50 |
 

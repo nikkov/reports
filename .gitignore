@@ -33,3 +33,4 @@ backend/build-clean/
 
 # состояния входа для e2e
 frontend/.auth/
+dist-reports

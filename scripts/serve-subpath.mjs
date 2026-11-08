@@ -2,13 +2,16 @@
 // Стенд «как за реверс-прокси»: отдаёт собранный фронтенд под префиксом (/reports)
 // и проксирует <префикс>/api на бэкенд. Нужен для проверки ADR-53 без nginx.
 //
+// Сначала сборка под префикс: ./scripts/build-subpath.sh (в frontend/dist-reports).
+//
 //   node scripts/serve-subpath.mjs --port 5180 --prefix /reports --api http://127.0.0.1:8080
+//   node scripts/serve-subpath.mjs --root frontend/dist-reports
 import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const root = resolve(fileURLToPath(new URL('../frontend/dist', import.meta.url)))
+const defaultRoot = resolve(fileURLToPath(new URL('../frontend/dist-reports', import.meta.url)))
 const args = process.argv.slice(2)
 const arg = (name, fallback) => {
   const i = args.indexOf(`--${name}`)
@@ -17,6 +20,7 @@ const arg = (name, fallback) => {
 const port = Number(arg('port', '5180'))
 const prefix = arg('prefix', '/reports').replace(/\/$/, '')
 const api = arg('api', 'http://127.0.0.1:8080').replace(/\/$/, '')
+const root = resolve(arg('root', defaultRoot))
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -61,6 +65,16 @@ async function proxy(req, res, path) {
   req.on('close', () => upstream.body?.cancel?.().catch?.(() => {}))
   for await (const chunk of upstream.body) res.write(chunk)
   res.end()
+}
+
+// ловушка: обычный dist собран под корень, его ассеты под префиксом дают 404
+try {
+  const index = await readFile(join(root, 'index.html'), 'utf8')
+  if (!index.includes(`${prefix}/assets/`)) {
+    console.warn(`внимание: ${root} собран без префикса ${prefix}/ — запустите ./scripts/build-subpath.sh`)
+  }
+} catch {
+  console.warn(`внимание: в ${root} нет index.html — запустите ./scripts/build-subpath.sh`)
 }
 
 const server = createServer(async (req, res) => {
