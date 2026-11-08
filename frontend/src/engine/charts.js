@@ -143,11 +143,13 @@ export function buildSankeyModel(rows, { sourceField, targetField, valueField, l
   let dropped = 0
 
   const nodeId = (level, value) => (chain ? `${level}\u0001${value}` : String(value))
+  // level и raw нужны drill-переходу (ADR-72): из узла видно, какому уровню он
+  // принадлежит и какое значение стоит за служебным id
   const addNode = (level, value) => {
     const id = nodeId(level, value)
     if (!seen.has(id)) {
       seen.add(id)
-      order.push({ name: id })
+      order.push({ name: id, level, raw: String(value), levels: chain ? { [chain[level]]: String(value) } : {} })
       if (chain) display.set(id, String(value))
     }
     return id
@@ -171,7 +173,19 @@ export function buildSankeyModel(rows, { sourceField, targetField, valueField, l
         const key = `${from}\u0001${to}`
         let cell = flows.get(key)
         if (!cell) {
-          cell = { source: from, target: to, sum: 0, count: 0, min: Infinity, max: -Infinity }
+          // у связи уровней известны только её концы: регион на связи
+          // «категория → товар» не определить, и подставлять его нельзя
+          cell = {
+            source: from,
+            target: to,
+            sourceLevel: i,
+            targetLevel: i + 1,
+            levels: { [chain[i]]: String(path[i]), [chain[i + 1]]: String(path[i + 1]) },
+            sum: 0,
+            count: 0,
+            min: Infinity,
+            max: -Infinity
+          }
           flows.set(key, cell)
         }
         cell.sum += weight
@@ -222,7 +236,12 @@ export function buildSankeyModel(rows, { sourceField, targetField, valueField, l
   for (const cell of flows.values()) {
     const value = pick(cell)
     if (!Number.isFinite(value) || value <= 0) continue // ECharts не рисует нулевые и отрицательные потоки
-    links.push({ source: cell.source, target: cell.target, value })
+    links.push({
+      source: cell.source,
+      target: cell.target,
+      value,
+      ...(cell.levels ? { levels: cell.levels, sourceLevel: cell.sourceLevel, targetLevel: cell.targetLevel } : {})
+    })
   }
 
   // подпись узла: у цепочки это исходное значение, у пары — сам узел

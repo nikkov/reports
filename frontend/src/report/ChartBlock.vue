@@ -18,6 +18,7 @@ import * as echarts from 'echarts'
 import RU from 'echarts/i18n/langRU'
 import { aggregateSeries } from '../engine/group.js'
 import { buildBandModel, buildGaugeModel, buildSankeyModel } from '../engine/charts.js'
+import { drillAllowed } from '../engine/drill.js'
 
 echarts.registerLocale('RU', RU)
 
@@ -298,11 +299,21 @@ function buildOption() {
 // у круговой — только подпись сектора.
 function onPointClick(event) {
   if (!props.drill?.report) return
-  // sankey: в событии приходит сам поток {source, target, value}. У цепочки уровней (ADR-68)
-  // id узла содержит префикс уровня — в параметры уходит исходное значение без него.
-  if (props.block.chartType === 'sankey' && event.data && event.data.source) {
+  // sankey: в событии приходит поток {source, target, value} или узел. У цепочки уровней
+  // (ADR-68) id узла содержит префикс уровня — в параметры уходит исходное значение,
+  // а рядом — карта значений уровней для подстановок level.<поле> (ADR-72).
+  if (props.block.chartType === 'sankey' && event.data) {
+    const data = event.data
     const clean = (id) => (typeof id === 'string' ? id.replace(/^\d+\u0001/, '') : id ?? null)
-    emit('drill', { spec: props.drill, x: clean(event.data.source), series: clean(event.data.target) })
+    const levels = data.levels || {}
+    // переход возможен, только если в кликнутом элементе есть все нужные уровни:
+    // иначе фильтр получился бы шире, чем клик
+    if (!drillAllowed(props.drill, levels)) return
+    if (data.source) {
+      emit('drill', { spec: props.drill, x: clean(data.source), series: clean(data.target), levels })
+      return
+    }
+    emit('drill', { spec: props.drill, x: clean(data.name), series: null, levels, node: clean(data.name) })
     return
   }
   // gauge: одна точка без категории — в параметры ничего не подставляется

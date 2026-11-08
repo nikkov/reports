@@ -346,10 +346,30 @@ function checkGaugeZones(block, base, errors) {
     }
     // у gauge нет ни категории, ни серии: подставлять нечего (ADR-56)
     const gauge = isChart && block.chartType === 'gauge'
+    // цепочка уровней sankey отдаёт значения уровней в переход (ADR-72)
+    const chain = isChart && block.chartType === 'sankey' && Array.isArray(block.levels)
     const allowed = isChart && !gauge ? ['x', 'series'] : []
     for (const [name, ref] of Object.entries(block.drill.params || {})) {
       if (typeof ref !== 'string' || !ref) {
         errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'значение должно быть строкой' })
+        continue
+      }
+      if (ref === 'node') {
+        if (!chain) {
+          errors.push({ path: `blocks.${i}.drill.params.${name}`, message: 'node допустим только в sankey с levels' })
+        }
+        continue
+      }
+      if (ref.startsWith('level.')) {
+        const field = ref.slice(6)
+        if (!chain) {
+          errors.push({
+            path: `blocks.${i}.drill.params.${name}`,
+            message: 'level.<поле> допустим только в sankey с levels'
+          })
+        } else if (!block.levels.includes(field)) {
+          errors.push({ path: `blocks.${i}.drill.params.${name}`, message: `уровня «${field}» нет в levels` })
+        }
         continue
       }
       if (ref.startsWith('$')) {

@@ -83,6 +83,7 @@ import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
 import ChartBlock from './ChartBlock.vue'
 import { resolveStyles } from '../template/styles.js'
+import { drillAllowed, resolveDrill } from '../engine/drill.js'
 
 const params = new URLSearchParams(location.search)
 const reportId = params.get('report') || 'sales-summary'
@@ -401,16 +402,20 @@ function onDrill({ row, spec }) {
 
 // Drill-through с диаграммы (ADR-43): ссылки в params — категория точки (`x`),
 // имя серии (`series`), текущий параметр (`param.<name>`) или литерал.
-function onChartDrill({ spec, x, series }) {
+// Подстановки перехода (ADR-43, ADR-72):
+//   x / series      — концы потока sankey или категория/серия точки,
+//   node            — значение кликнутого узла sankey,
+//   level.<поле>    — значение уровня цепочки (регион, категория, товар),
+//   param.<имя>     — параметр текущего отчёта (период и т. п.),
+//   любая строка    — константа.
+function onChartDrill({ spec, x, series, levels, node }) {
   if (!spec?.report) return
+  // второй рубеж: тот же запрет, что в диаграмме — фильтр не должен быть шире клика
+  if (!drillAllowed(spec, levels || {})) return
   const query = new URLSearchParams()
   query.set('report', spec.report)
-  for (const [name, ref] of Object.entries(spec.params || {})) {
-    if (typeof ref !== 'string') continue
-    if (ref === 'x') query.set(name, x ?? '')
-    else if (ref === 'series') query.set(name, series ?? '')
-    else if (ref.startsWith('param.')) query.set(name, paramValues[ref.slice(6)] ?? '')
-    else query.set(name, ref)
+  for (const [name, value] of resolveDrill(spec, { x, series, node, levels: levels || {}, params: paramValues })) {
+    query.set(name, value)
   }
   window.location.href = 'report.html?' + query.toString()
 }

@@ -2131,6 +2131,242 @@
    "errors": [
     "blocks.1.detailOrder.0.field"
    ]
+  },
+  {
+   "name": "drill в sankey: level.<поле> допустим",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "sankey",
+      "levels": [
+       "region",
+       "category",
+       "product"
+      ],
+      "valueField": "v",
+      "drill": {
+       "report": "sales-drill",
+       "params": {
+        "region": "level.region",
+        "category": "level.category",
+        "from": "param.from"
+       }
+      }
+     }
+    ]
+   },
+   "errors": []
+  },
+  {
+   "name": "drill в sankey: уровня нет в levels",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "sankey",
+      "levels": [
+       "region",
+       "category",
+       "product"
+      ],
+      "valueField": "v",
+      "drill": {
+       "report": "sales-drill",
+       "params": {
+        "product_line": "level.product_line"
+       }
+      }
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.drill.params.product_line"
+   ]
+  },
+  {
+   "name": "drill: level.<поле> без цепочки уровней",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "sankey",
+      "sourceField": "region",
+      "targetField": "category",
+      "valueField": "v",
+      "drill": {
+       "report": "sales-drill",
+       "params": {
+        "region": "level.region"
+       }
+      }
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.drill.params.region"
+   ]
+  },
+  {
+   "name": "drill в sankey: node допустим у цепочки",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "sankey",
+      "levels": [
+       "region",
+       "category",
+       "product"
+      ],
+      "valueField": "v",
+      "drill": {
+       "report": "sales-drill",
+       "params": {
+        "category": "node"
+       }
+      }
+     }
+    ]
+   },
+   "errors": []
+  },
+  {
+   "name": "drill: node у линии недопустим",
+   "template": {
+    "version": 2,
+    "id": "parity-ok",
+    "title": "Проверка",
+    "params": [
+     {
+      "name": "from",
+      "type": "date",
+      "label": "с"
+     }
+    ],
+    "datasets": {
+     "sales": {
+      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+      "params": {
+       "from": "$from"
+      }
+     }
+    },
+    "blocks": [
+     {
+      "type": "text",
+      "text": "Период {{from}}"
+     },
+     {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "line",
+      "xField": "region",
+      "yField": "v",
+      "drill": {
+       "report": "sales-drill",
+       "params": {
+        "category": "node"
+       }
+      }
+     }
+    ]
+   },
+   "errors": [
+    "blocks.1.drill.params.category"
+   ]
   }
  ]
 }

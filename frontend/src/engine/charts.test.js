@@ -53,6 +53,38 @@ describe('sankey: цепочка уровней', () => {
 })
 
 // Несколько коридоров в band (ADR-69): каждая пара границ даёт свой закрашенный диапазон.
+// ADR-72: у связи цепочки известны только её концы — drill подставляет ровно их.
+describe('sankey: метаданные для перехода', () => {
+  const rows = [
+    { region: 'Восток', category: 'Одежда', product: 'Куртка', amount: 10 },
+    { region: 'Восток', category: 'Обувь', product: 'Кроссовки', amount: 5 }
+  ]
+
+  it('связь отдаёт значения своих уровней, узел — своего', () => {
+    const model = buildSankeyModel(rows, { levels: ['region', 'category', 'product'], valueField: 'amount' })
+    const fromRegion = model.links.find((l) => l.levels?.region === 'Восток')
+    expect(fromRegion.levels).toEqual({ region: 'Восток', category: 'Одежда' })
+    expect(fromRegion.sourceLevel).toBe(0)
+    expect(fromRegion.targetLevel).toBe(1)
+
+    const shoeLink = model.links.find((l) => l.levels?.product === 'Кроссовки')
+    // на связи «категория → товар» региона нет: подставлять его нельзя
+    expect(shoeLink.levels).toEqual({ category: 'Обувь', product: 'Кроссовки' })
+    expect(shoeLink.levels.region).toBeUndefined()
+
+    const node = model.nodes.find((n) => n.name.startsWith('0\u0001'))
+    expect(node.levels).toEqual({ region: node.raw })
+  })
+
+  it('пара source/target метаданных уровней не даёт', () => {
+    const model = buildSankeyModel(
+      [{ a: 'Восток', b: 'Одежда', amount: 3 }],
+      { sourceField: 'a', targetField: 'b', valueField: 'amount' }
+    )
+    expect(model.links[0].levels).toBeUndefined()
+  })
+})
+
 describe('band: несколько коридоров', () => {
   const rows = [
     { day: '1', v: 200, lo: 120, hi: 280, sdLo: 170, sdHi: 230 },
@@ -189,7 +221,8 @@ describe('sankey: потоки между узлами', () => {
       valueField: 'v'
     })
     expect(model.links).toEqual([{ source: 'A', target: 'A', value: 4 }])
-    expect(model.nodes).toEqual([{ name: 'A' }])
+    // узел теперь несёт уровень и исходное значение для перехода (ADR-72)
+    expect(model.nodes).toEqual([{ name: 'A', level: 0, raw: 'A', levels: {} }])
   })
 })
 

@@ -73,6 +73,8 @@ void checkDrill(ValidationResult &r, const Json::Value &block, const std::string
     }
     // у gauge нет ни категории, ни серии: подставлять нечего (ADR-56)
     const bool gauge = isChart && asString(block["chartType"]) == "gauge";
+    // цепочка уровней sankey умеет отдавать значения уровней в переход (ADR-72)
+    const bool chain = isChart && asString(block["chartType"]) == "sankey" && block["levels"].isArray();
     for (const auto &name : drill["params"].getMemberNames()) {
         const std::string ref = asString(drill["params"][name]);
         const std::string path = base + ".drill.params." + name;
@@ -82,6 +84,23 @@ void checkDrill(ValidationResult &r, const Json::Value &block, const std::string
         }
         if (gauge && (ref == "x" || ref == "series")) {
             addError(r, path, "у диаграммы gauge нет x и series: подставляйте param.<name> или литерал");
+            continue;
+        }
+        if (ref == "node") {
+            if (!chain) addError(r, path, "node допустим только в sankey с levels");
+            continue;
+        }
+        if (ref.rfind("level.", 0) == 0) {
+            if (!chain) {
+                addError(r, path, "level.<поле> допустим только в sankey с levels");
+                continue;
+            }
+            const std::string field = ref.substr(6);
+            bool found = false;
+            for (const auto &level : block["levels"]) {
+                if (asString(level) == field) found = true;
+            }
+            if (!found) addError(r, path, "уровня «" + field + "» нет в levels");
             continue;
         }
         if (ref[0] == '$') {

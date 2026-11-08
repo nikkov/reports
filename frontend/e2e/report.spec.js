@@ -1453,6 +1453,49 @@ test('детали группы: страницы по 200, кнопка «ещ�
   await request.delete(`/api/reports/${id}`)
 })
 
+// ADR-72: переход из цепочки уровней подставляет значения уровней, а не пару x/series.
+// Запрет перехода без нужного уровня проверяется юнитом (engine/drill.test.js): в браузере
+// лента рисуется поверх узла, и «клик мимо» там не отличить от клика по ленте.
+test('drill из цепочки sankey: связь «регион → категория» открывает детали', async ({ page }) => {
+  await page.goto('/report.html?report=sales-path&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк:')
+  await expect(page.locator('.chart canvas').first()).toBeVisible()
+
+  // Ленты уровня 0→1 лежат между первым и вторым столбцом узлов (x от ширины узла
+  // до узла второго уровня): точка в этом коридоре гарантированно попадает в связь,
+  // где участвуют оба первых уровня
+  const point = await page.evaluate(() => {
+    const ch = (window.__charts || []).find((c) => c.type === 'sankey').instance
+    const dom = ch.getDom()
+    dom.scrollIntoView({ block: 'center' })
+    const box = dom.getBoundingClientRect()
+    const zr = ch.getZr()
+    const sm = ch.getModel().getSeriesByIndex(0)
+    const g = sm.getGraph()
+    const xs = []
+    g.eachNode((n) => xs.push(Math.round(n.getLayout().x)))
+    const left = Math.min(...xs)
+    const right = [...new Set(xs)].sort((a, b) => a - b)[1]
+    for (let x = left + 20; x < right - 10; x += 3) {
+      for (let y = 10; y < ch.getHeight() - 10; y += 3) {
+        const el = zr.handler.findHover(x, y).target
+        if (el?.type === 'path') return { x: box.left + x, y: box.top + y, left, right }
+      }
+    }
+    return null
+  })
+  expect(point, 'связь уровня 0→1 должна быть кликабельна').toBeTruthy()
+
+  await page.mouse.click(point.x, point.y)
+  await expect(page).toHaveURL(/report=sales-drill/)
+  const url = new URL(page.url())
+  // переход подставил оба уровня цепочки и период текущего отчёта
+  expect(url.searchParams.get('region')).toBeTruthy()
+  expect(url.searchParams.get('category')).toBeTruthy()
+  expect(url.searchParams.get('from')).toBe('2026-03-01')
+  await expect(page.locator('.meta')).toContainText('строк:')
+})
+
 // ADR-71: порядок деталей задаёт шаблон, а не текст строки.
 test('порядок деталей группы берётся из detailOrder шаблона', async ({ page, request }) => {
   const body = (offset) => ({
