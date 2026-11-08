@@ -1320,6 +1320,42 @@ test('диаграммы gauge и sankey: спидометр и потоки р�
   await expect(page.locator('.chart-box').first()).toContainText('Маржа за период')
 })
 
+// ADR-68: многоуровневый sankey — связи между соседними уровнями цепочки.
+test('многоуровневый sankey: три уровня и равные суммы на входе и выходе', async ({ page }) => {
+  await page.goto('/report.html?report=sales-path&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.chart canvas').first()).toBeVisible()
+
+  const model = await page.evaluate(() => {
+    const chart = (window.__charts || []).find((c) => c.type === 'sankey')
+    if (!chart) return null
+    const series = chart.instance.getOption().series[0]
+    const links = series.links
+    const sum = (list) => list.reduce((acc, l) => acc + l.value, 0)
+    return {
+      nodes: series.data.length,
+      links: links.length,
+      sourceLevels: [...new Set(links.map((l) => l.source.split('\u0001')[0]))].sort(),
+      targetLevels: [...new Set(links.map((l) => l.target.split('\u0001')[0]))].sort(),
+      firstLevelSum: sum(links.filter((l) => l.source.startsWith('0\u0001'))),
+      lastLevelSum: sum(links.filter((l) => l.target.startsWith('2\u0001'))),
+      labelFormatted: typeof series.label.formatter === 'function'
+    }
+  })
+
+  expect(model).not.toBeNull()
+  // 5 регионов + 5 категорий + 39 товаров
+  expect(model.nodes).toBe(49)
+  expect(model.links).toBe(60)
+  // связи идут только между соседними уровнями: 0→1 и 1→2
+  expect(model.sourceLevels).toEqual(['0', '1'])
+  expect(model.targetLevels).toEqual(['1', '2'])
+  // поток не теряется по дороге: сумма на входе равна сумме на выходе
+  expect(model.firstLevelSum).toBe(150892900)
+  expect(model.lastLevelSum).toBe(model.firstLevelSum)
+  // подписи без служебного префикса уровня
+  expect(model.labelFormatted).toBe(true)
+})
+
 test('рассылка: часовой пояс расписания считается при создании', async ({ request, page }) => {
   const created = await request.post('/api/admin/subscriptions', {
     data: {

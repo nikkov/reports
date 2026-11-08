@@ -1,0 +1,91 @@
+{
+  "version": 2,
+  "id": "sales-path",
+  "title": "Путь продажи: регион → категория → товар",
+  "description": "Многоуровневый sankey: сумма продаж разложена по цепочке «регион → категория → товар» (ADR-68). Под диаграммой — те же суммы парами «регион — категория».",
+  "folder": "Продажи",
+  "tags": [
+    "sankey",
+    "потоки",
+    "многоуровневый"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "default": "2026-03-01"
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "default": "2026-03-10"
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "sql": "SELECT r.name AS region, s.category, s.product, s.amount FROM sales s JOIN regions r ON r.id = s.region_id WHERE s.order_date BETWEEN :from::date AND :to::date"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Сумма продаж {{from}} — {{to}} по цепочке «регион → категория → товар». Толщина потока — сумма, наведение показывает пару узлов и значение."
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "title": "Потоки: регион → категория → товар",
+      "width": "full",
+      "chartType": "sankey",
+      "levels": [
+        "region",
+        "category",
+        "product"
+      ],
+      "valueField": "amount",
+      "aggregate": "sum",
+      "height": 620
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "title": "Те же суммы парами «регион — категория»",
+      "width": "full",
+      "aggregate": {
+        "groupBy": [
+          "region",
+          "category"
+        ],
+        "measures": [
+          {
+            "field": "amount",
+            "agg": "sum"
+          }
+        ]
+      },
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": "integer",
+          "align": "right",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  ]
+}

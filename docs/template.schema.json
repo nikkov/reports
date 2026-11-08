@@ -456,6 +456,16 @@
           "type": "string",
           "minLength": 1
         },
+        "levels": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "sankey: цепочка уровней (регион → категория → товар); заменяет sourceField/targetField"
+        },
         "valueField": {
           "type": "string",
           "minLength": 1

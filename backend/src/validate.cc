@@ -258,6 +258,12 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
             addError(r, base + "." + field, std::string("для диаграммы «") + type + "» обязательно поле " + field);
         }
     };
+    const auto checkHeight = [&](const Json::Value &b, const std::string &path) {
+        if (b["height"].isNull()) return;
+        if (!b["height"].isNumeric() || b["height"].asDouble() < 240 || b["height"].asDouble() > 900) {
+            addError(r, path + ".height", "height: число от 240 до 900 (px)");
+        }
+    };
     const auto forbid = [&](const char *field, const char *why) {
         if (!block[field].isNull()) {
             addError(r, base + "." + field, std::string("для диаграммы «") + type + "» " + field +
@@ -306,6 +312,9 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
                 }
             }
         }
+        if (!block["levels"].isNull()) {
+            addError(r, base + ".levels", "levels допустимы только для sankey");
+        }
     } else if (type == "band") {
         // значение и две границы полосы (ADR-58)
         need("xField");
@@ -322,18 +331,58 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
         if (!y.empty() && (y == lo || y == hi)) {
             addError(r, base + ".yField", "значение должно быть отдельным полем, не границей");
         }
+        if (!block["levels"].isNull()) {
+            addError(r, base + ".levels", "levels допустимы только для sankey");
+        }
     } else if (type == "sankey") {
-        need("sourceField");
-        need("targetField");
+        // Поток задаётся либо парой source/target, либо цепочкой уровней (ADR-68)
+        checkHeight(block, base);
         need("valueField");
-        forbid("xField", "узлы задаются sourceField и targetField");
+        std::vector<std::string> chain;
+        const bool hasLevels = !block["levels"].isNull();
+        if (hasLevels) {
+            if (!block["levels"].isArray() || block["levels"].size() < 2 || block["levels"].size() > 4) {
+                addError(r, base + ".levels", "levels: от 2 до 4 полей");
+            } else {
+                for (const auto &item : block["levels"]) {
+                    const std::string field = asString(item);
+                    if (field.empty()) {
+                        addError(r, base + ".levels", "в levels только непустые имена полей");
+                    }
+                    chain.push_back(field);
+                }
+                if (std::set<std::string>(chain.begin(), chain.end()).size() != chain.size()) {
+                    addError(r, base + ".levels", "поля уровней не должны повторяться");
+                }
+                if (!block["sourceField"].isNull() || !block["targetField"].isNull()) {
+                    addError(r, base + ".sourceField", "у цепочки уровней sourceField/targetField не задаются");
+                }
+            }
+        } else {
+            need("sourceField");
+            need("targetField");
+        }
+        forbid("xField", "узлы задаются sourceField/targetField или levels");
         forbid("yField", "вес потока задаётся valueField");
-        const std::string s = asString(block["sourceField"]);
-        const std::string t = asString(block["targetField"]);
-        const std::string v = asString(block["valueField"]);
-        if (!s.empty() && !t.empty() && !v.empty() && (s == t || s == v || t == v)) {
-            addError(r, base + ".targetField",
-                     "sourceField, targetField и valueField должны быть разными полями");
+        std::vector<std::string> names;
+        if (hasLevels) {
+            for (const auto &field : chain) {
+                if (!field.empty()) names.push_back(field);
+            }
+            const std::string weight = asString(block["valueField"]);
+            if (!weight.empty()) names.push_back(weight);
+            if (std::set<std::string>(names.begin(), names.end()).size() != names.size()) {
+                addError(r, base + ".levels", "поля уровней и веса должны быть разными");
+            }
+        } else {
+            for (const char *field : {"sourceField", "targetField", "valueField"}) {
+                const std::string value = asString(block[field]);
+                if (!value.empty()) names.push_back(value);
+            }
+            if (std::set<std::string>(names.begin(), names.end()).size() != names.size()) {
+                addError(r, base + ".targetField",
+                         "sourceField, targetField и valueField должны быть разными полями");
+            }
         }
     } else {
         need("xField");
@@ -343,6 +392,9 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
         }
         if (!block["lowField"].isNull() || !block["highField"].isNull()) {
             addError(r, base + ".chartType", "lowField/highField допустимы только для band");
+        }
+        if (!block["levels"].isNull()) {
+            addError(r, base + ".levels", "levels допустимы только для sankey");
         }
     }
 }

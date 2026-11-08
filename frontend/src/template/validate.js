@@ -181,6 +181,15 @@ function checkStyles(styles, path, knownFields, errors, warnings, palette = {}) 
   }
 }
 
+// Высота диаграммы: у многоуровневого sankey узлов десятки, на 320 px подписи не читаются.
+function checkChartHeight(block, base, errors) {
+  if (block.height === undefined) return
+  const height = block.height
+  if (typeof height !== 'number' || !Number.isFinite(height) || height < 240 || height > 900) {
+    errors.push({ path: `${base}.height`, message: 'height: число от 240 до 900 (px)' })
+  }
+}
+
 export function validateTemplate(template) {
   const errors = []
   const warnings = []
@@ -568,17 +577,44 @@ function checkGaugeZones(block, base, errors) {
         if (block.sourceField !== undefined || block.targetField !== undefined || block.valueField !== undefined) {
           errors.push({ path: `${base}.chartType`, message: 'sourceField/targetField/valueField допустимы только для sankey' })
         }
+        if (block.levels !== undefined) {
+          errors.push({ path: `${base}.levels`, message: 'levels допустимы только для sankey' })
+        }
       } else if (type === 'sankey') {
-        need('sourceField')
-        need('targetField')
+        // Поток задаётся либо парой source/target, либо цепочкой уровней (ADR-68)
+        checkChartHeight(block, base, errors)
         need('valueField')
-        forbid('xField', 'узлы задаются sourceField и targetField')
+        if (block.levels !== undefined) {
+          if (!Array.isArray(block.levels) || block.levels.length < 2 || block.levels.length > 4) {
+            errors.push({ path: `${base}.levels`, message: 'levels: от 2 до 4 полей' })
+          } else {
+            if (block.levels.some((f) => typeof f !== 'string' || !f)) {
+              errors.push({ path: `${base}.levels`, message: 'в levels только непустые имена полей' })
+            } else if (new Set(block.levels).size !== block.levels.length) {
+              errors.push({ path: `${base}.levels`, message: 'поля уровней не должны повторяться' })
+            }
+            if (block.sourceField !== undefined || block.targetField !== undefined) {
+              errors.push({
+                path: `${base}.sourceField`,
+                message: 'у цепочки уровней sourceField/targetField не задаются'
+              })
+            }
+          }
+        } else {
+          need('sourceField')
+          need('targetField')
+        }
+        forbid('xField', 'узлы задаются sourceField/targetField или levels')
         forbid('yField', 'вес потока задаётся valueField')
-        const names = [block.sourceField, block.targetField, block.valueField].filter(Boolean)
+        const names = (Array.isArray(block.levels)
+          ? [...block.levels, block.valueField]
+          : [block.sourceField, block.targetField, block.valueField]).filter(Boolean)
         if (new Set(names).size !== names.length) {
           errors.push({
-            path: `${base}.targetField`,
-            message: 'sourceField, targetField и valueField должны быть разными полями'
+            path: Array.isArray(block.levels) ? `${base}.levels` : `${base}.targetField`,
+            message: Array.isArray(block.levels)
+              ? 'поля уровней и веса должны быть разными'
+              : 'sourceField, targetField и valueField должны быть разными полями'
           })
         }
         if (block.aggregate && !['sum', 'avg', 'min', 'max', 'count'].includes(block.aggregate)) {
@@ -595,6 +631,9 @@ function checkGaugeZones(block, base, errors) {
         }
         if (block.lowField !== undefined || block.highField !== undefined) {
           errors.push({ path: `${base}.chartType`, message: 'lowField/highField допустимы только для band' })
+        }
+        if (block.levels !== undefined) {
+          errors.push({ path: `${base}.levels`, message: 'levels допустимы только для sankey' })
         }
         if (type === 'pie' && block.seriesField) {
           warnings.push({ path: `${base}.seriesField`, message: 'круговая диаграмма показывает одну серию' })

@@ -8,6 +8,50 @@ const rows = [
   { category: 'Мониторы', region: '', amount: 10 } // пустой приёмник — поток отбрасывается
 ]
 
+// Многоуровневый sankey (ADR-68): цепочка уровней вместо пары source/target.
+describe('sankey: цепочка уровней', () => {
+  const path = [
+    { region: 'Восток', category: 'Одежда', product: 'Футболка', v: 10 },
+    { region: 'Восток', category: 'Одежда', product: 'Куртка', v: 5 },
+    { region: 'Восток', category: 'Обувь', product: 'Кроссовки', v: 7 },
+    { region: 'Юг', category: 'Одежда', product: 'Футболка', v: 3 },
+    { region: 'Юг', category: 'Обувь', product: '', v: 99 }, // пустой уровень — строка отбрасывается
+    { region: '', category: 'Одежда', product: 'Куртка', v: 4 } // пустой верхний — тоже
+  ]
+
+  it('строит связи между соседними уровнями и суммирует вес', () => {
+    const model = buildSankeyModel(path, { levels: ['region', 'category', 'product'], valueField: 'v' })
+
+    // 3 региона? нет: Восток и Юг — на первом уровне, 2 категории, 3 товара
+    expect(model.nodes).toHaveLength(7)
+    // Восток→Одежда, Восток→Обувь, Юг→Одежда, Одежда→Футболка, Одежда→Куртка, Обувь→Кроссовки
+    expect(model.links).toHaveLength(6)
+    const value = (from, to) => model.links.find((l) => l.source === from && l.target === to)?.value
+    expect(value('1\u0001Обувь', '2\u0001Кроссовки')).toBe(7)
+    expect(value('0\u0001Восток', '1\u0001Одежда')).toBe(15)
+    expect(value('0\u0001Восток', '1\u0001Обувь')).toBe(7)
+    expect(value('1\u0001Одежда', '2\u0001Футболка')).toBe(13) // Восток 10 + Юг 3
+    expect(value('1\u0001Одежда', '2\u0001Куртка')).toBe(5)
+    expect(model.dropped).toBe(2)
+  })
+
+  it('одинаковые названия на разных уровнях не склеиваются', () => {
+    const same = [{ a: 'Восток', b: 'Восток', v: 1 }]
+    const model = buildSankeyModel(same, { levels: ['a', 'b'], valueField: 'v' })
+    expect(model.nodes.map((n) => n.name)).toEqual(['0\u0001Восток', '1\u0001Восток'])
+    expect(model.links).toHaveLength(1)
+    // подписи — исходные значения без префикса уровня
+    expect(model.label('0\u0001Восток')).toBe('Восток')
+  })
+
+  it('пара source/target работает как раньше', () => {
+    const model = buildSankeyModel(path, { sourceField: 'region', targetField: 'category', valueField: 'v' })
+    expect(model.nodes.map((n) => n.name)).toContain('Восток')
+    expect(model.label('Восток')).toBe('Восток')
+    expect(model.levels).toBe(null)
+  })
+})
+
 describe('gauge: одно число из выборки', () => {
   it('sum по умолчанию', () => {
     expect(buildGaugeModel(rows, { yField: 'amount' }).value).toBe(185)
@@ -144,7 +188,10 @@ describe('gauge: крайние случаи шкалы', () => {
 
   it('пустые строки и отсутствие поля не ломают модель', () => {
     expect(buildGaugeModel([{}, { v: null }], { yField: 'v' }).value).toBe(0)
-    expect(buildSankeyModel([], { sourceField: 'a', targetField: 'b', valueField: 'v' })).toEqual({ nodes: [], links: [], dropped: 0 })
+    const empty = buildSankeyModel([], { sourceField: 'a', targetField: 'b', valueField: 'v' })
+    expect(empty.nodes).toEqual([])
+    expect(empty.links).toEqual([])
+    expect(empty.dropped).toBe(0)
   })
 })
 

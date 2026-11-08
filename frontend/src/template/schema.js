@@ -458,6 +458,22 @@ export default {
           "type": "string",
           "minLength": 1
         },
+        "height": {
+          "type": "number",
+          "minimum": 240,
+          "maximum": 900,
+          "description": "высота области диаграммы в px (по умолчанию 320); для многоуровневого sankey нужно больше"
+        },
+        "levels": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "sankey: цепочка уровней (регион → категория → товар); заменяет sourceField/targetField"
+        },
         "valueField": {
           "type": "string",
           "minLength": 1

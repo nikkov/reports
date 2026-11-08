@@ -66,6 +66,7 @@
           v-else-if="block.type === 'chart'"
           :block="block"
           :rows="rowsFor(block)"
+          :height="block.height || 320"
           :styles="stylesFor(block)"
           :drill="block.drill || null"
           @drill="onChartDrill"

@@ -178,22 +178,37 @@ function buildOption() {
       sourceField: props.block.sourceField,
       targetField: props.block.targetField,
       valueField: props.block.valueField,
+      levels: props.block.levels,
       aggregate: props.block.aggregate || 'sum'
     })
+    // Подпись узла берём из модели: у цепочки id содержит префикс уровня, иначе
+    // одинаковые названия на разных уровнях склеились бы в один узел (ADR-68).
+    const labelOf = (name) => model.label(name)
     return {
       animation: false,
       textStyle: textStyle(),
-      tooltip: { trigger: 'item', valueFormatter: fmt },
+      tooltip: {
+        trigger: 'item',
+        formatter: (p) => {
+          if (p.dataType === 'edge') {
+            return `${labelOf(p.data.source)} → ${labelOf(p.data.target)}<br/><b>${fmt(p.data.value)}</b>`
+          }
+          return `${labelOf(p.name)}<br/><b>${fmt(p.value)}</b>`
+        }
+      },
       series: [
         {
           type: 'sankey',
           data: model.nodes,
           links: model.links,
+          // узлы прижимаются к краям, иначе при десятках узлов на последнем уровне
+          // первый уровень сжимается в нечитаемое пятно
+          nodeAlign: 'justify',
           emphasis: { focus: 'adjacency' },
-          nodeGap: 12,
+          nodeGap: 10,
           nodeWidth: 14,
           lineStyle: { color: 'gradient', curveness: 0.5, opacity: 0.42 },
-          label: { color: textStyle()?.color, fontSize: 12 }
+          label: { color: textStyle()?.color, fontSize: 12, formatter: (p) => labelOf(p.name) }
         }
       ]
     }
@@ -255,9 +270,11 @@ function buildOption() {
 // у круговой — только подпись сектора.
 function onPointClick(event) {
   if (!props.drill?.report) return
-  // sankey: в событии приходит сам поток {source, target, value}
+  // sankey: в событии приходит сам поток {source, target, value}. У цепочки уровней (ADR-68)
+  // id узла содержит префикс уровня — в параметры уходит исходное значение без него.
   if (props.block.chartType === 'sankey' && event.data && event.data.source) {
-    emit('drill', { spec: props.drill, x: event.data.source ?? null, series: event.data.target ?? null })
+    const clean = (id) => (typeof id === 'string' ? id.replace(/^\d+\u0001/, '') : id ?? null)
+    emit('drill', { spec: props.drill, x: clean(event.data.source), series: clean(event.data.target) })
     return
   }
   // gauge: одна точка без категории — в параметры ничего не подставляется

@@ -116,38 +116,77 @@ export function buildBandModel(rows, { xField, yField, lowField, highField } = {
   return { categories, values, lows, highs, band }
 }
 
-// Потоки для sankey: пары «источник → приёмник» со агрегированным весом.
-export function buildSankeyModel(rows, { sourceField, targetField, valueField, aggregate = 'sum' } = {}) {
+// Потоки для sankey (ADR-56, ADR-68): пара «источник → приёмник» либо цепочка уровней
+// levels: [поле1, поле2, поле3] — тогда связи строятся между соседними уровнями.
+// Узлы разных уровней нумеруются префиксом (`0\u0001Восток`), иначе одинаковые названия
+// на разных уровнях склеились бы в один узел и путь считался бы неверно; подпись в
+// диаграмме берётся из display.
+export function buildSankeyModel(rows, { sourceField, targetField, valueField, levels, aggregate = 'sum' } = {}) {
+  const chain = Array.isArray(levels) && levels.length >= 2 ? levels : null
   const order = []
   const seen = new Set()
+  const display = new Map() // id узла → подпись для глаза
   const flows = new Map() // "источник\u0001приёмник" → {sum,count,min,max}
   let dropped = 0
 
+  const nodeId = (level, value) => (chain ? `${level}\u0001${value}` : String(value))
+  const addNode = (level, value) => {
+    const id = nodeId(level, value)
+    if (!seen.has(id)) {
+      seen.add(id)
+      order.push({ name: id })
+      if (chain) display.set(id, String(value))
+    }
+    return id
+  }
+
   for (const row of rows || []) {
-    const from = row?.[sourceField]
-    const to = row?.[targetField]
     const weight = num(row?.[valueField])
-    if (isNullKey(from) || isNullKey(to) || weight === null) {
+    if (weight === null) {
       dropped++
       continue
     }
-    const key = `${from}\u0001${to}`
+    if (chain) {
+      const path = chain.map((field) => row?.[field])
+      if (path.some((v) => isNullKey(v))) {
+        dropped++
+        continue
+      }
+      for (let i = 0; i < chain.length - 1; i++) {
+        const from = addNode(i, path[i])
+        const to = addNode(i + 1, path[i + 1])
+        const key = `${from}\u0001${to}`
+        let cell = flows.get(key)
+        if (!cell) {
+          cell = { source: from, target: to, sum: 0, count: 0, min: Infinity, max: -Infinity }
+          flows.set(key, cell)
+        }
+        cell.sum += weight
+        cell.count++
+        if (weight < cell.min) cell.min = weight
+        if (weight > cell.max) cell.max = weight
+      }
+      continue
+    }
+
+    const from = row?.[sourceField]
+    const to = row?.[targetField]
+    if (isNullKey(from) || isNullKey(to)) {
+      dropped++
+      continue
+    }
+    const source = addNode(0, from)
+    const target = addNode(0, to)
+    const key = `${source}\u0001${target}`
     let cell = flows.get(key)
     if (!cell) {
-      cell = { source: String(from), target: String(to), sum: 0, count: 0, min: Infinity, max: -Infinity }
+      cell = { source, target, sum: 0, count: 0, min: Infinity, max: -Infinity }
       flows.set(key, cell)
     }
     cell.sum += weight
     cell.count++
     if (weight < cell.min) cell.min = weight
     if (weight > cell.max) cell.max = weight
-
-    for (const node of [String(from), String(to)]) {
-      if (!seen.has(node)) {
-        seen.add(node)
-        order.push({ name: node })
-      }
-    }
   }
 
   const pick = (cell) => {
@@ -173,5 +212,7 @@ export function buildSankeyModel(rows, { sourceField, targetField, valueField, a
     links.push({ source: cell.source, target: cell.target, value })
   }
 
-  return { nodes: order, links, dropped }
+  // подпись узла: у цепочки это исходное значение, у пары — сам узел
+  const label = (name) => (display.has(name) ? display.get(name) : name)
+  return { nodes: order, links, dropped, display, label, levels: chain }
 }
