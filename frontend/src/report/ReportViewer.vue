@@ -76,7 +76,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { api } from '../api/client.js'
+import { API_BASE, api } from '../api/client.js'
 import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
 import ChartBlock from './ChartBlock.vue'
@@ -283,7 +283,7 @@ let liveSource = null
 function startLive() {
   stopLive()
   if (!liveMode.value || refreshPaused.value) return
-  liveSource = new EventSource(`/api/report/events?report=${encodeURIComponent(reportId)}`)
+  liveSource = new EventSource(`${API_BASE}/api/report/events?report=${encodeURIComponent(reportId)}`)
   liveSource.addEventListener('change', async () => {
     // шаблон мог измениться целиком: подтягиваем его, затем данные
     try {

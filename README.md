@@ -219,3 +219,18 @@ REP_CI_DB=my_ci ./scripts/ci-e2e.sh  # другая база — если report
 Страница `audit.html` (роль admin): кто и когда публиковал шаблоны, менял роли пользователей,
 отправлял рассылку, входил в систему. API — `GET /api/admin/audit?action=&actor=&limit=&offset=`,
 только чтение: подчистить журнал через интерфейс нельзя (ADR-52).
+
+## За реверс-прокси (префикс /reports)
+
+Сборка под префикс — те же скрипты с двумя переменными:
+
+```bash
+REP_BASE=/reports/ VITE_API_BASE=/reports ./scripts/build.sh
+```
+
+- страницы и ассеты уходят под `/reports/`, все запросы — в `/reports/api`;
+- прокси должен снимать префикс: `/reports/api/… → http://127.0.0.1:8080/api/…`
+  (готовый пример — `deploy/nginx-reports.conf`, включая отдельный блок для SSE
+  с `proxy_buffering off`);
+- проверить без nginx можно стендом: `node scripts/serve-subpath.mjs --port 5180 --prefix /reports`;
+- обычная сборка (без переменных) остаётся корневой и используется стендом и e2e.

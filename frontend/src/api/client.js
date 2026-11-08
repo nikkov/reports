@@ -1,5 +1,8 @@
 // Тонкий клиент API отчётов. Все запросы отменяемы (AbortController), ошибки типизированы.
-const BASE = import.meta.env.VITE_API_BASE || ''
+// Префикс API. Пусто — тот же хост и корень (стенд); за реверс-прокси
+// под /reports обычно задаётся VITE_API_BASE=/reports при сборке (ADR-53).
+export const API_BASE = import.meta.env.VITE_API_BASE || ''
+const BASE = API_BASE
 
 async function request(path, options = {}) {
   const resp = await fetch(`${BASE}${path}`, {

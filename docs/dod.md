@@ -330,6 +330,22 @@ SQL наборов данных в шаблон.
 | Неизвестный набор | 422 `DATASET_NOT_FOUND` |
 | Ничего не сломано | `ALL CHECKS PASSED`: ctest 23, vitest 102, golden 15/15, e2e 42 |
 
+## Приёмка версии 1.25
+
+**Ожидает приёмки постановщиком** (префикс приложения для реверс-прокси).
+
+| Критерий | Подтверждение |
+|---|---|
+| Сборка под префикс | `REP_BASE=/reports/ VITE_API_BASE=/reports ./scripts/build.sh` → ассеты `/reports/assets/…` |
+| Стенд без nginx | `scripts/serve-subpath.mjs`: статика `/reports/`, API `/reports/api` |
+| Вход под префиксом | `/reports/login.html` → редирект на `/reports/`, cookie работает |
+| Каталог и отчёт | 10 карточек, `строк: 5 · запрос: 20 мс · шаблон v2` |
+| Живые события | индикатор «обновление по событию», запросы `/reports/api/report/events` |
+| Админка и журнал | `/reports/admin.html`, `/reports/audit.html` (44 записи) |
+| Чисто | 0 ответов ≥ 400, 0 ошибок JS |
+| Пример прокси | `deploy/nginx-reports.conf` (снятие префикса, SSE без буферизации) |
+| Обычная сборка не сломана | `ALL CHECKS PASSED`: ctest 56, vitest 131, golden 15/15, e2e 50 |
+
 ## Приёмка версии 1.24
 
 **Ожидает приёмки постановщиком** (аудит действий).

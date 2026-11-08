@@ -21,6 +21,7 @@
 <script setup>
 // Страница входа (ADR-34): cookie rep_session ставит сервер, роль приходит в ответе.
 import { ref } from 'vue'
+import { API_BASE } from '../api/client.js'
 
 const login = ref('')
 const password = ref('')
@@ -29,7 +30,7 @@ const error = ref('')
 
 function nextUrl() {
   const next = new URLSearchParams(location.search).get('next')
-  if (!next || !next.startsWith('/') || next.startsWith('//')) return '/'
+  if (!next || !next.startsWith('/') || next.startsWith('//')) return import.meta.env.BASE_URL
   return next
 }
 
@@ -38,7 +39,7 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ login: login.value, password: password.value })

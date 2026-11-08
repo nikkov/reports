@@ -5,7 +5,10 @@ import { ssePassthrough } from './sse-proxy.js'
 
 // Три входа: index.html — песочница рендерера (спайк), report.html — страница отчёта,
 // admin.html — админка шаблонов (CodeMirror попадает только в её чанк).
+// Приложение можно ставить не только в корень: REP_BASE=/reports/ при сборке
+// даёт ассеты и страницы под префиксом, что и нужно за реверс-прокси (ADR-53).
 export default defineConfig({
+  base: process.env.REP_BASE || '/',
   plugins: [vue(), ssePassthrough()],
   server: {
     port: 5173,

@@ -86,8 +86,8 @@
 
     <footer class="foot">
       <a href="spike.html">Песочница рендерера</a> ·
-      <a href="/api/reports">/api/reports</a> ·
-      <a href="/api/health">/api/health</a>
+      <a :href="`${API_BASE}/api/reports`">{{ API_BASE }}/api/reports</a> ·
+      <a :href="`${API_BASE}/api/health`">{{ API_BASE }}/api/health</a>
     </footer>
   </div>
 </template>
@@ -96,7 +96,7 @@
 // Каталог отчётов (ADR-30): папки, теги и избранное из шаблона + localStorage.
 // Данные — GET /api/reports (title, description, folder, tags, params).
 import { computed, onMounted, ref, watch } from 'vue'
-import { api } from '../api/client.js'
+import { API_BASE, api } from '../api/client.js'
 
 const reports = ref([])
 const loading = ref(true)

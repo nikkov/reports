@@ -45,7 +45,7 @@
 
       <footer class="side-foot">
         <a href="index.html">← Список отчётов</a>
-        <a href="/api/admin/reports">/api/admin/reports</a>
+        <a :href="`${API_BASE}/api/admin/reports`">{{ API_BASE }}/api/admin/reports</a>
       </footer>
     </aside>
 
@@ -248,7 +248,7 @@ import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { json, jsonParseLinter } from '@codemirror/lang-json'
 import { lintGutter, linter } from '@codemirror/lint'
-import { api } from '../api/client.js'
+import { API_BASE, api } from '../api/client.js'
 import validateTemplate from '../template/validate.js'
 import migrateTemplate from '../template/migrate.js'
 
