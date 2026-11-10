@@ -42,7 +42,11 @@ size_t loadDotEnv(const std::string &path) {
             value = value.substr(1, value.size() - 2);
         }
         if (std::getenv(key.c_str()) == nullptr) {
+#ifdef _WIN32
+            _putenv_s(key.c_str(), value.c_str());
+#else
             setenv(key.c_str(), value.c_str(), 0);
+#endif
             ++loaded;
         }
     }

@@ -407,6 +407,10 @@ void runQuery(const orm::DbClientPtr &db, const std::string &sql,
 }  // namespace
 
 int main() {
+ #ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+   
     // Winsock под Windows нужно поднять до первого сокета (проверка порта, SMTP);
     // на POSIX вызов пустой.
     {
