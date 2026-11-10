@@ -52,6 +52,19 @@ else
   echo "skip (нет node или scripts/licenses.mjs)"
 fi
 
+step "Скрипты: синтаксис bash"
+bad=0
+for s in scripts/*.sh db/*.sh db/examples/*.sh; do
+  [ -e "$s" ] || continue
+  if ! bash -n "$s" 2>/dev/null; then
+    echo "FAIL: синтаксис $s" >&2
+    bash -n "$s" || true
+    bad=1
+  fi
+done
+[ "$bad" = "0" ] || exit 1
+echo "синтаксис скриптов: ok"
+
 step "Backend: сборка и тесты"
 if [ -f "$ROOT/backend/CMakeLists.txt" ]; then
   cmake -S "$ROOT/backend" -B "$ROOT/backend/build" \

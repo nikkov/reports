@@ -28,7 +28,9 @@
 
 # 2. База: роли (owner/srv/ro), ядро (reports), примеры (reports_examples), миграции
 #    под суперпользователем создаются роли и базы, дальше DDL идёт владельцем reporting_owner
-./scripts/db-ro.sh                       # создаёт reporting_ro и выдаёт SELECT на примеры
+./scripts/db-users.sh                    # reporting_srv + reporting_ro: пароли, права, проверки
+./scripts/db-users.sh --rotate           # плановая смена паролей (обновляет backend/.env)
+./scripts/db-users.sh --password-stdin   # пароли из stdin: строка 1 — srv, строка 2 — ro
 REP_DB=reporting ./db/init.sh            # ядро + примеры; только ядро: --core-only
 REP_DB=reporting ./db/init.sh --core-only  # база «продукт без демо-данных»
 
