@@ -26,7 +26,8 @@
 # 1. Сборка (на этой же машине или перенос артефактов)
 ./scripts/build.sh
 
-# 2. База: ядро (схема reports), примеры (reports_examples), миграции, права readonly-роли
+# 2. База: роли (owner/srv/ro), ядро (reports), примеры (reports_examples), миграции
+#    под суперпользователем создаются роли и базы, дальше DDL идёт владельцем reporting_owner
 ./scripts/db-ro.sh                       # создаёт reporting_ro и выдаёт SELECT на примеры
 REP_DB=reporting ./db/init.sh            # ядро + примеры; только ядро: --core-only
 REP_DB=reporting ./db/init.sh --core-only  # база «продукт без демо-данных»
@@ -38,6 +39,12 @@ REP_ADMIN=1 REP_ADMIN_LOGIN=admin REP_ADMIN_PASSWORD=... \
 # 4. Пользователи (режим сессий) — логины и пароли из переменных, не из репозитория
 REP_DB=reporting REP_ADMIN_PASSWORD=... REP_VIEWER_PASSWORD=... ./scripts/auth-init.sh
 ```
+
+Роли и права (ADR-75): `reporting_owner` — владелец схем и таблиц, под ним идут DDL и миграции
+(`REP_OWNER_DB_USER`/`REP_OWNER_DB_PASSWORD`); `reporting_srv` — под ней работает сервер
+(`PGUSER`): DML в ядре и чтение примеров, **без права создавать объекты**; `reporting_ro` — только
+чтение `reports_examples`. Суперпользователь нужен лишь на установке; в эксплуатации
+`REP_STRICT_ROLE=1` заставляет сервер отказаться стартовать под ним.
 
 `db/init.sh` идемпотентен по структуре (CREATE ... IF NOT EXISTS) и по миграциям, но примеры
 перезаливает (`db/examples/seed.sql` делает TRUNCATE). На рабочей базе запускают только миграции из

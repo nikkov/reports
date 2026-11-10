@@ -445,6 +445,30 @@ int main() {
     } else {
         LOG_WARN << "REP_RO_DB_USER/REP_RO_DB_PASSWORD не заданы: данные читаются основной ролью";
     }
+
+    // Эксплуатация не должна идти под суперпользователем (ADR-75): для сервера есть
+    // reporting_srv. На стенде это предупреждение, в строгом режиме — отказ стартовать.
+    {
+        const std::string roleCheck = rep::envOr("REP_STRICT_ROLE", "0");
+        runQuery(
+            db, "SELECT current_user AS role, (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS is_super", {},
+            [roleCheck](const orm::Result &res) {
+                if (res.empty()) return;
+                const std::string role = res[0]["role"].c_str();
+                if (!res[0]["is_super"].as<bool>()) {
+                    LOG_INFO << "сервер работает под ролью " << role;
+                    return;
+                }
+                if (roleCheck == "1") {
+                    LOG_ERROR << "сервер запущен под суперпользователем " << role
+                              << " — для эксплуатации нужна reporting_srv (REP_STRICT_ROLE=1)";
+                    std::_Exit(1);
+                }
+                LOG_WARN << "сервер работает под суперпользователем " << role
+                         << ": так можно только на стенде, для эксплуатации — reporting_srv";
+            },
+            [](const std::exception_ptr &) {});
+    }
     auto dataDb = dbRo ? dbRo : db;
 
     const std::string templatesSource = rep::envOr("REP_TEMPLATES_SOURCE", "db");
@@ -2900,12 +2924,20 @@ int main() {
         [db, maxRows, authMode, logRetentionDays, &dbRo](const HttpRequestPtr &,
                                                          std::function<void(const HttpResponsePtr &)> &&cb) {
             runQuery(
-                db, "SELECT 1", {},
+                db,
+                "SELECT current_user AS role, "
+                "(SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS is_super", {},
                 [cb, maxRows, authMode, logRetentionDays, &dbRo](const orm::Result &res) {
                     Json::Value body;
                     body["status"] = "ok";
                     body["schemaVersion"] = rep::kCurrentTemplateVersion;
                     body["db"] = !res.empty();
+                    // под какой ролью работает сервер: в эксплуатации это reporting_srv,
+                    // суперпользователь допустим только на стенде (ADR-75)
+                    if (!res.empty()) {
+                        body["dbUser"] = res[0]["role"].c_str();
+                        body["superuser"] = res[0]["is_super"].as<bool>();
+                    }
                     body["maxRows"] = static_cast<Json::UInt64>(maxRows);
                     body["readOnlyRole"] = static_cast<bool>(dbRo);
                     body["authMode"] = authMode == rep::AuthMode::Proxy ? "proxy"

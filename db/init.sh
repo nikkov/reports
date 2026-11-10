@@ -4,6 +4,10 @@
 #                      рассылка, журнал действий;
 #   reports_examples — синтетические данные демонстрационных отчётов.
 #
+# Роли (ADR-75): DDL выполняется владельцем объектов — reporting_owner (REP_OWNER_DB_*),
+# сервер эксплуатации ходит под reporting_srv, отчёты читает reporting_ro. Суперпользователь
+# нужен только на установке.
+#
 #   ./db/init.sh                  — ядро + примеры (dev-база целиком)
 #   ./db/init.sh --core-only      — только ядро, без демо-данных
 #   ./db/init.sh --examples-only  — только примеры (ядро уже стоит)
@@ -32,14 +36,27 @@ DB="${REP_DB:-${PGDATABASE:-reporting}}"
 export PGDATABASE="$DB"
 PSQL=(psql -v ON_ERROR_STOP=1)
 
-RO_USER="${REP_RO_DB_USER:-reporting_ro}"
+# DDL выполняет владелец объектов: серверу (reporting_srv) создавать таблицы запрещено.
+OWNER_USER="${REP_OWNER_DB_USER:-}"
+OWNER_PW="${REP_OWNER_DB_PASSWORD:-}"
+if [ -n "$OWNER_USER" ] && [ -n "$OWNER_PW" ]; then
+  PSQL+=(-U "$OWNER_USER")
+  export PGPASSWORD="$OWNER_PW"
+fi
 
-echo "== host $PGHOST:$PGPORT user $PGUSER db $DB"
+RO_USER="${REP_RO_DB_USER:-reporting_ro}"
+SRV_USER="${REP_SRV_DB_USER:-reporting_srv}"
+
+echo "== host $PGHOST:$PGPORT user ${OWNER_USER:-$PGUSER} db $DB"
 echo "   ядро: $([ "$CORE" = 1 ] && echo да || echo нет), примеры: $([ "$EXAMPLES" = 1 ] && echo да || echo нет)"
 
 exists="$(${PSQL[@]} -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB'")"
 if [ -z "$exists" ]; then
-  ${PSQL[@]} -d postgres -c "CREATE DATABASE \"$DB\" ENCODING 'UTF8' TEMPLATE template0"
+  if [ -n "$OWNER_USER" ]; then
+    ${PSQL[@]} -d postgres -c "CREATE DATABASE \"$DB\" OWNER \"$OWNER_USER\" ENCODING 'UTF8' TEMPLATE template0"
+  else
+    ${PSQL[@]} -d postgres -c "CREATE DATABASE \"$DB\" ENCODING 'UTF8' TEMPLATE template0"
+  fi
   echo "created database $DB"
 else
   echo "database $DB already exists"
@@ -63,17 +80,13 @@ if [ "$EXAMPLES" = 1 ]; then
   ${PSQL[@]} -d "$DB" -q -f "$ROOT/db/examples/seed.sql"
 fi
 
-# Права: приложение пишет в ядро и читает примеры; роль только-чтения видит только примеры.
-if [ -n "$(${PSQL[@]} -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$RO_USER'")" ]; then
-  if [ "$CORE" = 1 ]; then
-    ${PSQL[@]} -d "$DB" -q -c "GRANT USAGE ON SCHEMA reports TO \"$PGUSER\"; GRANT ALL ON ALL TABLES IN SCHEMA reports TO \"$PGUSER\"; GRANT ALL ON ALL SEQUENCES IN SCHEMA reports TO \"$PGUSER\";"
-  fi
-  if [ "$EXAMPLES" = 1 ]; then
-    ${PSQL[@]} -d "$DB" -q -c "GRANT USAGE ON SCHEMA reports_examples TO \"$PGUSER\"; GRANT SELECT ON ALL TABLES IN SCHEMA reports_examples TO \"$PGUSER\";"
-    ${PSQL[@]} -d "$DB" -q -c "GRANT USAGE ON SCHEMA reports_examples TO \"$RO_USER\"; GRANT SELECT ON ALL TABLES IN SCHEMA reports_examples TO \"$RO_USER\";"
-    ${PSQL[@]} -d "$DB" -q -c "ALTER DEFAULT PRIVILEGES IN SCHEMA reports_examples GRANT SELECT ON TABLES TO \"$RO_USER\";"
-  fi
-  echo "read-only: $RO_USER — SELECT на reports_examples"
+# Права эксплуатационных ролей — одним декларативным файлом (db/roles.sql):
+# reporting_srv получает DML в ядре и чтение примеров, reporting_ro — только чтение примеров.
+if [ -n "$(${PSQL[@]} -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$SRV_USER'")" ]; then
+  ${PSQL[@]} -d "$DB" -q -f "$ROOT/db/roles.sql"
+  echo "права: $SRV_USER — DML в reports и чтение reports_examples; $RO_USER — только чтение примеров"
+else
+  echo "права: роль $SRV_USER не найдена — выполните scripts/dev-db-init.sh (или db/roles.sql вручную)"
 fi
 
 # Шаблоны из файлов в БД (ADR-21). Загрузка идёт через админский API, поэтому
