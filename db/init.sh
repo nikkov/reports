@@ -89,12 +89,12 @@ else
   echo "права: роль $SRV_USER не найдена — выполните scripts/dev-db-init.sh (или db/roles.sql вручную)"
 fi
 
-# Шаблоны из файлов в БД (ADR-21). Загрузка идёт через админский API, поэтому
-# при бутстрапе без запущенного бэкенда её пропускают (REP_SKIP_TEMPLATES=1).
+# Шаблоны из файлов в БД (ADR-21) — напрямую, без запущенного сервера (db/load-examples.sh).
+# Скрипт пишет под ролью сервера (PGUSER), права которой уже выданы выше по db/roles.sql.
 if [ "${REP_SKIP_TEMPLATES:-0}" = "1" ]; then
   echo "templates: пропущены (REP_SKIP_TEMPLATES=1)"
-elif [ "$CORE" = 1 ] && command -v node >/dev/null 2>&1; then
-  node "$ROOT/scripts/templates-push.mjs" "$ROOT"/backend/templates/*.json >/dev/null
+elif [ "$CORE" = 1 ]; then
+  REP_DB="$DB" "$ROOT/db/load-examples.sh" >/dev/null
   echo "templates: $(${PSQL[@]} -d "$DB" -tAc "SELECT count(*) FROM reports.report_templates")"
 fi
 

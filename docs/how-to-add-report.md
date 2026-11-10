@@ -103,6 +103,10 @@ npm run validate -- ../backend/templates/<id>.json
 ```bash
 cd ..
 . scripts/env.sh                     # PGPASSWORD и прочие переменные подключения
+# напрямую в БД, без запущенного сервера (рекомендуется при установке)
+./db/load-examples.sh <id>
+
+# или через админский API работающего сервера
 node scripts/templates-push.mjs backend/templates/<id>.json
 # или все сразу:
 node scripts/templates-push.mjs backend/templates/*.json
@@ -172,7 +176,8 @@ REP_E2E=1 ./scripts/check.sh     # всё вместе: conan, запрещён�
 | `backend/templates/*.json` | шаблоны (источник в репозитории) |
 | `frontend/src/template/schema.js` | канон JSON Schema |
 | `frontend/src/template/validate.js` | семантический валидатор |
-| `scripts/templates-push.mjs` | загрузка шаблонов в БД |
+| `db/load-examples.sh` | загрузка шаблонов прямо в БД (psql, без сервера и API) |
+| `scripts/templates-push.mjs` | загрузка шаблонов через админский API (нужен запущенный сервер) |
 | `docs/template-reference.md` | справочник полей |
 | `docs/expressions.md` | грамматика выражений |
 | `docs/decisions.md` | ADR, включая ADR-21 (хранение шаблонов) и ADR-22 (параметры-справочники) |

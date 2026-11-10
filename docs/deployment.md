@@ -63,7 +63,7 @@ REP_DB=reporting ./db/init.sh --core-only  # база «продукт без д
 
 # 3. Шаблоны из файлов в базу
 REP_ADMIN=1 REP_ADMIN_LOGIN=admin REP_ADMIN_PASSWORD=... \
-  node scripts/templates-push.mjs
+  ./db/load-examples.sh        # шаблоны примеров прямо в БД, без сервера
 
 # 4. Пользователи (режим сессий) — логины и пароли из переменных, не из репозитория
 REP_DB=reporting REP_ADMIN_PASSWORD=... REP_VIEWER_PASSWORD=... ./scripts/auth-init.sh
@@ -162,7 +162,8 @@ journalctl -u rep-backend -f
 1. Остановить сервис (или подготовить второй порт и переключить прокси);
 2. заменить `backend/build/rep` и каталог `dist`;
 3. применить новые миграции: `psql -d reporting -f db/migrations/<новая>.sql`;
-4. если менялись шаблоны — `node scripts/templates-push.mjs` и перезапуск (шаблоны читаются на старте);
+4. если менялись шаблоны — `./db/load-examples.sh` (напрямую в БД) или `node scripts/templates-push.mjs`
+   (через работающий сервер), затем перезапуск: шаблоны читаются на старте;
 5. запустить сервис, проверить `curl -s localhost:8080/api/health` — `status: ok`, `db: true`,
    `schemaVersion` соответствует ожидаемой версии формата шаблона;
 6. проверить каталог и один отчёт глазами.
