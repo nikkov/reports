@@ -1,12 +1,10 @@
 {
   "name": "rep-frontend",
   "private": true,
-  "version": "1.53.0",
+  "version": "1.54.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vite build",
-    "preview": "vite preview",
     "validate": "node scripts/validate.mjs",
     "schema:json": "node scripts/emit-schema.mjs",
     "test": "vitest run",

@@ -124,8 +124,8 @@ node scripts/templates-push.mjs backend/templates/*.json
 ## 6. Проверка в браузере
 
 ```bash
-open http://127.0.0.1:5173/                                 # список отчётов
-open "http://127.0.0.1:5173/report.html?report=<id>"        # сам отчёт
+open http://127.0.0.1:8080/                                 # список отчётов
+open "http://127.0.0.1:8080/report.html?report=<id>"        # сам отчёт
 ```
 
 В списке карточка должна показать заголовок, описание и бейджи параметров с их видом
@@ -144,7 +144,7 @@ curl -s -X POST localhost:8080/api/report/data -H 'Content-Type: application/jso
 
 ```bash
 cd frontend && npm test          # vitest: движок, выражения, валидатор
-cd frontend && npm run e2e       # Playwright (нужны запущенные backend :8080 и preview :5173)
+cd frontend && npm run e2e       # Playwright (нужен только backend :8080)
 REP_E2E=1 ./scripts/check.sh     # всё вместе: conan, запрещённые компоненты, сборка, тесты, golden, e2e
 ```
 

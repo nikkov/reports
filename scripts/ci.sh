@@ -2,7 +2,7 @@
 # Проверки без e2e (e2e требуют запущенных сервисов и БД): сборка бэкенда, unit-тесты,
 # валидация шаблонов, юнит-тесты и сборка фронтенда. Используется в CI и локально.
 #   ./scripts/ci.sh              — всё перечисленное
-#   REP_E2E=1 ./scripts/ci.sh    — плюс Playwright (нужны backend и preview на :8080/:5173)
+#   REP_E2E=1 ./scripts/ci.sh    — плюс Playwright (нужен backend:8080 — он же отдаёт статику)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

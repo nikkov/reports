@@ -1,4 +1,4 @@
-# Report Server — версия 1.53.0
+# Report Server — версия 1.54.0
 
 Принята постановщиком 2026-11-05. Шаблон самодостаточен: оформление, форматы, правила подсветки,
 SQL наборов данных и SQL справочников живут в нём. Есть админка `/admin.html`, экспорт в Excel (числа с форматами, объединения, подытоги), печать
@@ -133,22 +133,21 @@ REP_E2E=1 ./scripts/ci.sh    # то же + Playwright (нужны backend и pre
 > `Json::ValueIteratorBase::name`. `scripts/build.sh` и `scripts/ci.sh` передают этот флаг сами.
 
 ```bash
-./scripts/build.sh     # conan install + cmake + ctest + npm ci + build (идемпотентно)
-./scripts/demo.sh      # backend :8080 + preview dist :5173, печатает ссылку, Ctrl+C — стоп
+./scripts/build.sh     # conan install + cmake + ctest + npm ci + build + web рядом с бинарником
+./scripts/demo.sh      # один процесс :8080 — API и страницы, печатает ссылку, Ctrl+C — стоп
 ```
 
 ## Страница отчёта и e2e
 
 ```bash
-# бэкенд и dev-сервер должны быть запущены
-./backend/build/rep &                      # :8080
-cd frontend && npm run dev &               # :5173 (проксирует /api на :8080)
+# один процесс: и API, и статика (ADR-79). Порт всегда 8080
+./backend/build/rep &
 
-open http://127.0.0.1:5173/                                            # список отчётов
-open "http://127.0.0.1:5173/report.html?report=sales-summary&from=2026-01-01&to=2026-03-31"
-open http://127.0.0.1:5173/report.html?report=params-demo              # все виды параметров
-open http://127.0.0.1:5173/spike.html                                  # песочница рендерера
-cd frontend && npm run e2e                 # 18 тестов Playwright
+open http://127.0.0.1:8080/                                            # список отчётов
+open "http://127.0.0.1:8080/report.html?report=sales-summary&from=2026-01-01&to=2026-03-31"
+open http://127.0.0.1:8080/report.html?report=params-demo              # все виды параметров
+open http://127.0.0.1:8080/spike.html                                  # песочница рендерера
+cd frontend && npm run e2e                 # Playwright против :8080
 REP_E2E=1 ./scripts/check.sh               # всё вместе
 ```
 | `db/init.sh` | создание БД и загрузка синтетики (идемпотентно) |
@@ -211,10 +210,11 @@ curl -b cookie -X POST localhost:8080/api/admin/subscriptions/1/run
 
 ### E2E в CI и локально
 
-Сквозные тесты (47) гоняются на изолированном стенде: своя БД, порты и локальный SMTP-приёмник.
+Сквозные тесты гоняются на изолированном стенде: своя БД и локальный SMTP-приёмник,
+порт один — 8080 (сервер отдаёт и API, и статику).
 
 ```bash
-./scripts/ci-e2e.sh                  # локально: база reporting_ci, порты 8081/5174/1026
+./scripts/ci-e2e.sh                  # локально: база reporting_ci, порт 8080, SMTP 1025
 REP_CI_DB=my_ci ./scripts/ci-e2e.sh  # другая база — если reporting_ci занята
 ```
 
@@ -254,7 +254,7 @@ REP_CI_DB=my_ci ./scripts/ci-e2e.sh  # другая база — если report
 - прокси должен снимать префикс: `/reports/api/… → http://127.0.0.1:8080/api/…`
   (готовый пример — `deploy/nginx-reports.conf`, включая отдельный блок для SSE
   с `proxy_buffering off`);
-- проверить без nginx: `node scripts/serve-subpath.mjs --port 5180 --prefix /reports`
+- проверить без nginx: `./scripts/demo.sh` — сервер сам отдаёт `/report.html` и `/api` на :8080
   (тот же `dist`, префикс задаётся только при запуске стенда).
 
 ## Режимы входа

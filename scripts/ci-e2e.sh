@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Стенд для e2e «как в CI»: отдельная БД, свои порты, локальный приёмник писем.
+# Стенд для e2e «как в CI»: отдельная БД и локальный приёмник писем.
+# Порт один — 8080 (ADR-80): сервер отдаёт и API, и статику, отдельного preview нет.
 # Предполагает, что бэкенд и фронтенд уже собраны (CI собирает их шагами раньше).
 #
 #   ./scripts/ci-e2e.sh            — поднять стенд и прогнать Playwright
 #   REP_CI_DB=reporting_ci ./scripts/ci-e2e.sh
 #
-# Скрипт намеренно не трогает рабочую БД и рабочие порты: всё изолировано,
-# чтобы CI-прогон можно было повторить локально и наоборот.
+# Скрипт намеренно не трогает рабочую БД: прогон изолирован по базе.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,9 +14,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/scripts/env.sh"
 
 DB="${REP_CI_DB:-reporting_ci}"
-PORT="${REP_CI_PORT:-8081}"
-WEB_PORT="${REP_CI_WEB_PORT:-5174}"
-MAIL_PORT="${REP_CI_SMTP_PORT:-1026}"
+PORT="${REP_CI_PORT:-8080}"
+MAIL_PORT="${REP_CI_SMTP_PORT:-1025}"
 MAIL_DIR="${REP_CI_MAIL_DIR:-$ROOT/tmp/ci-mail}"
 
 [ "$DB" != "reporting" ] || { echo "REP_CI_DB не может совпадать с рабочей базой reporting"; exit 1; }
@@ -31,6 +30,9 @@ mkdir -p "$LOGDIR" "$MAIL_DIR"
 
 [ -x "$ROOT/backend/build/rep" ] || { echo "нет backend/build/rep: соберите бэкенд"; exit 1; }
 [ -d "$ROOT/frontend/dist" ] || { echo "нет frontend/dist: соберите фронтенд"; exit 1; }
+# статику отдаёт сам сервер: кладём сборку рядом с бинарником (ADR-79)
+rm -rf "$ROOT/backend/build/web"
+cp -a "$ROOT/frontend/dist" "$ROOT/backend/build/web"
 
 PIDS=()
 cleanup() {
@@ -72,22 +74,15 @@ set -a
 set +a
 REP_API="http://127.0.0.1:$PORT" node "$ROOT/scripts/templates-push.mjs" "$ROOT"/backend/templates/*.json | tail -1
 
-step "Фронтенд (preview собранного dist) :$WEB_PORT"
-( cd "$ROOT/frontend" && REP_API="http://127.0.0.1:$PORT" npx vite preview --port "$WEB_PORT" --host 127.0.0.1 \
-    > "$LOGDIR/web.log" 2>&1 ) &
-PIDS+=($!)
-for i in $(seq 1 60); do
-  curl -sf -m 1 "http://127.0.0.1:$WEB_PORT/" >/dev/null && break
-  sleep 0.5
-done
-curl -sf -m 2 "http://127.0.0.1:$WEB_PORT/" >/dev/null || {
-  echo "preview не поднялся:"; tail -30 "$LOGDIR/web.log"; exit 1;
+step "Статика через сервер"
+curl -sf -m 2 "http://127.0.0.1:$PORT/" >/dev/null || {
+  echo "сервер не отдаёт страницы — проверьте backend/build/web"; exit 1;
 }
 
 step "Playwright"
 cd "$ROOT/frontend"
 # REP_API нужен и global-setup: он логинится именно в тот бэкенд, чьи сессии проверяет стенд
-REP_API="http://127.0.0.1:$PORT" REP_E2E_BASE="http://127.0.0.1:$WEB_PORT" npx playwright test "$@"
+REP_API="http://127.0.0.1:$PORT" REP_E2E_BASE="http://127.0.0.1:$PORT" npx playwright test "$@"
 
 echo
 echo "CI-E2E: все e2e прошли"

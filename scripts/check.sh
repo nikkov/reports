@@ -116,10 +116,13 @@ if [ -f "$ROOT/frontend/package.json" ]; then
       echo "skip tests (нет npm-скрипта test)"
     fi
     if [ "${REP_E2E:-0}" = "1" ]; then
+      # сервер отдаёт страницы сам (ADR-79): сборка должна лежать рядом с бинарником
+      rm -rf "$ROOT/backend/build/web"
+      cp -a "$ROOT/frontend/dist" "$ROOT/backend/build/web"
       npm run --silent golden
       npm run --silent e2e
     else
-      echo "skip e2e (нужны запущенные backend:8080 и vite:5173; включить: REP_E2E=1 ./scripts/check.sh)"
+      echo "skip e2e (нужен backend:8080 — он же отдаёт статику; включить: REP_E2E=1 ./scripts/check.sh)"
     fi
   )
 else

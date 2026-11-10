@@ -10,18 +10,9 @@ import { ssePassthrough } from './sse-proxy.js'
 // Фиксированный префикс нужен редко — тогда REP_BASE=/reports/.
 export default defineConfig({
   base: process.env.REP_BASE || './',
+  // Отдельного dev/preview-сервера нет: и API, и статику отдаёт rep на :8080
+  // (ADR-79, ADR-80), поэтому у стенда один порт. Vite нужен только для сборки.
   plugins: [vue(), ssePassthrough()],
-  server: {
-    port: 5173,
-    host: '127.0.0.1',
-    proxy: { '/api': 'http://127.0.0.1:8080' }
-  },
-  // Демонстрация работает на prebuilt dist: preview тоже должен проксировать /api.
-  preview: {
-    port: 5173,
-    host: '127.0.0.1',
-    proxy: { '/api': process.env.REP_API || 'http://127.0.0.1:8080' }
-  },
   test: {
     include: ['src/**/*.test.js'],
     exclude: ['e2e/**', 'node_modules/**'],
