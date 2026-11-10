@@ -102,5 +102,18 @@ else
   echo "skip (нет frontend/package.json)"
 fi
 
+# e2e создаёт и удаляет свои отчёты, а снимки версий остаются (FK между историей и
+# шаблоном нет по ADR-26). Убираем сирот сразу после прогона, чтобы мусор не копился.
+# Без доступной БД шаг пропускается — check.sh должен работать и на голой машине.
+if command -v psql >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  if . "$(dirname "$0")/env.sh" >/dev/null 2>&1 && psql -tAc "SELECT 1" >/dev/null 2>&1; then
+    echo "=== Чистка сирот в БД (db-cleanup.sh) ==="
+    "$(dirname "$0")/db-cleanup.sh" | tail -1
+  else
+    echo "=== Чистка БД пропущена: база недоступна ==="
+  fi
+fi
+
 echo
 echo "ALL CHECKS PASSED"

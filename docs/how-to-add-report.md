@@ -11,7 +11,7 @@ SQL живёт в шаблоне: `datasets.<key>.sql` для данных и `p
 ```json
 "datasets": {
   "sales": {
-    "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id",
+    "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM reports_examples.sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id",
     "params": { "region": "$region", "category": "$category", "from": "$from", "to": "$to" }
   }
 }
@@ -22,7 +22,7 @@ SQL живёт в шаблоне: `datasets.<key>.sql` для данных и `p
   "label": "Регион",
   "source": {
     "kind": "lookup",
-    "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name"
+    "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name"
   }
 }
 ```
@@ -36,7 +36,7 @@ SQL живёт в шаблоне: `datasets.<key>.sql` для данных и `p
   "label": "Категория",
   "source": {
     "kind": "lookup",
-    "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1",
+    "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM reports_examples.sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1",
     "dependsOn": "region"
   }
 }
@@ -58,12 +58,12 @@ SQL живёт в шаблоне: `datasets.<key>.sql` для данных и `p
   "description": "Сводная по выбранному региону за период",
   "params": [
     { "name": "region", "type": "select", "label": "Регион", "required": true,
-      "source": { "kind": "lookup", "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name" } },
+      "source": { "kind": "lookup", "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name" } },
     { "name": "from", "type": "date", "label": "Период с", "required": true, "default": "2026-01-01", "source": { "kind": "date" } },
     { "name": "to", "type": "date", "label": "по", "required": true, "default": "2026-03-31", "source": { "kind": "date" } }
   ],
   "datasets": {
-    "sales": { "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE region_id = :region::int AND order_date >= :from::date AND order_date <= :to::date", "params": { "region": "$region", "from": "$from", "to": "$to" } }
+    "sales": { "sql": "SELECT region, category, product, amount, profit, order_date FROM reports_examples.sales WHERE region_id = :region::int AND order_date >= :from::date AND order_date <= :to::date", "params": { "region": "$region", "from": "$from", "to": "$to" } }
   },
   "blocks": [
     { "type": "text", "text": "Регион {{region}}, период {{from}} — {{to}}" },

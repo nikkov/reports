@@ -38,13 +38,13 @@
       "default": "",
       "source": {
         "kind": "lookup",
-        "sql": "SELECT DISTINCT service AS value, service AS label FROM ops ORDER BY service"
+        "sql": "SELECT DISTINCT service AS value, service AS label FROM reports_examples.ops ORDER BY service"
       }
     }
   ],
   "datasets": {
     "days": {
-      "sql": "SELECT o.day, round(avg(o.avg_ms)::numeric, 1) AS value_ms, min(o.avg_ms) AS min_ms, max(o.avg_ms) AS max_ms, round((avg(o.avg_ms) - coalesce(stddev_pop(o.avg_ms), 0))::numeric, 1) AS sd_low_ms, round((avg(o.avg_ms) + coalesce(stddev_pop(o.avg_ms), 0))::numeric, 1) AS sd_high_ms, sum(o.requests) AS requests FROM ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) GROUP BY o.day ORDER BY o.day",
+      "sql": "SELECT o.day, round(avg(o.avg_ms)::numeric, 1) AS value_ms, min(o.avg_ms) AS min_ms, max(o.avg_ms) AS max_ms, round((avg(o.avg_ms) - coalesce(stddev_pop(o.avg_ms), 0))::numeric, 1) AS sd_low_ms, round((avg(o.avg_ms) + coalesce(stddev_pop(o.avg_ms), 0))::numeric, 1) AS sd_high_ms, sum(o.requests) AS requests FROM reports_examples.ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) GROUP BY o.day ORDER BY o.day",
       "params": {
         "from": "$from",
         "to": "$to",

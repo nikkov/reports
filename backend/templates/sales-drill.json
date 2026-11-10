@@ -44,7 +44,7 @@
   ],
   "datasets": {
     "sales": {
-      "sql": "SELECT s.order_date, r.name AS region, s.category, s.product, s.amount, s.profit FROM sales s JOIN regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date AND (:region = '' OR r.name = :region) AND (:category = '' OR s.category = :category) ORDER BY s.order_date, s.id",
+      "sql": "SELECT s.order_date, r.name AS region, s.category, s.product, s.amount, s.profit FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date AND (:region = '' OR r.name = :region) AND (:category = '' OR s.category = :category) ORDER BY s.order_date, s.id",
       "params": {
         "from": "$from",
         "to": "$to",

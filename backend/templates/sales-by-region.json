@@ -10,7 +10,7 @@
       "required": true,
       "source": {
         "kind": "lookup",
-        "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name"
+        "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name"
       }
     },
     {
@@ -20,7 +20,7 @@
       "source": {
         "kind": "lookup",
         "dependsOn": "region",
-        "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1"
+        "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM reports_examples.sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1"
       }
     },
     {
@@ -52,7 +52,7 @@
         "from": "$from",
         "to": "$to"
       },
-      "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = :category) AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id"
+      "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM reports_examples.sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = :category) AND s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY s.category NULLS LAST, s.product, s.id"
     }
   },
   "blocks": [

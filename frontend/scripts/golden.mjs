@@ -70,13 +70,13 @@ async function main() {
   const sumExpr = aggCols.map((c) => `sum(${c.field})::bigint`).join(', ')
 
   const [grandRow] = psql(
-    `SELECT ${sumExpr}, count(*) FROM sales WHERE order_date BETWEEN '${FROM}' AND '${TO}'`
+    `SELECT ${sumExpr}, count(*) FROM reports_examples.sales WHERE order_date BETWEEN '${FROM}' AND '${TO}'`
   )
   const grandSql = grandRow.split('|').map(Number)
   const grandModelRow = model.rows.at(-1)
 
   const regionSql = psql(
-    `SELECT coalesce(region, '(пусто)'), ${sumExpr} FROM sales
+    `SELECT coalesce(region, '(пусто)'), ${sumExpr} FROM reports_examples.sales
       WHERE order_date BETWEEN '${FROM}' AND '${TO}' GROUP BY 1 ORDER BY 1`
   )
 

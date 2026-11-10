@@ -23,9 +23,14 @@
 | `PGDATABASE` | `reporting` | база данных |
 | `REP_STATEMENT_TIMEOUT_MS` | `30000` | `statement_timeout` соединения в миллисекундах; по его истечении API отвечает 504 `SQL_TIMEOUT` |
 | `REP_DB_POOL` | `8` | размер пула основной роли |
+| `REP_DB_SCHEMA` | `reports` | схема ядра: шаблоны, пользователи, сессии, рассылка, журнал (ADR-74) |
+| `PGOPTIONS` | `-c search_path=reports` | выставляется `scripts/env.sh`: psql-скрипты работают с ядром по коротким именам |
 
-Основная роль должна уметь писать: шаблоны, `users`, `sessions`, `report_subscriptions`,
-`subscription_runs`, `audit_log`. Если нужна изоляция чтения — см. ниже.
+Основная роль должна уметь писать в схему `reports`: шаблоны (`report_templates`, `report_templates_history`),
+`users`, `sessions`, `report_subscriptions`, `subscription_runs`, `audit_log`. Демонстрационные данные лежат
+в отдельной схеме `reports_examples` (`sales`, `finance`, `ops`, `regions`) и подключаются только из SQL
+шаблонов — поэтому схемы в шаблонах указываются явно, а ядро коротко. Схемы создаёт `db/init.sh`
+(`--core-only` — только ядро, без примеров). Если нужна изоляция чтения — см. ниже.
 
 ## Роль только-чтения для данных отчётов
 
@@ -39,6 +44,7 @@
 | `REP_RO_DB_HOST` | значение `PGHOST` | адрес для этого пула |
 | `REP_RO_DB_PORT` | значение `PGPORT` | порт |
 | `REP_RO_DB_NAME` | значение `PGDATABASE` | база |
+| `REP_RO_DB_SCHEMA` | `reports_examples` | схема данных отчётов для этого пула (ADR-74) |
 
 Права выдаются `db/init.sh` (роль создаётся `scripts/db-ro.sh`). Пул — фиксированные 2 соединения.
 `/api/health` показывает `readOnlyRole: true`, если пул создан.

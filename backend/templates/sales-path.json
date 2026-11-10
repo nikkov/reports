@@ -25,7 +25,7 @@
   ],
   "datasets": {
     "sales": {
-      "sql": "SELECT r.name AS region, s.category, s.product, s.amount FROM sales s JOIN regions r ON r.id = s.region_id WHERE s.order_date BETWEEN :from::date AND :to::date"
+      "sql": "SELECT r.name AS region, s.category, s.product, s.amount FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date BETWEEN :from::date AND :to::date"
     }
   },
   "blocks": [

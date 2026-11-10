@@ -85,11 +85,11 @@
 ```json
 {
   "kind": "lookup",
-  "sql": "SELECT id::text AS value, name AS label FROM regions ORDER BY name"
+  "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name"
 }
 {
   "kind": "lookup",
-  "sql": "SELECT DISTINCT category AS value, category AS label FROM sales WHERE region_id = :region::int ORDER BY 1",
+  "sql": "SELECT DISTINCT category AS value, category AS label FROM reports_examples.sales WHERE region_id = :region::int ORDER BY 1",
   "dependsOn": "region"
 }
 { "kind": "static", "options": [{ "value": "all", "label": "Все строки" }] }
@@ -120,7 +120,7 @@
 ```json
 "datasets": {
   "sales": {
-    "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date",
+    "sql": "SELECT region, category, product, amount, profit, order_date FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date",
     "params": { "from": "$from", "to": "$to" }
   }
 }

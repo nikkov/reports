@@ -32,14 +32,14 @@
   ],
   "datasets": {
     "byRegion": {
-      "sql": "SELECT r.name AS region, count(*) AS orders, sum(s.amount) AS amount FROM sales s JOIN regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name ORDER BY amount DESC",
+      "sql": "SELECT r.name AS region, count(*) AS orders, sum(s.amount) AS amount FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name ORDER BY amount DESC",
       "params": {
         "from": "$from",
         "to": "$to"
       }
     },
     "byCategory": {
-      "sql": "SELECT category, count(*) AS orders, sum(profit) AS profit FROM sales WHERE order_date >= :from::date AND order_date <= :to::date GROUP BY category ORDER BY profit DESC",
+      "sql": "SELECT category, count(*) AS orders, sum(profit) AS profit FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date GROUP BY category ORDER BY profit DESC",
       "params": {
         "from": "$from",
         "to": "$to"

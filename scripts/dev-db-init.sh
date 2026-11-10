@@ -6,8 +6,9 @@
 #   PGADMIN_USER=postgres ./scripts/dev-db-init.sh   — если в кластере нет вашей роли
 #
 # Скрипт идемпотентен: роли и базы создаются один раз, пароли переиспользуются из
-# backend/.env, шаблоны и пользователи обновляются. Схему (db/schema.sql) скрипт
-# пересоздаёт всегда — это dev-база, данные отчётов не жалко.
+# backend/.env, шаблоны и пользователи обновляются. Структуру и данные создаёт
+# db/init.sh (ядро — схема reports, примеры — reports_examples, ADR-74): здесь только
+# роли, базы, права и .env, чтобы не держать два источника правды.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -64,21 +65,6 @@ done
 export PGHOST=127.0.0.1 PGPORT="$PORT" PGUSER="$APP_USER" PGPASSWORD="$APP_PW"
 APP=(psql -h 127.0.0.1 -p "$PORT" -U "$APP_USER" -v ON_ERROR_STOP=1 -q)
 
-for db in reporting reporting_ci; do
-  echo "== схема и данные в $db"
-  "${APP[@]}" -d "$db" -f "$ROOT/db/schema.sql" >/dev/null
-  if [ "$SEED" = "1" ]; then
-    "${APP[@]}" -d "$db" -f "$ROOT/db/seed.sql" >/dev/null
-  fi
-  for migration in "$ROOT"/db/migrations/*.sql; do
-    [ -e "$migration" ] || continue
-    "${APP[@]}" -d "$db" -f "$migration" >/dev/null
-  done
-  # роль только-чтения: на каждую базу, иначе чтение падает «permission denied»
-  "${APP[@]}" -d "$db" \
-    -c "GRANT USAGE ON SCHEMA public TO \"$RO_USER\"; GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"$RO_USER\";" >/dev/null
-done
-
 # backend/.env: переключаем приложение на локальный кластер
 cat > "$ENV_FILE" <<ENV
 # Подключение к dev-БД. Скопировать в backend/.env (в git не попадает).
@@ -95,12 +81,20 @@ ENV
 chmod 600 "$ENV_FILE"
 echo "== backend/.env переключён на 127.0.0.1:$PORT (пароли не печатаются)"
 
+# Структуру и данные создаёт db/init.sh: ядро — схема reports, примеры — reports_examples
+# (ADR-74). Дублировать DDL здесь нельзя: два источника правды разъезжаются.
+for db in reporting reporting_ci; do
+  echo "== схема и данные в $db"
+  REP_DB="$db" REP_SKIP_TEMPLATES=1 "$ROOT/db/init.sh" $([ "$SEED" = "1" ] || echo --core-only) >/dev/null
+done
+
+
 # Пользователи админки (ADR-34): пароли дописываются в тот же .env
 REP_AUTH=1 PGDATABASE=reporting "$ROOT/scripts/auth-init.sh" >/dev/null
 
 if [ "$SEED" = "1" ]; then
-  counts="$("${APP[@]}" -d reporting -tAc \
-    "SELECT (SELECT count(*) FROM sales) || '/' || (SELECT count(*) FROM finance) || '/' || (SELECT count(*) FROM ops)")"
+  counts=$("${APP[@]}" -d reporting -tAc \
+    "SELECT (SELECT count(*) FROM reports_examples.sales) || '/' || (SELECT count(*) FROM reports_examples.finance) || '/' || (SELECT count(*) FROM reports_examples.ops)")
   echo "   строки sales/finance/ops: $counts"
   [ "$counts" = "50000/576/540" ] || die "неожиданное число строк: $counts"
 fi

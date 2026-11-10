@@ -32,7 +32,7 @@
   ],
   "datasets": {
     "sales": {
-      "sql": "SELECT s.category, s.amount, s.profit FROM sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date",
+      "sql": "SELECT s.category, s.amount, s.profit FROM reports_examples.sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date",
       "params": {
         "from": "$from",
         "to": "$to"

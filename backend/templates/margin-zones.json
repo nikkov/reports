@@ -37,7 +37,7 @@
         "from": "$from",
         "to": "$to"
       },
-      "sql": "SELECT round(sum(s.profit)::numeric / nullif(sum(s.amount), 0) * 100, 2) AS margin_pct, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS deals FROM sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date"
+      "sql": "SELECT round(sum(s.profit)::numeric / nullif(sum(s.amount), 0) * 100, 2) AS margin_pct, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS deals FROM reports_examples.sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date"
     }
   },
   "blocks": [

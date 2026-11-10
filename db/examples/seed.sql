@@ -1,17 +1,18 @@
--- Детерминированные синтетические данные (ADR-16). Повторный запуск безопасен.
+-- Детерминированные синтетические данные примеров (ADR-16, ADR-74).
+-- Схема reports_examples; повторный запуск безопасен.
 -- Значения получаются арифметикой от i, поэтому результат не зависит от random()/версии СУБД.
 BEGIN;
 
-TRUNCATE sales, finance, ops, regions RESTART IDENTITY;
+TRUNCATE reports_examples.sales, reports_examples.finance, reports_examples.ops, reports_examples.regions RESTART IDENTITY;
 
-INSERT INTO regions (id, name) VALUES
+INSERT INTO reports_examples.regions (id, name) VALUES
     (1, 'Север'), (2, 'Юг'), (3, 'Запад'), (4, 'Восток'), (5, 'Центр');
 
--- sales: 50 000 строк, период 2025-10-01 .. 2026-03-31 (182 дня)
-INSERT INTO sales (id, order_date, region_id, region, category, product, customer, qty, amount, profit)
+-- reports_examples.sales: 50 000 строк, период 2025-10-01 .. 2026-03-31 (182 дня)
+INSERT INTO reports_examples.sales (id, order_date, region_id, region, category, product, customer, qty, amount, profit)
 SELECT i,
        DATE '2025-10-01' + ((i * 17) % 182),
-       (SELECT id FROM regions WHERE name = CASE WHEN i % 1009 = 0 THEN NULL
+       (SELECT id FROM reports_examples.regions WHERE name = CASE WHEN i % 1009 = 0 THEN NULL
             ELSE (ARRAY['Север','Юг','Запад','Восток','Центр'])[1 + (i * 7) % 5] END),
        CASE WHEN i % 1009 = 0 THEN NULL
             ELSE (ARRAY['Север','Юг','Запад','Восток','Центр'])[1 + (i * 7) % 5] END,
@@ -27,8 +28,8 @@ SELECT i,
             ELSE (100 * (100 + (i * 37) % 900)) / 4 - 100 * ((i * 11) % 50) END
 FROM generate_series(1, 50000) AS g(i);
 
--- finance: 6 периодов x 12 ЦФ x 8 счетов = 576 строк
-INSERT INTO finance (id, period, cost_center, account, plan_amount, fact_amount)
+-- reports_examples.finance: 6 периодов x 12 ЦФ x 8 счетов = 576 строк
+INSERT INTO reports_examples.finance (id, period, cost_center, account, plan_amount, fact_amount)
 SELECT i,
        DATE '2025-10-01' + (((i * 5) % 6) * 30),
        CASE WHEN i % 97 = 0 THEN NULL ELSE 'ЦФ-' || (1 + (i * 7) % 12) END,
@@ -37,8 +38,8 @@ SELECT i,
        1000 * (500 + (i * 43) % 5000)
 FROM generate_series(1, 576) AS g(i);
 
--- ops: 90 дней x 6 сервисов = 540 строк
-INSERT INTO ops (id, day, service, team, requests, failures, avg_ms)
+-- reports_examples.ops: 90 дней x 6 сервисов = 540 строк
+INSERT INTO reports_examples.ops (id, day, service, team, requests, failures, avg_ms)
 SELECT i,
        DATE '2026-01-01' + ((i * 11) % 90),
        (ARRAY['api','web','etl','auth','billing','search'])[1 + (i * 5) % 6],
@@ -48,8 +49,8 @@ SELECT i,
        50 + (i * 13) % 400
 FROM generate_series(1, 540) AS g(i);
 
-ANALYZE sales;
-ANALYZE finance;
-ANALYZE ops;
+ANALYZE reports_examples.sales;
+ANALYZE reports_examples.finance;
+ANALYZE reports_examples.ops;
 
 COMMIT;

@@ -56,13 +56,17 @@ std::string connInfoFromEnv() {
     const std::string password = envOr("PGPASSWORD", "");
     const std::string dbname = envOr("PGDATABASE", "reporting");
     const std::string timeoutMs = envOr("REP_STATEMENT_TIMEOUT_MS", "30000");
+    // Ядро живёт в отдельной схеме (ADR-74): без search_path приложение искало бы
+    // таблицы в public. Примеры (reports_examples) подключаются только из SQL шаблонов
+    // и поэтому указываются там явно.
+    const std::string schema = envOr("REP_DB_SCHEMA", "reports");
 
     // statement_timeout задаётся на уровне соединения через libpq option (ADR-7).
     std::ostringstream dsn;
     dsn << "host=" << host << " port=" << port << " user=" << user
         << " password=" << password << " dbname=" << dbname
         << " application_name=rep-backend"
-        << " options='-c statement_timeout=" << timeoutMs << "'";
+        << " options='-c statement_timeout=" << timeoutMs << " -c search_path=" << schema << "'";
     return dsn.str();
 }
 
@@ -75,12 +79,14 @@ std::string readOnlyConnInfoFromEnv() {
     const std::string port = envOr("REP_RO_DB_PORT", envOr("PGPORT", "5432"));
     const std::string dbname = envOr("REP_RO_DB_NAME", envOr("PGDATABASE", "reporting"));
     const std::string timeoutMs = envOr("REP_STATEMENT_TIMEOUT_MS", "30000");
+    // Роль только-чтения работает с данными отчётов, то есть с примерами (ADR-33, ADR-74)
+    const std::string schema = envOr("REP_RO_DB_SCHEMA", "reports_examples");
 
     std::ostringstream dsn;
     dsn << "host=" << host << " port=" << port << " user=" << user
         << " password=" << password << " dbname=" << dbname
         << " application_name=rep-backend-ro"
-        << " options='-c statement_timeout=" << timeoutMs << "'";
+        << " options='-c statement_timeout=" << timeoutMs << " -c search_path=" << schema << "'";
     return dsn.str();
 }
 

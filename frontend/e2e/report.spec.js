@@ -1347,7 +1347,7 @@ test('детали группы: страницы по 200, кнопка «ещ�
         ],
         datasets: {
           sales: {
-            sql: 'SELECT s.category, s.amount, s.profit FROM sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date',
+            sql: 'SELECT s.category, s.amount, s.profit FROM reports_examples.sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date',
             params: { from: '$from', to: '$to' }
           }
         },
@@ -1880,7 +1880,7 @@ test('серверная валидация шаблона: список оши�
     version: 1,
     id: 'bad-server-e2e',
     title: 'Плохой шаблон',
-    datasets: { s: { sql: 'DELETE FROM sales' } },
+    datasets: { s: { sql: 'DELETE FROM reports_examples.sales' } },
     blocks: [{ type: 'table', dataKey: 's', columns: [{ title: 'без поля' }] }]
   }
 
@@ -1941,6 +1941,9 @@ test('обновление по событию: публикация шабло�
 
   await expect.poll(() => calls.length, { timeout: 5000 }).toBeGreaterThanOrEqual(2)
   await expect(page.locator('h1')).toHaveText('По событию e2e v2')
+
+  // убираем за собой: иначе шаблон остаётся в каталоге после прогона
+  await request.delete(`/api/reports/${id}`)
 })
 
 test('автообновление: шаблон задаёт период, страница перезапрашивает данные', async ({ page, request }) => {

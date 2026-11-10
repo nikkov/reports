@@ -32,3 +32,10 @@ export PGPORT="${PGPORT:-32770}"
 export PGUSER="${PGUSER:-postgres}"
 export PGPASSWORD="${PGPASSWORD:-postgres}"
 export PGDATABASE="${PGDATABASE:-reporting}"
+
+# Ядро живёт в схеме reports (ADR-74): psql-скрипты (auth-init, проверки, db-ro) работают
+# с короткими именами таблиц, а примеры всегда указывают reports_examples явно.
+case "${PGOPTIONS:-}" in
+  *search_path=reports*) ;;
+  *) export PGOPTIONS="${PGOPTIONS:-} -c search_path=reports" ;;
+esac

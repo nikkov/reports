@@ -1,4 +1,4 @@
-# Report Server — версия 1.46.1
+# Report Server — версия 1.47.0
 
 Принята постановщиком 2026-11-05. Шаблон самодостаточен: оформление, форматы, правила подсветки,
 SQL наборов данных и SQL справочников живут в нём. Есть админка `/admin.html`, экспорт в Excel (числа с форматами, объединения, подытоги), печать
@@ -61,8 +61,11 @@ cmake --build backend/build -j"$(nproc)"
 
 ## Данные
 
-`db/schema.sql` — `sales` (50 000, с `region_id` → `regions`), `regions` (5), `finance` (576), `ops` (540), `report_templates`.
-`db/seed.sql` детерминирован (значения — арифметика от `i`), повторный запуск безопасен.
+Схемы разделены (ADR-74): ядро — `reports` (`db/core.sql`): `report_templates`, `report_templates_history`,
+`users`, `sessions`, `report_subscriptions`, `subscription_runs`, `audit_log`. Примеры — `reports_examples`
+(`db/examples/schema.sql` + `seed.sql`): `sales` (50 000, с `region_id` → `regions`), `regions` (5),
+`finance` (576), `ops` (540). `./db/init.sh --core-only` ставит только ядро, без демо-данных.
+`db/examples/seed.sql` детерминирован (значения — арифметика от `i`), повторный запуск безопасен.
 Период продаж: 2025-10-01 … 2026-03-31. В данных намеренно есть `NULL`-ключи (49 регионов, 23 категории),
 нулевые суммы (50), отрицательная прибыль (1221) и одна строка-выброс.
 

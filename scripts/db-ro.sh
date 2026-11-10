@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ENV_FILE="$ROOT/backend/.env"
 RO_USER="${REP_RO_DB_USER:-reporting_ro}"
-ROWS="INSERT INTO regions(id, name) VALUES (99991, 'should-fail')"
+ROWS="INSERT INTO reports_examples.regions(id, name) VALUES (99991, 'should-fail')"
 
 rotate=false
 [ "${1:-}" = "--rotate" ] && rotate=true
@@ -32,22 +32,42 @@ if [ -z "$current" ] || [ "$rotate" = true ]; then
   echo "пароль роли $RO_USER обновлён в backend/.env"
 fi
 
+# Подходит ли уже пароль из .env: если роль логинится, менять её не нужно — и не
+# обязательно иметь на это права (ALTER ROLE доступен суперпользователю).
+role_login() {
+  PGPASSWORD="$current" psql -h "$PGHOST" -p "$PGPORT" -U "$RO_USER" -d "$PGDATABASE" -tAc "SELECT 1" >/dev/null 2>&1
+}
+
 exists="$(psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$RO_USER'")"
 if [ -z "$exists" ]; then
-  psql -v ON_ERROR_STOP=1 -c "CREATE ROLE $RO_USER LOGIN PASSWORD '$current'"
-  echo "роль $RO_USER создана"
-else
-  psql -v ON_ERROR_STOP=1 -c "ALTER ROLE $RO_USER LOGIN PASSWORD '$current'"
+  if psql -v ON_ERROR_STOP=1 -c "CREATE ROLE $RO_USER LOGIN PASSWORD '$current'" 2>/dev/null; then
+    echo "роль $RO_USER создана"
+  else
+    echo "ОШИБКА: роль $RO_USER не создана — нужны права суперпользователя (запустите под postgres)" >&2
+    exit 1
+  fi
+elif role_login; then
+  echo "роль $RO_USER уже с этим паролем — менять не нужно"
+elif psql -v ON_ERROR_STOP=1 -c "ALTER ROLE $RO_USER LOGIN PASSWORD '$current'" 2>/dev/null; then
   echo "роль $RO_USER обновлена"
+else
+  echo "ОШИБКА: пароль $RO_USER не подходит, а сменить его нет прав (нужен суперпользователь)" >&2
+  exit 1
 fi
 
 psql -v ON_ERROR_STOP=1 -f "$ROOT/db/roles.sql" >/dev/null
-echo "права: SELECT на схему public, запись запрещена"
+echo "права: SELECT на схему reports_examples, запись запрещена"
+
+# Страховки (statement_timeout, read-only по умолчанию) требуют прав суперпользователя:
+# под обычной ролью приложения пропускаем — сам бэкенд задаёт тайм-аут в DSN.
+if ! psql -v ON_ERROR_STOP=1 -f "$ROOT/db/roles-hardening.sql" >/dev/null 2>&1; then
+  echo "   замечание: ALTER ROLE пропущен — нужны права суперпользователя (запустите под postgres)"
+fi
 
 # --- проверки на живом соединении -----------------------------------------
 set +e
 ok_read="$(psql "host=${PGHOST} port=${PGPORT} user=${RO_USER} password=${current} dbname=${PGDATABASE}" \
-  -tAc "SELECT count(*) FROM sales" 2>&1)"
+  -tAc "SELECT count(*) FROM reports_examples.sales" 2>&1)"
 set -e
 if [ -z "$ok_read" ] || ! [[ "$ok_read" =~ ^[0-9]+$ ]]; then
   echo "ОШИБКА: роль не читает sales: $ok_read" >&2
@@ -59,7 +79,8 @@ set +e
 write_out="$(psql "host=${PGHOST} port=${PGPORT} user=${RO_USER} password=${current} dbname=${PGDATABASE}" \
   -c "$ROWS" 2>&1)"
 set -e
-if echo "$write_out" | grep -qi "read-only\|permission denied\|только для чтения"; then
+# сообщение зависит от локали сервера: с русской локалью это «нет доступа к таблице …»
+if echo "$write_out" | grep -qi "read-only\|permission denied\|только для чтения\|нет доступа"; then
   echo "запись запрещена: $(echo "$write_out" | head -1)"
 else
   echo "ОШИБКА: роль смогла писать в базу: $write_out" >&2

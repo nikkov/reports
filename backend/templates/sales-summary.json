@@ -30,7 +30,7 @@
         "from": "$from",
         "to": "$to"
       },
-      "sql": "SELECT region, category, product, amount, profit, order_date FROM sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id"
+      "sql": "SELECT region, category, product, amount, profit, order_date FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id"
     }
   },
   "blocks": [

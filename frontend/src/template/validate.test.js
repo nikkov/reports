@@ -120,8 +120,8 @@ describe('validateTemplate', () => {
   it('принимает справочник из БД и каскад от него', () => {
     const t = base()
     t.params = [
-      { name: 'region', type: 'select', source: { kind: 'lookup', sql: 'SELECT id::text AS value, name AS label FROM regions' }, required: true },
-      { name: 'category', type: 'select', source: { kind: 'lookup', sql: 'SELECT DISTINCT category AS value, category AS label FROM sales WHERE region_id = :region::int', dependsOn: 'region' } }
+      { name: 'region', type: 'select',        source: { kind: 'lookup', sql: 'SELECT id::text AS value, name AS label FROM reports_examples.regions' }, required: true },
+      { name: 'category', type: 'select', source: { kind: 'lookup', sql: 'SELECT DISTINCT category AS value, category AS label FROM reports_examples.sales WHERE region_id = :region::int', dependsOn: 'region' } }
     ]
     t.datasets.sales.params = { from: '$region', to: '$region' }
     t.blocks[0].text = 'Регион {{region}}'

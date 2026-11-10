@@ -26,10 +26,10 @@
 # 1. Сборка (на этой же машине или перенос артефактов)
 ./scripts/build.sh
 
-# 2. База: схема, данные, миграции, права роли только-чтения
-./scripts/db-ro.sh                 # создаёт reporting_ro и выдаёт SELECT
-REP_DB=reporting ./db/init.sh      # ВНИМАНИЕ: пересоздаёт таблицы отчётов
-psql -d reporting -f db/seed.sql   # синтетические данные, если нужны
+# 2. База: ядро (схема reports), примеры (reports_examples), миграции, права readonly-роли
+./scripts/db-ro.sh                       # создаёт reporting_ro и выдаёт SELECT на примеры
+REP_DB=reporting ./db/init.sh            # ядро + примеры; только ядро: --core-only
+REP_DB=reporting ./db/init.sh --core-only  # база «продукт без демо-данных»
 
 # 3. Шаблоны из файлов в базу
 REP_ADMIN=1 REP_ADMIN_LOGIN=admin REP_ADMIN_PASSWORD=... \
@@ -39,8 +39,10 @@ REP_ADMIN=1 REP_ADMIN_LOGIN=admin REP_ADMIN_PASSWORD=... \
 REP_DB=reporting REP_ADMIN_PASSWORD=... REP_VIEWER_PASSWORD=... ./scripts/auth-init.sh
 ```
 
-`db/init.sh` идемпотентен по миграциям, но `db/schema.sql` пересоздаёт таблицы — на рабочей базе
-его не запускают, только миграции из `db/migrations/*.sql` (они идемпотентны).
+`db/init.sh` идемпотентен по структуре (CREATE ... IF NOT EXISTS) и по миграциям, но примеры
+перезаливает (`db/examples/seed.sql` делает TRUNCATE). На рабочей базе запускают только миграции из
+`db/migrations/*.sql` — они идемпотентны. Ядро и примеры живут в разных схемах: `reports` и
+`reports_examples` (ADR-74), поэтому `--core-only` поднимает продукт без синтетики.
 
 ## Конфигурация
 
