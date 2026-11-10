@@ -9,6 +9,11 @@
 
 ## Подключение к PostgreSQL
 
+Для разработки — локальный кластер PostgreSQL 15 (`127.0.0.1:5432`): его поднимает и накатывает
+схему скрипт `./scripts/dev-db-init.sh` (роли `rep_app` и `reporting_ro`, базы `reporting` и
+`reporting_ci`, синтетика 50 000/576/540 строк, пользователи админки, `backend/.env`). Скрипт
+идемпотентен: повторный запуск пересоздаёт схему и данные, пароли берёт из `.env`.
+
 | Переменная | По умолчанию | Что делает |
 |---|---|---|
 | `PGHOST` | `127.0.0.1` | адрес сервера БД |
@@ -164,7 +169,8 @@
 ## Пример
 
 ```bash
-export PGHOST=192.168.0.3 PGPORT=32770 PGDATABASE=reporting
+# локальный кластер разработки (то же, что пишет scripts/dev-db-init.sh)
+export PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE=reporting
 export PGUSER=rep_app PGPASSWORD=...            # основная роль: чтение и запись
 export REP_RO_DB_USER=reporting_ro REP_RO_DB_PASSWORD=...   # данные — только чтение
 export REP_HOST=127.0.0.1 REP_PORT=8080 REP_ADMIN=1

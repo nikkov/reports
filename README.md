@@ -1,4 +1,4 @@
-# Report Server — версия 1.46.0
+# Report Server — версия 1.46.1
 
 Принята постановщиком 2026-11-05. Шаблон самодостаточен: оформление, форматы, правила подсветки,
 SQL наборов данных и SQL справочников живут в нём. Есть админка `/admin.html`, экспорт в Excel (числа с форматами, объединения, подытоги), печать
@@ -45,13 +45,14 @@ SQL наборов данных и SQL справочников живут в н
 - Linux x86_64, g++ ≥ 12, CMake ≥ 3.20 (`cmake_minimum_required` в `backend/CMakeLists.txt`)
 - Conan **v1** (1.66.0) из venv `~/python_venv` — bare `conan` в PATH это v2, он не подходит (ADR-13)
 - Node.js ≥ 20 (nvm: `nvm use 24`)
-- PostgreSQL 18 (dev: `192.168.0.3:32770`, БД `reporting`)
+- PostgreSQL 15+ (dev: локальный кластер `127.0.0.1:5432`, БД `reporting` — поднимается
+  скриптом `./scripts/dev-db-init.sh`; стенд может смотреть на отдельный сервер)
 
 ## Быстрый старт
 
 ```bash
-cp backend/.env.example backend/.env     # креды БД (в git не попадает)
-./db/init.sh                             # создать reporting + 50k синтетических строк
+./scripts/dev-db-init.sh                 # локальный PostgreSQL 15: роли, базы, схема, 50k строк, .env
+#   стенд на отдельном сервере: cp backend/.env.example backend/.env && ./db/init.sh
 ./scripts/conan install backend -if backend/build --build missing -s build_type=Release
 cmake -S backend -B backend/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PWD/backend/build
 cmake --build backend/build -j"$(nproc)"
