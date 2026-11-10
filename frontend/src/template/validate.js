@@ -209,6 +209,81 @@ export function validateTemplate(template) {
 
   const params = template.params || []
 
+  // Источники данных (ADR-76): блок connections описывает, куда идти за данными —
+  // адрес, базу, пользователя, схему, режим SSL и имя переменной окружения с паролем.
+  // Пароль в шаблоне не хранится (решение PO), поэтому поле password — ошибка.
+  // Наборы и справочники ссылаются на источник по ключу; `default` — сервер из
+  // окружения, его можно не объявлять.
+  const connections = template.connections && typeof template.connections === 'object' ? template.connections : {}
+  const connKeys = new Set(Object.keys(connections))
+  const connKnown = (key) => !key || key === 'default' || connKeys.has(key)
+  const idPattern = /^[a-z0-9][a-z0-9_-]*$/
+  const envPattern = /^[A-Za-z_][A-Za-z0-9_]*$/
+  const sslModes = ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']
+
+  for (const [key, conn] of Object.entries(connections)) {
+    const base = `connections.${key}`
+    if (!idPattern.test(key)) {
+      errors.push({ path: base, message: 'ключ источника должен соответствовать ^[a-z0-9][a-z0-9_-]*$' })
+    }
+    if (!conn || typeof conn !== 'object' || Array.isArray(conn)) {
+      errors.push({ path: base, message: 'источник должен быть объектом' })
+      continue
+    }
+    if (Object.prototype.hasOwnProperty.call(conn, 'password')) {
+      errors.push({
+        path: `${base}.password`,
+        message: 'пароль в шаблоне не хранится: укажите passwordEnv с именем переменной окружения'
+      })
+    }
+    const kind = conn.kind || 'postgres'
+    if (!['postgres', 'rest'].includes(kind)) {
+      errors.push({ path: `${base}.kind`, message: `неизвестный kind «${kind}»: поддержаны postgres и rest` })
+      continue
+    }
+    if (kind === 'postgres') {
+      if (!conn.host) errors.push({ path: `${base}.host`, message: 'для postgres нужен host' })
+      if (!conn.database) errors.push({ path: `${base}.database`, message: 'для postgres нужна database' })
+      if (!conn.user) errors.push({ path: `${base}.user`, message: 'для postgres нужен user' })
+      if (!conn.passwordEnv) {
+        errors.push({
+          path: `${base}.passwordEnv`,
+          message: 'для postgres нужен passwordEnv — имя переменной окружения с паролем'
+        })
+      } else if (!envPattern.test(conn.passwordEnv)) {
+        errors.push({ path: `${base}.passwordEnv`, message: 'passwordEnv должен быть именем переменной окружения' })
+      }
+      if (conn.schema && !envPattern.test(conn.schema)) {
+        errors.push({ path: `${base}.schema`, message: 'schema должен быть идентификатором' })
+      }
+      const ssl = conn.sslmode || conn.sslMode
+      if (ssl && !sslModes.includes(ssl)) {
+        errors.push({
+          path: `${base}.sslmode`,
+          message: 'sslmode: disable, allow, prefer, require, verify-ca или verify-full'
+        })
+      }
+      if (conn.connectTimeout !== undefined &&
+          !(Number.isInteger(conn.connectTimeout) && conn.connectTimeout >= 1 && conn.connectTimeout <= 120)) {
+        errors.push({ path: `${base}.connectTimeout`, message: 'connectTimeout — целое 1…120 секунд' })
+      }
+      if (conn.statementTimeoutMs !== undefined &&
+          !(Number.isInteger(conn.statementTimeoutMs) &&
+            conn.statementTimeoutMs >= 0 && conn.statementTimeoutMs <= 600000)) {
+        errors.push({
+          path: `${base}.statementTimeoutMs`,
+          message: 'statementTimeoutMs — целое 0…600000 (0 — без ограничения)'
+        })
+      }
+    } else {
+      // rest зарезервирован: структура проверяется, исполнение появится позже
+      if (!conn.baseUrl) errors.push({ path: `${base}.baseUrl`, message: 'для rest нужен baseUrl' })
+    }
+  }
+  if (connections.default && (connections.default.kind || 'postgres') !== 'postgres') {
+    errors.push({ path: 'connections.default', message: 'источник default должен быть postgres' })
+  }
+
   // Способы получения значений параметров (ADR-22): дата/время, статический набор, справочник из БД.
   const paramsByName = new Map(params.map((p) => [p.name, p]))
 
@@ -236,6 +311,15 @@ export function validateTemplate(template) {
       if (p.type !== 'select') {
         errors.push({ path: `${path}.type`, message: 'параметр со справочником должен иметь type=select' })
       }
+      // справочник может читаться с другого сервера (ADR-76)
+      if (src.connection && !connKnown(src.connection)) {
+        errors.push({
+          path: `${path}.source.connection`,
+          message: `источник «${src.connection}» не объявлен в connections`
+        })
+      }
+    } else if (src.connection) {
+      errors.push({ path: `${path}.source.connection`, message: 'connection допустим только у source.kind=lookup' })
     }
 
     if (kind === 'static') {
@@ -394,6 +478,12 @@ function checkGaugeZones(block, base, errors) {
   for (const [key, ds] of Object.entries(template.datasets || {})) {
     if (ds?.queryId) {
       errors.push({ path: `datasets.${key}`, message: 'queryId больше не поддерживается: SQL задаётся в datasets.<key>.sql' })
+    }
+    if (ds?.connection && !connKnown(ds.connection)) {
+      errors.push({
+        path: `datasets.${key}.connection`,
+        message: `источник «${ds.connection}» не объявлен в connections`
+      })
     }
     for (const [paramName, source] of Object.entries(ds.params || {})) {
       if (typeof source === 'string' && source.startsWith('$')) {

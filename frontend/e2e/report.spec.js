@@ -1986,3 +1986,36 @@ test('автообновление: шаблон задаёт период, ст
 
   await request.delete(`/api/reports/${id}`)
 })
+
+test('внешний источник: отчёт читает вторую БД, пароль остаётся в окружении', async ({ page, request }) => {
+  await page.goto('/report.html?report=sales-external&from=2026-01-01&to=2026-03-31')
+  // данные из внешней БД приходят вместе с данными сервера: два блока, диаграмма
+  await expect(page.getByText('Отгрузки (внешняя БД warehouse)')).toBeVisible()
+  await expect(page.locator('.chart canvas').first()).toBeVisible()
+
+  // «Восток»: 27 450 000 + 29 100 000 + 31 800 000 и 1 315 заказов — только из warehouse.
+  // Ждём именно вторую таблицу: она появляется после ответа по набору shipments.
+  const shipments = page.locator('table').nth(1)
+  await expect(shipments).toContainText('88 350 000')
+  await expect(shipments).toContainText('1 315')
+  await expect(shipments).toContainText('410 450 000') // ИТОГО по внешнему источнику
+
+  // Публичный шаблон не раскрывает ни адрес источника, ни имя переменной с паролем
+  const tpl = await (await request.get('/api/reports/sales-external')).json()
+  const raw = JSON.stringify(tpl)
+  expect(raw).not.toContain('"connections"')
+  expect(raw).not.toContain('passwordEnv')
+  expect(raw).not.toContain('reporting_ext')
+})
+
+test('внешний источник: данные второго набора доступны по dataset', async ({ request }) => {
+  const res = await request.post('/api/report/data', {
+    data: { reportId: 'sales-external', dataset: 'shipments', params: { from: '2026-01-01', to: '2026-03-31' } }
+  })
+  expect(res.ok()).toBeTruthy()
+  const body = await res.json()
+  expect(body.rowCount).toBe(5)
+  const east = body.rows.find((r) => r.region === 'Восток')
+  expect(String(east.shipped)).toBe('88350000')
+  expect(String(east.orders)).toBe('1315')
+})

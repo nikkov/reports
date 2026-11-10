@@ -21,6 +21,19 @@ bool isParamName(const std::string &s) {
     return true;
 }
 
+// Имя переменной окружения: PGPASSWORD, REP_CONN_FINANCE_PASSWORD — буквы любого
+// регистра, цифры и подчёркивание, начинается с буквы или подчёркивания.
+bool isEnvName(const std::string &s) {
+    if (s.empty()) return false;
+    const auto first = static_cast<unsigned char>(s[0]);
+    if (!std::isalpha(first) && first != '_') return false;
+    for (char c : s) {
+        const auto ch = static_cast<unsigned char>(c);
+        if (!std::isalnum(ch) && ch != '_') return false;
+    }
+    return true;
+}
+
 bool isIdName(const std::string &s) {
     if (s.empty()) return false;
     if (!std::islower(static_cast<unsigned char>(s[0])) && !std::isdigit(static_cast<unsigned char>(s[0]))) {
@@ -540,6 +553,96 @@ ValidationResult validateTemplateJson(const Json::Value &root,
     if (!root["datasets"].isNull() && !root["datasets"].isObject()) {
         addError(r, "datasets", "datasets должен быть объектом");
     }
+
+    // Источники данных (ADR-76): блок connections описывает, КУДА идти за данными —
+    // адрес, базу, пользователя, схему и переменную окружения с паролем. Пароль в шаблоне
+    // хранить нельзя, поэтому поле password — ошибка, а не предупреждение. Наборы и
+    // справочники ссылаются на источник по ключу; `default` (и пустое значение) — окружение
+    // сервера, объявлять его не обязательно.
+    std::set<std::string> connKeys;
+    if (!root["connections"].isNull()) {
+        if (!root["connections"].isObject()) {
+            addError(r, "connections", "connections должен быть объектом");
+        } else {
+            static const std::set<std::string> kinds = {"postgres", "rest"};
+            for (const auto &key : root["connections"].getMemberNames()) {
+                const std::string base = "connections." + key;
+                const Json::Value &conn = root["connections"][key];
+                if (!conn.isObject()) {
+                    addError(r, base, "источник должен быть объектом");
+                    continue;
+                }
+                if (!isIdName(key)) {
+                    addError(r, base, "ключ источника должен соответствовать ^[a-z0-9][a-z0-9_-]*$");
+                }
+                connKeys.insert(key);
+                const std::string kind = conn.get("kind", "postgres").asString();
+                if (!kinds.count(kind)) {
+                    addError(r, base + ".kind",
+                             "неизвестный kind «" + kind + "»: поддержаны postgres и rest");
+                    continue;
+                }
+                if (conn.isMember("password")) {
+                    addError(r, base + ".password",
+                             "пароль в шаблоне не хранится: укажите passwordEnv с именем переменной окружения");
+                }
+                if (kind == "postgres") {
+                    if (asString(conn["host"]).empty()) addError(r, base + ".host", "для postgres нужен host");
+                    if (asString(conn["database"]).empty()) {
+                        addError(r, base + ".database", "для postgres нужна database");
+                    }
+                    if (asString(conn["user"]).empty()) addError(r, base + ".user", "для postgres нужен user");
+                    const std::string pwEnv = asString(conn["passwordEnv"]);
+                    if (pwEnv.empty()) {
+                        addError(r, base + ".passwordEnv",
+                                 "для postgres нужен passwordEnv — имя переменной окружения с паролем");
+                    } else if (!isEnvName(pwEnv)) {
+                        addError(r, base + ".passwordEnv", "passwordEnv должен быть именем переменной окружения");
+                    }
+                    if (conn.isMember("port") && !conn["port"].isString() && !conn["port"].isInt()) {
+                        addError(r, base + ".port", "port должен быть числом или строкой");
+                    }
+                    const std::string schema = asString(conn["schema"]);
+                    if (!schema.empty() && !isIdName(schema)) {
+                        addError(r, base + ".schema", "schema должен быть идентификатором");
+                    }
+                    const std::string ssl = asString(conn.isMember("sslmode") ? conn["sslmode"] : conn["sslMode"]);
+                    if (!ssl.empty()) {
+                        static const std::set<std::string> modes = {"disable", "allow", "prefer",
+                                                                    "require", "verify-ca", "verify-full"};
+                        if (!modes.count(ssl)) {
+                            addError(r, base + ".sslmode",
+                                     "sslmode: disable, allow, prefer, require, verify-ca или verify-full");
+                        }
+                    }
+                    if (conn.isMember("connectTimeout")) {
+                        const auto &value = conn["connectTimeout"];
+                        if (!value.isInt() || value.asInt() < 1 || value.asInt() > 120) {
+                            addError(r, base + ".connectTimeout", "connectTimeout — целое 1…120 секунд");
+                        }
+                    }
+                    if (conn.isMember("statementTimeoutMs")) {
+                        const auto &value = conn["statementTimeoutMs"];
+                        if (!value.isInt() || value.asInt() < 0 || value.asInt() > 600000) {
+                            addError(r, base + ".statementTimeoutMs",
+                                     "statementTimeoutMs — целое 0…600000 (0 — без ограничения)");
+                        }
+                    }
+                } else {  // rest — структура зарезервирована под будущие источники
+                    if (asString(conn["baseUrl"]).empty()) addError(r, base + ".baseUrl", "для rest нужен baseUrl");
+                    if (conn.isMember("headers") && !conn["headers"].isObject()) {
+                        addError(r, base + ".headers", "headers должен быть объектом");
+                    }
+                }
+            }
+        }
+    }
+    // Источник по умолчанию — окружение сервера: объявлять его не обязательно, а если
+    // объявлен, он должен быть postgres (rest на месте default сломал бы все отчёты).
+    if (connKeys.count("default") && root["connections"]["default"].isObject() &&
+        root["connections"]["default"].get("kind", "postgres").asString() != "postgres") {
+        addError(r, "connections.default", "источник default должен быть postgres");
+    }
     if (root.isMember("folder") && !root["folder"].isString()) {
         addError(r, "folder", "folder должен быть строкой");
     }
@@ -635,6 +738,12 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                     addError(r, path + ".source", "queryId больше не поддерживается: перенесите SQL в source.sql");
                 }
                 if (src.isMember("options")) addError(r, path + ".source", "lookup и options взаимоисключающие");
+                // справочник тоже может читать другой сервер (ADR-76)
+                const std::string srcConn = asString(src["connection"]);
+                if (!srcConn.empty() && srcConn != "default" && !connKeys.count(srcConn)) {
+                    addError(r, path + ".source.connection",
+                             "источник «" + srcConn + "» не объявлен в connections");
+                }
                 if (type != "select") addError(r, path + ".type", "параметр со справочником должен иметь type=select");
             } else if (kind == "static") {
                 if (!src["options"].isArray() || src["options"].empty()) {
@@ -651,6 +760,9 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                     addError(r, path + ".source", "для даты/времени queryId и options недопустимы");
                 }
                 if (type != kind) addError(r, path + ".type", "для source.kind=" + kind + " ожидался type=" + kind);
+                if (kind != "lookup" && src.isMember("connection")) {
+                    addError(r, path + ".source.connection", "connection допустим только у source.kind=lookup");
+                }
             }
 
             if (param["multiple"].asBool() && kind != "lookup" && kind != "static") {
@@ -697,6 +809,10 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             } else {
                 std::string sqlErr;
                 if (!checkSql(sql, sqlErr)) addError(r, path, sqlErr);
+            }
+            const std::string dsConn = asString(ds["connection"]);
+            if (!dsConn.empty() && dsConn != "default" && !connKeys.count(dsConn)) {
+                addError(r, path + ".connection", "источник «" + dsConn + "» не объявлен в connections");
             }
             if (ds["params"].isObject()) {
                 for (const auto &paramName : ds["params"].getMemberNames()) {

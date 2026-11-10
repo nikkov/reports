@@ -62,6 +62,17 @@ else
   echo "skip (нет backend/CMakeLists.txt)"
 fi
 
+# Внешний источник для примера sales-external (ADR-76): отдельная БД warehouse.
+# Нужен e2e-проверке «данные из другой БД»; если прав на создание баз нет — тест
+# упадёт с понятным сообщением, а не тихо пропустит проверку.
+if [ "${REP_E2E:-0}" = "1" ] && [ -x "$ROOT/db/examples/external.sh" ]; then
+  if "$ROOT/db/examples/external.sh" >/dev/null 2>&1; then
+    echo "внешний источник (reporting_ext/warehouse) готов"
+  else
+    echo "ВНИМАНИЕ: внешний источник не создан — e2e нужен db/examples/external.sh"
+  fi
+fi
+
 step "Frontend: покрытие engine/ (DoD ≥ 90%)"
 if [ -f "$ROOT/frontend/package.json" ]; then
   ( cd "$ROOT/frontend" && npm run --silent coverage | tail -2 )

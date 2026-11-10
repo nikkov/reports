@@ -1,4 +1,7 @@
 <template>
+  <!-- Заголовок блока (ADR-55): без него таблица в шаблоне с двумя наборами
+       выглядит безымянной, хотя название задано и видно у диаграмм. -->
+  <h2 v-if="block.title" class="tv-title">{{ block.title }}</h2>
   <div v-if="isGrouped" class="tv-bar">
     <button type="button" @click="collapseAll">Свернуть всё</button>
     <button type="button" :disabled="expandingAll" @click="expandAll">
@@ -462,6 +465,11 @@ function cellText(row, key) {
   font-variant-numeric: tabular-nums;
 }
 
+.tv-title {
+  font-size: 13px;
+  margin: 0 0 6px;
+  font-weight: 600;
+}
 .tv-more {
   font-size: 12px;
   padding: 2px 8px;

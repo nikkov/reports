@@ -41,6 +41,8 @@
 | `REP_OWNER_DB_USER` | — | владелец объектов: под ним выполняются DDL и миграции (`db/init.sh`, `db-ro.sh`) |
 | `REP_OWNER_DB_PASSWORD` | — | его пароль; серверу не нужен, только развёртыванию |
 | `REP_STRICT_ROLE` | `0` | `1` — отказаться стартовать под суперпользователем (эксплуатационный режим) |
+| `REP_CONN_<ИМЯ>_PASSWORD` | — | пароли внешних источников: имя задаётся в шаблоне полем `passwordEnv` (ADR-76). В шаблоне и документации значений нет |
+| `REP_EXT_DB`, `REP_EXT_USER` | `reporting_ext`, `reporting_ext_ro` | демонстрационная вторая БД для примера `sales-external` (`db/examples/external.sh`) |
 
 Основная роль должна уметь писать в схему `reports`: шаблоны (`report_templates`, `report_templates_history`),
 `users`, `sessions`, `report_subscriptions`, `subscription_runs`, `audit_log`. Демонстрационные данные лежат

@@ -44,6 +44,13 @@ export default {
         "$ref": "#/$defs/dataset"
       }
     },
+    "connections": {
+      "type": "object",
+      "description": "источники данных: адреса, базы и учётные записи; пароль — только именем переменной окружения",
+      "additionalProperties": {
+        "$ref": "#/$defs/connection"
+      }
+    },
     "blocks": {
       "type": "array",
       "minItems": 1,
@@ -184,6 +191,11 @@ export default {
             "sql": {
               "type": "string",
               "minLength": 1
+            },
+            "connection": {
+              "type": "string",
+              "minLength": 1,
+              "description": "ключ источника из блока connections (только для lookup); пусто — сервер по умолчанию"
             }
           }
         },
@@ -203,11 +215,98 @@ export default {
           "type": "string",
           "minLength": 1
         },
+        "connection": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ключ источника из блока connections; пусто — сервер по умолчанию"
+        },
         "params": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
           }
+        }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "postgres",
+            "rest"
+          ],
+          "description": "тип источника; rest зарезервирован под будущие версии"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1
+        },
+        "user": {
+          "type": "string",
+          "minLength": 1
+        },
+        "passwordEnv": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "имя переменной окружения с паролем: сам пароль в шаблоне не хранится"
+        },
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "sslmode": {
+          "enum": [
+            "disable",
+            "allow",
+            "prefer",
+            "require",
+            "verify-ca",
+            "verify-full"
+          ]
+        },
+        "sslMode": {
+          "enum": [
+            "disable",
+            "allow",
+            "prefer",
+            "require",
+            "verify-ca",
+            "verify-full"
+          ]
+        },
+        "connectTimeout": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
+        },
+        "statementTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600000
+        },
+        "baseUrl": {
+          "type": "string",
+          "minLength": 1,
+          "description": "для kind=rest: адрес API"
+        },
+        "headers": {
+          "type": "object"
+        },
+        "tokenEnv": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
         }
       }
     },

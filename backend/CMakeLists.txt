@@ -23,6 +23,7 @@ find_package(OpenSSL REQUIRED)
 add_library(rep_core STATIC
   src/aggregate.cc
   src/auth.cc
+  src/connections.cc
   src/csv_export.cc
   src/dataset.cc
   src/smtp.cc
@@ -68,6 +69,7 @@ add_executable(rep_tests
   tests/group_rows_test.cc
   tests/template_migrate_test.cc
   tests/auth_test.cc
+  tests/connections_test.cc
   tests/dataset_test.cc
   tests/queries_test.cc
   tests/params_test.cc

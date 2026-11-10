@@ -1,0 +1,125 @@
+{
+  "version": 2,
+  "id": "sales-external",
+  "title": "Продажи и отгрузки (внешний источник)",
+  "description": "Два источника в одном отчёте: продажи из БД сервера и отгрузки из отдельной базы warehouse — адрес и учётная запись заданы в блоке connections, пароль берётся из переменной окружения.",
+  "folder": "Примеры",
+  "tags": [
+    "пример",
+    "источники",
+    "postgres"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "ext": {
+      "kind": "postgres",
+      "host": "127.0.0.1",
+      "port": 5432,
+      "database": "reporting_ext",
+      "user": "reporting_ext_ro",
+      "passwordEnv": "REP_CONN_EXT_PASSWORD",
+      "schema": "warehouse",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 2000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, sum(amount) AS amount, sum(profit) AS profit FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date GROUP BY region ORDER BY region NULLS LAST"
+    },
+    "shipments": {
+      "connection": "ext",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, sum(shipped_amount) AS shipped, sum(orders_count) AS orders FROM warehouse.shipments WHERE month >= :from::date AND month <= :to::date GROUP BY region ORDER BY region"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Продажи читаются из БД сервера, отгрузки — из внешней базы warehouse (источник ext в блоке connections). Период {{from}} — {{to}}."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "title": "Продажи (БД сервера)",
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": "number",
+          "aggregate": "sum"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "format": "number",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "shipments",
+      "title": "Отгрузки (внешняя БД warehouse)",
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "shipped",
+          "title": "Отгружено",
+          "format": "number",
+          "aggregate": "sum"
+        },
+        {
+          "field": "orders",
+          "title": "Заказов",
+          "format": "integer",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "shipments",
+      "chartType": "bar",
+      "title": "Отгружено по регионам",
+      "xField": "region",
+      "yField": "shipped"
+    }
+  ]
+}

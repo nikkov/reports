@@ -1,2372 +1,2608 @@
 {
- "comment": "Набор шаблонов, на котором серверный (validate.cc) и клиентский (validate.js) валидаторы обязаны давать одинаковые пути ошибок. Проверяется в backend/tests/validate_test.cc и frontend/src/template/validate.parity.test.js.",
- "cases": [
-  {
-   "name": "валидный минимум",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "версия новее сервера",
-   "template": {
-    "version": 99,
-    "id": "parity-v",
-    "title": "Т",
-    "blocks": [
-     {
-      "type": "text",
-      "text": "т"
-     }
-    ],
-    "datasets": {}
-   },
-   "errors": [
-    "version"
-   ]
-  },
-  {
-   "name": "нет заголовка",
-   "template": {
-    "version": 1,
-    "id": "parity-t",
-    "blocks": [
-     {
-      "type": "text",
-      "text": "т"
-     }
-    ],
-    "datasets": {}
-   },
-   "errors": [
-    "title"
-   ]
-  },
-  {
-   "name": "пустой список блоков",
-   "template": {
-    "version": 1,
-    "id": "parity-b",
-    "title": "Т",
-    "blocks": [],
-    "datasets": {}
-   },
-   "errors": [
-    "blocks"
-   ]
-  },
-  {
-   "name": "набор без sql",
-   "template": {
-    "version": 1,
-    "id": "parity-ds",
-    "title": "Т",
-    "datasets": {
-     "sales": {}
-    },
-    "blocks": [
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "datasets.sales.sql"
-   ]
-  },
-  {
-   "name": "набор с queryId",
-   "template": {
-    "version": 1,
-    "id": "parity-q",
-    "title": "Т",
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "queryId": "old"
-     }
-    },
-    "blocks": [
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "datasets.sales",
-    "datasets.sales.queryId"
-   ]
-  },
-  {
-   "name": "набор ссылается на необъявленный параметр",
-   "template": {
-    "version": 1,
-    "id": "parity-ref",
-    "title": "Т",
-    "params": [],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "datasets.sales.params.from"
-   ]
-  },
-  {
-   "name": "select без источника",
-   "template": {
-    "version": 1,
-    "id": "parity-sel",
-    "title": "Т",
-    "params": [
-     {
-      "name": "region",
-      "type": "select",
-      "label": "Регион"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x"
-     }
-    },
-    "blocks": [
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "params.0"
-   ]
-  },
-  {
-   "name": "справочник без sql",
-   "template": {
-    "version": 1,
-    "id": "parity-lookup",
-    "title": "Т",
-    "params": [
-     {
-      "name": "region",
-      "type": "select",
-      "label": "Регион",
-      "source": {
-       "kind": "lookup"
-      }
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x"
-     }
-    },
-    "blocks": [
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "params.0.source"
-   ]
-  },
-  {
-   "name": "неизвестный родитель каскада",
-   "template": {
-    "version": 1,
-    "id": "parity-dep",
-    "title": "Т",
-    "params": [
-     {
-      "name": "city",
-      "type": "select",
-      "label": "Город",
-      "source": {
-       "kind": "lookup",
-       "sql": "SELECT 1 AS id, 'x' AS name",
-       "dependsOn": "region"
-      }
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x"
-     }
-    },
-    "blocks": [
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "params.0.source.dependsOn"
-   ]
-  },
-  {
-   "name": "колонка без field и expression",
-   "template": {
-    "version": 1,
-    "id": "parity-col",
-    "title": "Т",
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x"
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "т"
-     },
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.columns.0"
-   ]
-  },
-  {
-   "name": "текст с необъявленным параметром",
-   "template": {
-    "version": 1,
-    "id": "parity-txt",
-    "title": "Т",
-    "params": [],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x"
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.0.text"
-   ]
-  },
-  {
-   "name": "период автообновления вне диапазона",
-   "template": {
-    "version": 1,
-    "id": "parity-refresh",
-    "title": "Т",
-    "refreshSeconds": 4000,
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x"
-     }
-    },
-    "blocks": [
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "refreshSeconds"
-   ]
-  },
-  {
-   "name": "drill в диаграмме без report",
-   "template": {
-    "version": 1,
-    "id": "parity-drill",
-    "title": "Т",
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y"
-     }
-    },
-    "blocks": [
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "bar",
-      "xField": "x",
-      "yField": "y",
-      "drill": {
-       "params": {
-        "region": "x"
-       }
-      }
-     }
-    ]
-   },
-   "errors": [
-    "blocks.0.drill.report"
-   ]
-  },
-  {
-   "name": "версия 1 допустима (будет мигрирована)",
-   "template": {
-    "version": 1,
-    "id": "parity-v1",
-    "title": "T",
-    "params": [],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x"
-     }
-    },
-    "blocks": [
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "x",
-        "title": "X"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "gauge: значение и шкала",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "gauge",
-      "yField": "x",
-      "min": 0,
-      "max": 100,
-      "unit": "%"
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "gauge без yField",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "gauge"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.yField"
-   ]
-  },
-  {
-   "name": "gauge с xField",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "gauge",
-      "yField": "x",
-      "xField": "x"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.xField"
-   ]
-  },
-  {
-   "name": "sankey: поток между узлами",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "sourceField": "x",
-      "targetField": "y",
-      "valueField": "x"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.targetField"
-   ]
-  },
-  {
-   "name": "sankey без valueField",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "sourceField": "x",
-      "targetField": "y"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.valueField"
-   ]
-  },
-  {
-   "name": "sankey с одинаковыми полями",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "sourceField": "x",
-      "targetField": "x",
-      "valueField": "x"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.targetField"
-   ]
-  },
-  {
-   "name": "sankey с xField",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "sourceField": "x",
-      "targetField": "y",
-      "valueField": "z",
-      "xField": "x"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.xField"
-   ]
-  },
-  {
-   "name": "линия без yField",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "line",
-      "xField": "x"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.yField"
-   ]
-  },
-  {
-   "name": "gauge: drill на x недопустим",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "gauge",
-      "yField": "x",
-      "drill": {
-       "report": "sales-detail",
-       "params": {
-        "region": "x"
-       }
-      }
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.drill.params.region"
-   ]
-  },
-  {
-   "name": "sankey: drill принимает x и series",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "sourceField": "x",
-      "targetField": "y",
-      "valueField": "z",
-      "drill": {
-       "report": "sales-detail",
-       "params": {
-        "region": "x",
-        "category": "series"
-       }
-      }
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "gauge: четыре границы и пять цветов",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "gauge",
-      "yField": "x",
-      "min": 0,
-      "max": 40,
-      "thresholds": [
-       10,
-       15,
-       25,
-       30
-      ],
-      "zoneColors": [
-       "#c62828",
-       "#f9a825",
-       "#2e7d32",
-       "#f9a825",
-       "#c62828"
-      ]
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "gauge: границы не возрастают",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "gauge",
-      "yField": "x",
-      "min": 0,
-      "max": 40,
-      "thresholds": [
-       10,
-       5,
-       25,
-       30
-      ],
-      "zoneColors": [
-       "#c62828",
-       "#f9a825",
-       "#2e7d32",
-       "#f9a825",
-       "#c62828"
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.thresholds.1"
-   ]
-  },
-  {
-   "name": "gauge: цветов меньше, чем зон",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "gauge",
-      "yField": "x",
-      "min": 0,
-      "max": 40,
-      "thresholds": [
-       10,
-       15,
-       25,
-       30
-      ],
-      "zoneColors": [
-       "#c62828",
-       "#f9a825",
-       "#2e7d32",
-       "#c62828"
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.zoneColors"
-   ]
-  },
-  {
-   "name": "gauge: одна граница мало",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "gauge",
-      "yField": "x",
-      "min": 0,
-      "max": 40,
-      "thresholds": [
-       10
-      ],
-      "zoneColors": [
-       "#c62828",
-       "#2e7d32"
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.thresholds",
-    "blocks.1.zoneColors"
-   ]
-  },
-  {
-   "name": "band: значение и две границы",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "x",
-      "yField": "y",
-      "lowField": "x",
-      "highField": "z"
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "band без highField",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "x",
-      "yField": "y",
-      "lowField": "z"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.highField"
-   ]
-  },
-  {
-   "name": "band: границы совпадают",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "x",
-      "yField": "y",
-      "lowField": "z",
-      "highField": "z"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.highField"
-   ]
-  },
-  {
-   "name": "band: значение совпадает с границей",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "x",
-      "yField": "z",
-      "lowField": "x",
-      "highField": "z"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.yField"
-   ]
-  },
-  {
-   "name": "band: seriesField не используется",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "x",
-      "yField": "y",
-      "lowField": "x",
-      "highField": "z",
-      "seriesField": "y"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.seriesField"
-   ]
-  },
-  {
-   "name": "lowField у линии недопустим",
-   "template": {
-    "version": 1,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "line",
-      "xField": "x",
-      "yField": "y",
-      "lowField": "x"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.chartType"
-   ]
-  },
-  {
-   "name": "sankey: цепочка уровней допустима",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "levels": [
-       "a",
-       "b",
-       "c"
-      ],
-      "valueField": "v"
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "sankey: levels вместе с sourceField несовместимы",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "levels": [
-       "a",
-       "b"
-      ],
-      "sourceField": "a",
-      "valueField": "v"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.sourceField"
-   ]
-  },
-  {
-   "name": "sankey: levels из одного поля",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "levels": [
-       "a"
-      ],
-      "valueField": "v"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.levels"
-   ]
-  },
-  {
-   "name": "sankey: levels у столбцов недопустимы",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "bar",
-      "xField": "a",
-      "yField": "v",
-      "levels": [
-       "a",
-       "b"
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.levels"
-   ]
-  },
-  {
-   "name": "sankey: высота вне диапазона",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "levels": [
-       "a",
-       "b"
-      ],
-      "valueField": "v",
-      "height": 120
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.height"
-   ]
-  },
-  {
-   "name": "band: два коридора допустимы",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "a",
-      "yField": "v",
-      "bands": [
-       {
-        "lowField": "b",
-        "highField": "c"
-       },
-       {
-        "lowField": "c",
-        "highField": "d"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "band: bands вместе с lowField",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "a",
-      "yField": "v",
-      "bands": [
-       {
-        "lowField": "b",
-        "highField": "c"
-       }
-      ],
-      "lowField": "b"
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.lowField"
-   ]
-  },
-  {
-   "name": "band: в коридоре нет highField",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "a",
-      "yField": "v",
-      "bands": [
-       {
-        "lowField": "b"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.bands.0.highField"
-   ]
-  },
-  {
-   "name": "band: границы коридора совпадают",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "a",
-      "yField": "v",
-      "bands": [
-       {
-        "lowField": "b",
-        "highField": "b"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.bands.0.highField"
-   ]
-  },
-  {
-   "name": "band: значение не может быть границей коридора",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "a",
-      "yField": "v",
-      "bands": [
-       {
-        "lowField": "v",
-        "highField": "c"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.bands.0.lowField"
-   ]
-  },
-  {
-   "name": "bands у линии недопустимы",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "line",
-      "xField": "a",
-      "yField": "v",
-      "bands": [
-       {
-        "lowField": "b",
-        "highField": "c"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.bands"
-   ]
-  },
-  {
-   "name": "band: пять коридоров — много",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "band",
-      "xField": "a",
-      "yField": "v",
-      "bands": [
-       {
-        "lowField": "b",
-        "highField": "c"
-       },
-       {
-        "lowField": "b",
-        "highField": "c"
-       },
-       {
-        "lowField": "b",
-        "highField": "c"
-       },
-       {
-        "lowField": "b",
-        "highField": "c"
-       },
-       {
-        "lowField": "b",
-        "highField": "c"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.bands"
-   ]
-  },
-  {
-   "name": "detailOrder: порядок деталей допустим",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "a",
-        "title": "A",
-        "group": true
-       },
-       {
-        "field": "v",
-        "title": "V",
-        "aggregate": "sum"
-       }
-      ],
-      "aggregate": {
-       "groupBy": [
-        "a"
-       ],
-       "measures": [
-        {
-         "field": "v",
-         "agg": "sum"
-        }
-       ]
+  "comment": "Набор шаблонов, на котором серверный (validate.cc) и клиентский (validate.js) валидаторы обязаны давать одинаковые пути ошибок. Проверяется в backend/tests/validate_test.cc и frontend/src/template/validate.parity.test.js.",
+  "cases": [
+    {
+      "name": "валидный минимум",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
       },
-      "detailOrder": [
-       {
-        "field": "v",
-        "dir": "desc"
-       },
-       {
-        "field": "a"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "detailOrder без aggregate бессмыслен",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
+      "errors": []
     },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "a",
-        "title": "A",
-        "group": true
-       },
-       {
-        "field": "v",
-        "title": "V",
-        "aggregate": "sum"
-       }
-      ],
-      "detailOrder": [
-       {
-        "field": "v",
-        "dir": "desc"
-       }
-      ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.detailOrder"
-   ]
-  },
-  {
-   "name": "detailOrder: неверное направление",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "a",
-        "title": "A",
-        "group": true
-       },
-       {
-        "field": "v",
-        "title": "V",
-        "aggregate": "sum"
-       }
-      ],
-      "aggregate": {
-       "groupBy": [
-        "a"
-       ],
-       "measures": [
-        {
-         "field": "v",
-         "agg": "sum"
-        }
-       ]
+    {
+      "name": "версия новее сервера",
+      "template": {
+        "version": 99,
+        "id": "parity-v",
+        "title": "Т",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "т"
+          }
+        ],
+        "datasets": {}
       },
-      "detailOrder": [
-       {
-        "field": "v",
-        "dir": "вниз"
-       }
+      "errors": [
+        "version"
       ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.detailOrder.0.dir"
-   ]
-  },
-  {
-   "name": "detailOrder: пустой список",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
     },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "a",
-        "title": "A",
-        "group": true
-       },
-       {
-        "field": "v",
-        "title": "V",
-        "aggregate": "sum"
-       }
-      ],
-      "aggregate": {
-       "groupBy": [
-        "a"
-       ],
-       "measures": [
-        {
-         "field": "v",
-         "agg": "sum"
-        }
-       ]
+    {
+      "name": "нет заголовка",
+      "template": {
+        "version": 1,
+        "id": "parity-t",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "т"
+          }
+        ],
+        "datasets": {}
       },
-      "detailOrder": []
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.detailOrder"
-   ]
-  },
-  {
-   "name": "detailOrder: поле не идентификатор",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
-    },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "table",
-      "dataKey": "sales",
-      "columns": [
-       {
-        "field": "a",
-        "title": "A",
-        "group": true
-       },
-       {
-        "field": "v",
-        "title": "V",
-        "aggregate": "sum"
-       }
-      ],
-      "aggregate": {
-       "groupBy": [
-        "a"
-       ],
-       "measures": [
-        {
-         "field": "v",
-         "agg": "sum"
-        }
-       ]
-      },
-      "detailOrder": [
-       {
-        "field": "v desc; drop table sales"
-       }
+      "errors": [
+        "title"
       ]
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.detailOrder.0.field"
-   ]
-  },
-  {
-   "name": "drill в sankey: level.<поле> допустим",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
     },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "levels": [
-       "region",
-       "category",
-       "product"
-      ],
-      "valueField": "v",
-      "drill": {
-       "report": "sales-drill",
-       "params": {
-        "region": "level.region",
-        "category": "level.category",
-        "from": "param.from"
-       }
-      }
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "drill в sankey: уровня нет в levels",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
+    {
+      "name": "пустой список блоков",
+      "template": {
+        "version": 1,
+        "id": "parity-b",
+        "title": "Т",
+        "blocks": [],
+        "datasets": {}
+      },
+      "errors": [
+        "blocks"
+      ]
     },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "levels": [
-       "region",
-       "category",
-       "product"
-      ],
-      "valueField": "v",
-      "drill": {
-       "report": "sales-drill",
-       "params": {
-        "product_line": "level.product_line"
-       }
-      }
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.drill.params.product_line"
-   ]
-  },
-  {
-   "name": "drill: level.<поле> без цепочки уровней",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
+    {
+      "name": "набор без sql",
+      "template": {
+        "version": 1,
+        "id": "parity-ds",
+        "title": "Т",
+        "datasets": {
+          "sales": {}
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.sales.sql"
+      ]
     },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "sourceField": "region",
-      "targetField": "category",
-      "valueField": "v",
-      "drill": {
-       "report": "sales-drill",
-       "params": {
-        "region": "level.region"
-       }
-      }
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.drill.params.region"
-   ]
-  },
-  {
-   "name": "drill в sankey: node допустим у цепочки",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
+    {
+      "name": "набор с queryId",
+      "template": {
+        "version": 1,
+        "id": "parity-q",
+        "title": "Т",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "queryId": "old"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.sales",
+        "datasets.sales.queryId"
+      ]
     },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "sankey",
-      "levels": [
-       "region",
-       "category",
-       "product"
-      ],
-      "valueField": "v",
-      "drill": {
-       "report": "sales-drill",
-       "params": {
-        "category": "node"
-       }
-      }
-     }
-    ]
-   },
-   "errors": []
-  },
-  {
-   "name": "drill: node у линии недопустим",
-   "template": {
-    "version": 2,
-    "id": "parity-ok",
-    "title": "Проверка",
-    "params": [
-     {
-      "name": "from",
-      "type": "date",
-      "label": "с"
-     }
-    ],
-    "datasets": {
-     "sales": {
-      "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
-      "params": {
-       "from": "$from"
-      }
-     }
+    {
+      "name": "набор ссылается на необъявленный параметр",
+      "template": {
+        "version": 1,
+        "id": "parity-ref",
+        "title": "Т",
+        "params": [],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.sales.params.from"
+      ]
     },
-    "blocks": [
-     {
-      "type": "text",
-      "text": "Период {{from}}"
-     },
-     {
-      "type": "chart",
-      "dataKey": "sales",
-      "chartType": "line",
-      "xField": "region",
-      "yField": "v",
-      "drill": {
-       "report": "sales-drill",
-       "params": {
-        "category": "node"
-       }
-      }
-     }
-    ]
-   },
-   "errors": [
-    "blocks.1.drill.params.category"
-   ]
-  }
- ]
+    {
+      "name": "select без источника",
+      "template": {
+        "version": 1,
+        "id": "parity-sel",
+        "title": "Т",
+        "params": [
+          {
+            "name": "region",
+            "type": "select",
+            "label": "Регион"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0"
+      ]
+    },
+    {
+      "name": "справочник без sql",
+      "template": {
+        "version": 1,
+        "id": "parity-lookup",
+        "title": "Т",
+        "params": [
+          {
+            "name": "region",
+            "type": "select",
+            "label": "Регион",
+            "source": {
+              "kind": "lookup"
+            }
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source"
+      ]
+    },
+    {
+      "name": "неизвестный родитель каскада",
+      "template": {
+        "version": 1,
+        "id": "parity-dep",
+        "title": "Т",
+        "params": [
+          {
+            "name": "city",
+            "type": "select",
+            "label": "Город",
+            "source": {
+              "kind": "lookup",
+              "sql": "SELECT 1 AS id, 'x' AS name",
+              "dependsOn": "region"
+            }
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source.dependsOn"
+      ]
+    },
+    {
+      "name": "колонка без field и expression",
+      "template": {
+        "version": 1,
+        "id": "parity-col",
+        "title": "Т",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "т"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.columns.0"
+      ]
+    },
+    {
+      "name": "текст с необъявленным параметром",
+      "template": {
+        "version": 1,
+        "id": "parity-txt",
+        "title": "Т",
+        "params": [],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.text"
+      ]
+    },
+    {
+      "name": "период автообновления вне диапазона",
+      "template": {
+        "version": 1,
+        "id": "parity-refresh",
+        "title": "Т",
+        "refreshSeconds": 4000,
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "refreshSeconds"
+      ]
+    },
+    {
+      "name": "drill в диаграмме без report",
+      "template": {
+        "version": 1,
+        "id": "parity-drill",
+        "title": "Т",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y"
+          }
+        },
+        "blocks": [
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "bar",
+            "xField": "x",
+            "yField": "y",
+            "drill": {
+              "params": {
+                "region": "x"
+              }
+            }
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.drill.report"
+      ]
+    },
+    {
+      "name": "версия 1 допустима (будет мигрирована)",
+      "template": {
+        "version": 1,
+        "id": "parity-v1",
+        "title": "T",
+        "params": [],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "gauge: значение и шкала",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 100,
+            "unit": "%"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "gauge без yField",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.yField"
+      ]
+    },
+    {
+      "name": "gauge с xField",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "xField": "x"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.xField"
+      ]
+    },
+    {
+      "name": "sankey: поток между узлами",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "sourceField": "x",
+            "targetField": "y",
+            "valueField": "x"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.targetField"
+      ]
+    },
+    {
+      "name": "sankey без valueField",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "sourceField": "x",
+            "targetField": "y"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.valueField"
+      ]
+    },
+    {
+      "name": "sankey с одинаковыми полями",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "sourceField": "x",
+            "targetField": "x",
+            "valueField": "x"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.targetField"
+      ]
+    },
+    {
+      "name": "sankey с xField",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "sourceField": "x",
+            "targetField": "y",
+            "valueField": "z",
+            "xField": "x"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.xField"
+      ]
+    },
+    {
+      "name": "линия без yField",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "line",
+            "xField": "x"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.yField"
+      ]
+    },
+    {
+      "name": "gauge: drill на x недопустим",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "drill": {
+              "report": "sales-detail",
+              "params": {
+                "region": "x"
+              }
+            }
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.drill.params.region"
+      ]
+    },
+    {
+      "name": "sankey: drill принимает x и series",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "sourceField": "x",
+            "targetField": "y",
+            "valueField": "z",
+            "drill": {
+              "report": "sales-detail",
+              "params": {
+                "region": "x",
+                "category": "series"
+              }
+            }
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "gauge: четыре границы и пять цветов",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 40,
+            "thresholds": [
+              10,
+              15,
+              25,
+              30
+            ],
+            "zoneColors": [
+              "#c62828",
+              "#f9a825",
+              "#2e7d32",
+              "#f9a825",
+              "#c62828"
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "gauge: границы не возрастают",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 40,
+            "thresholds": [
+              10,
+              5,
+              25,
+              30
+            ],
+            "zoneColors": [
+              "#c62828",
+              "#f9a825",
+              "#2e7d32",
+              "#f9a825",
+              "#c62828"
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.thresholds.1"
+      ]
+    },
+    {
+      "name": "gauge: цветов меньше, чем зон",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 40,
+            "thresholds": [
+              10,
+              15,
+              25,
+              30
+            ],
+            "zoneColors": [
+              "#c62828",
+              "#f9a825",
+              "#2e7d32",
+              "#c62828"
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.zoneColors"
+      ]
+    },
+    {
+      "name": "gauge: одна граница мало",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "gauge",
+            "yField": "x",
+            "min": 0,
+            "max": 40,
+            "thresholds": [
+              10
+            ],
+            "zoneColors": [
+              "#c62828",
+              "#2e7d32"
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.thresholds",
+        "blocks.1.zoneColors"
+      ]
+    },
+    {
+      "name": "band: значение и две границы",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "x",
+            "highField": "z"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "band без highField",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "z"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.highField"
+      ]
+    },
+    {
+      "name": "band: границы совпадают",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "z",
+            "highField": "z"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.highField"
+      ]
+    },
+    {
+      "name": "band: значение совпадает с границей",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "z",
+            "lowField": "x",
+            "highField": "z"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.yField"
+      ]
+    },
+    {
+      "name": "band: seriesField не используется",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "x",
+            "highField": "z",
+            "seriesField": "y"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.seriesField"
+      ]
+    },
+    {
+      "name": "lowField у линии недопустим",
+      "template": {
+        "version": 1,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x, 2 AS y, 3 AS z",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "line",
+            "xField": "x",
+            "yField": "y",
+            "lowField": "x"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.chartType"
+      ]
+    },
+    {
+      "name": "sankey: цепочка уровней допустима",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "levels": [
+              "a",
+              "b",
+              "c"
+            ],
+            "valueField": "v"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "sankey: levels вместе с sourceField несовместимы",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "levels": [
+              "a",
+              "b"
+            ],
+            "sourceField": "a",
+            "valueField": "v"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.sourceField"
+      ]
+    },
+    {
+      "name": "sankey: levels из одного поля",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "levels": [
+              "a"
+            ],
+            "valueField": "v"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.levels"
+      ]
+    },
+    {
+      "name": "sankey: levels у столбцов недопустимы",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "bar",
+            "xField": "a",
+            "yField": "v",
+            "levels": [
+              "a",
+              "b"
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.levels"
+      ]
+    },
+    {
+      "name": "sankey: высота вне диапазона",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "levels": [
+              "a",
+              "b"
+            ],
+            "valueField": "v",
+            "height": 120
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.height"
+      ]
+    },
+    {
+      "name": "band: два коридора допустимы",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "a",
+            "yField": "v",
+            "bands": [
+              {
+                "lowField": "b",
+                "highField": "c"
+              },
+              {
+                "lowField": "c",
+                "highField": "d"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "band: bands вместе с lowField",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "a",
+            "yField": "v",
+            "bands": [
+              {
+                "lowField": "b",
+                "highField": "c"
+              }
+            ],
+            "lowField": "b"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.lowField"
+      ]
+    },
+    {
+      "name": "band: в коридоре нет highField",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "a",
+            "yField": "v",
+            "bands": [
+              {
+                "lowField": "b"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.bands.0.highField"
+      ]
+    },
+    {
+      "name": "band: границы коридора совпадают",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "a",
+            "yField": "v",
+            "bands": [
+              {
+                "lowField": "b",
+                "highField": "b"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.bands.0.highField"
+      ]
+    },
+    {
+      "name": "band: значение не может быть границей коридора",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "a",
+            "yField": "v",
+            "bands": [
+              {
+                "lowField": "v",
+                "highField": "c"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.bands.0.lowField"
+      ]
+    },
+    {
+      "name": "bands у линии недопустимы",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "line",
+            "xField": "a",
+            "yField": "v",
+            "bands": [
+              {
+                "lowField": "b",
+                "highField": "c"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.bands"
+      ]
+    },
+    {
+      "name": "band: пять коридоров — много",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS c, 4 AS d, 5 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "band",
+            "xField": "a",
+            "yField": "v",
+            "bands": [
+              {
+                "lowField": "b",
+                "highField": "c"
+              },
+              {
+                "lowField": "b",
+                "highField": "c"
+              },
+              {
+                "lowField": "b",
+                "highField": "c"
+              },
+              {
+                "lowField": "b",
+                "highField": "c"
+              },
+              {
+                "lowField": "b",
+                "highField": "c"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.bands"
+      ]
+    },
+    {
+      "name": "detailOrder: порядок деталей допустим",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "a",
+                "title": "A",
+                "group": true
+              },
+              {
+                "field": "v",
+                "title": "V",
+                "aggregate": "sum"
+              }
+            ],
+            "aggregate": {
+              "groupBy": [
+                "a"
+              ],
+              "measures": [
+                {
+                  "field": "v",
+                  "agg": "sum"
+                }
+              ]
+            },
+            "detailOrder": [
+              {
+                "field": "v",
+                "dir": "desc"
+              },
+              {
+                "field": "a"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "detailOrder без aggregate бессмыслен",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "a",
+                "title": "A",
+                "group": true
+              },
+              {
+                "field": "v",
+                "title": "V",
+                "aggregate": "sum"
+              }
+            ],
+            "detailOrder": [
+              {
+                "field": "v",
+                "dir": "desc"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.detailOrder"
+      ]
+    },
+    {
+      "name": "detailOrder: неверное направление",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "a",
+                "title": "A",
+                "group": true
+              },
+              {
+                "field": "v",
+                "title": "V",
+                "aggregate": "sum"
+              }
+            ],
+            "aggregate": {
+              "groupBy": [
+                "a"
+              ],
+              "measures": [
+                {
+                  "field": "v",
+                  "agg": "sum"
+                }
+              ]
+            },
+            "detailOrder": [
+              {
+                "field": "v",
+                "dir": "вниз"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.detailOrder.0.dir"
+      ]
+    },
+    {
+      "name": "detailOrder: пустой список",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "a",
+                "title": "A",
+                "group": true
+              },
+              {
+                "field": "v",
+                "title": "V",
+                "aggregate": "sum"
+              }
+            ],
+            "aggregate": {
+              "groupBy": [
+                "a"
+              ],
+              "measures": [
+                {
+                  "field": "v",
+                  "agg": "sum"
+                }
+              ]
+            },
+            "detailOrder": []
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.detailOrder"
+      ]
+    },
+    {
+      "name": "detailOrder: поле не идентификатор",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS a, 2 AS b, 3 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "table",
+            "dataKey": "sales",
+            "columns": [
+              {
+                "field": "a",
+                "title": "A",
+                "group": true
+              },
+              {
+                "field": "v",
+                "title": "V",
+                "aggregate": "sum"
+              }
+            ],
+            "aggregate": {
+              "groupBy": [
+                "a"
+              ],
+              "measures": [
+                {
+                  "field": "v",
+                  "agg": "sum"
+                }
+              ]
+            },
+            "detailOrder": [
+              {
+                "field": "v desc; drop table sales"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.detailOrder.0.field"
+      ]
+    },
+    {
+      "name": "drill в sankey: level.<поле> допустим",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "levels": [
+              "region",
+              "category",
+              "product"
+            ],
+            "valueField": "v",
+            "drill": {
+              "report": "sales-drill",
+              "params": {
+                "region": "level.region",
+                "category": "level.category",
+                "from": "param.from"
+              }
+            }
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "drill в sankey: уровня нет в levels",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "levels": [
+              "region",
+              "category",
+              "product"
+            ],
+            "valueField": "v",
+            "drill": {
+              "report": "sales-drill",
+              "params": {
+                "product_line": "level.product_line"
+              }
+            }
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.drill.params.product_line"
+      ]
+    },
+    {
+      "name": "drill: level.<поле> без цепочки уровней",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "sourceField": "region",
+            "targetField": "category",
+            "valueField": "v",
+            "drill": {
+              "report": "sales-drill",
+              "params": {
+                "region": "level.region"
+              }
+            }
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.drill.params.region"
+      ]
+    },
+    {
+      "name": "drill в sankey: node допустим у цепочки",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "sankey",
+            "levels": [
+              "region",
+              "category",
+              "product"
+            ],
+            "valueField": "v",
+            "drill": {
+              "report": "sales-drill",
+              "params": {
+                "category": "node"
+              }
+            }
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "drill: node у линии недопустим",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с"
+          }
+        ],
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 'a' AS region, 'b' AS category, 'c' AS product, 1 AS v",
+            "params": {
+              "from": "$from"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Период {{from}}"
+          },
+          {
+            "type": "chart",
+            "dataKey": "sales",
+            "chartType": "line",
+            "xField": "region",
+            "yField": "v",
+            "drill": {
+              "report": "sales-drill",
+              "params": {
+                "category": "node"
+              }
+            }
+          }
+        ]
+      },
+      "errors": [
+        "blocks.1.drill.params.category"
+      ]
+    },
+    {
+      "name": "connections: пароль в шаблоне запрещён",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "connections": {
+          "finance": {
+            "host": "db",
+            "database": "f",
+            "user": "u",
+            "passwordEnv": "REP_X_PASSWORD",
+            "password": "plain"
+          }
+        }
+      },
+      "errors": [
+        "connections.finance.password"
+      ]
+    },
+    {
+      "name": "connections: без passwordEnv",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "connections": {
+          "finance": {
+            "host": "db",
+            "database": "f",
+            "user": "u"
+          }
+        }
+      },
+      "errors": [
+        "connections.finance.passwordEnv"
+      ]
+    },
+    {
+      "name": "connections: неизвестный kind",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "connections": {
+          "crm": {
+            "kind": "oracle",
+            "baseUrl": "https://x"
+          }
+        }
+      },
+      "errors": [
+        "connections.crm.kind"
+      ]
+    },
+    {
+      "name": "connections: rest с baseUrl принимается",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "https://crm.example/api"
+          }
+        }
+      },
+      "errors": []
+    },
+    {
+      "name": "connections: default не postgres",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "connections": {
+          "default": {
+            "kind": "rest",
+            "baseUrl": "https://x"
+          }
+        }
+      },
+      "errors": [
+        "connections.default"
+      ]
+    },
+    {
+      "name": "datasets: ссылка на необъявленный источник",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "connection": "finance"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ]
+      },
+      "errors": [
+        "datasets.sales.connection"
+      ]
+    },
+    {
+      "name": "params: connection у не-lookup",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "params": [
+          {
+            "name": "d",
+            "type": "date",
+            "source": {
+              "kind": "date",
+              "connection": "finance"
+            }
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source.connection"
+      ]
+    },
+    {
+      "name": "params: справочник с объявленным источником",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "connections": {
+          "finance": {
+            "host": "db",
+            "database": "f",
+            "user": "u",
+            "passwordEnv": "REP_X_PASSWORD"
+          }
+        },
+        "params": [
+          {
+            "name": "r",
+            "type": "select",
+            "source": {
+              "kind": "lookup",
+              "sql": "SELECT 1 AS id, 'a' AS name",
+              "connection": "finance"
+            }
+          }
+        ]
+      },
+      "errors": []
+    }
+  ]
 }
