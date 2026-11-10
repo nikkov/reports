@@ -30,13 +30,28 @@
       }
     }
   ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
   "datasets": {
     "sales": {
       "sql": "SELECT s.category, s.amount, s.profit FROM reports_examples.sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date",
       "params": {
         "from": "$from",
         "to": "$to"
-      }
+      },
+      "connection": "main"
     }
   },
   "blocks": [

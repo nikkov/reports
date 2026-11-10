@@ -31,13 +31,28 @@
       }
     }
   ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
   "datasets": {
     "margin": {
       "params": {
         "from": "$from",
         "to": "$to"
       },
-      "sql": "SELECT round(sum(s.profit)::numeric / nullif(sum(s.amount), 0) * 100, 2) AS margin_pct, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS deals FROM reports_examples.sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date"
+      "sql": "SELECT round(sum(s.profit)::numeric / nullif(sum(s.amount), 0) * 100, 2) AS margin_pct, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS deals FROM reports_examples.sales s WHERE s.order_date >= :from::date AND s.order_date <= :to::date",
+      "connection": "main"
     }
   },
   "blocks": [

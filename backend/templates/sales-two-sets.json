@@ -30,20 +30,36 @@
       }
     }
   ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
   "datasets": {
     "byRegion": {
       "sql": "SELECT r.name AS region, count(*) AS orders, sum(s.amount) AS amount FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name ORDER BY amount DESC",
       "params": {
         "from": "$from",
         "to": "$to"
-      }
+      },
+      "connection": "main"
     },
     "byCategory": {
       "sql": "SELECT category, count(*) AS orders, sum(profit) AS profit FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date GROUP BY category ORDER BY profit DESC",
       "params": {
         "from": "$from",
         "to": "$to"
-      }
+      },
+      "connection": "main"
     }
   },
   "blocks": [

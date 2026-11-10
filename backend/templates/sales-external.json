@@ -32,6 +32,18 @@
     }
   ],
   "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    },
     "ext": {
       "kind": "postgres",
       "host": "127.0.0.1",
@@ -51,7 +63,8 @@
         "from": "$from",
         "to": "$to"
       },
-      "sql": "SELECT region, sum(amount) AS amount, sum(profit) AS profit FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date GROUP BY region ORDER BY region NULLS LAST"
+      "sql": "SELECT region, sum(amount) AS amount, sum(profit) AS profit FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date GROUP BY region ORDER BY region NULLS LAST",
+      "connection": "main"
     },
     "shipments": {
       "connection": "ext",

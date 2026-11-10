@@ -42,6 +42,7 @@
 | `REP_OWNER_DB_PASSWORD` | — | его пароль; серверу не нужен, только развёртыванию |
 | `REP_STRICT_ROLE` | `0` | `1` — отказаться стартовать под суперпользователем (эксплуатационный режим) |
 | `REP_CONN_<ИМЯ>_PASSWORD` | — | пароли внешних источников: имя задаётся в шаблоне полем `passwordEnv` (ADR-76). В шаблоне и документации значений нет |
+| `REP_RO_DB_USER`, `REP_RO_DB_PASSWORD` | — | роль чтения, под которой шаблоны примеров берут данные (`connections.main`, ADR-77). На CI-стенде допускается та же учётная запись, что и основная |
 | `REP_EXT_DB`, `REP_EXT_USER` | `reporting_ext`, `reporting_ext_ro` | демонстрационная вторая БД для примера `sales-external` (`db/examples/external.sh`) |
 
 Основная роль должна уметь писать в схему `reports`: шаблоны (`report_templates`, `report_templates_history`),

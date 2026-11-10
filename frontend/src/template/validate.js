@@ -220,6 +220,11 @@ export function validateTemplate(template) {
   const idPattern = /^[a-z0-9][a-z0-9_-]*$/
   const envPattern = /^[A-Za-z_][A-Za-z0-9_]*$/
   const sslModes = ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']
+  // Значение поля источника может быть целиком подстановкой ${ИМЯ} (ADR-77):
+  // адрес и база берутся из окружения, а в шаблоне остаётся видно, откуда они.
+  const envRefPattern = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/
+  const isRef = (value) => typeof value === 'string' && envRefPattern.test(value)
+  const refValid = (value) => value === undefined || !String(value).includes('${') || isRef(String(value))
 
   for (const [key, conn] of Object.entries(connections)) {
     const base = `connections.${key}`
@@ -253,8 +258,8 @@ export function validateTemplate(template) {
       } else if (!envPattern.test(conn.passwordEnv)) {
         errors.push({ path: `${base}.passwordEnv`, message: 'passwordEnv должен быть именем переменной окружения' })
       }
-      if (conn.schema && !envPattern.test(conn.schema)) {
-        errors.push({ path: `${base}.schema`, message: 'schema должен быть идентификатором' })
+      if (conn.schema && !envPattern.test(conn.schema) && !isRef(conn.schema)) {
+        errors.push({ path: `${base}.schema`, message: 'schema должен быть идентификатором или ${ИМЯ_ПЕРЕМЕННОЙ}' })
       }
       const ssl = conn.sslmode || conn.sslMode
       if (ssl && !sslModes.includes(ssl)) {
@@ -266,6 +271,14 @@ export function validateTemplate(template) {
       if (conn.connectTimeout !== undefined &&
           !(Number.isInteger(conn.connectTimeout) && conn.connectTimeout >= 1 && conn.connectTimeout <= 120)) {
         errors.push({ path: `${base}.connectTimeout`, message: 'connectTimeout — целое 1…120 секунд' })
+      }
+      for (const field of ['host', 'port', 'database', 'user', 'schema']) {
+        if (!refValid(conn[field])) {
+          errors.push({
+            path: `${base}.${field}`,
+            message: 'подстановка окружения задаётся целиком: ${ИМЯ_ПЕРЕМЕННОЙ}'
+          })
+        }
       }
       if (conn.statementTimeoutMs !== undefined &&
           !(Number.isInteger(conn.statementTimeoutMs) &&

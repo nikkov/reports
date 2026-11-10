@@ -11,7 +11,8 @@
       "required": true,
       "source": {
         "kind": "lookup",
-        "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name"
+        "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name",
+        "connection": "main"
       }
     },
     {
@@ -22,7 +23,8 @@
       "source": {
         "kind": "lookup",
         "dependsOn": "region",
-        "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM reports_examples.sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1"
+        "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM reports_examples.sales s WHERE s.region_id = :region::int AND s.category IS NOT NULL ORDER BY 1",
+        "connection": "main"
       }
     },
     {
@@ -66,6 +68,20 @@
       }
     }
   ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
   "datasets": {
     "sales": {
       "params": {
@@ -75,7 +91,8 @@
         "to": "$to",
         "scope": "$scope"
       },
-      "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM reports_examples.sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND s.order_date >= :from::date AND s.order_date <= :to::date AND (:scope = 'all' OR s.profit > 0) ORDER BY s.category NULLS LAST, s.product, s.id"
+      "sql": "SELECT s.region, s.category, s.product, s.amount, s.profit, s.order_date FROM reports_examples.sales s WHERE s.region_id = :region::int AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND s.order_date >= :from::date AND s.order_date <= :to::date AND (:scope = 'all' OR s.profit > 0) ORDER BY s.category NULLS LAST, s.product, s.id",
+      "connection": "main"
     }
   },
   "blocks": [

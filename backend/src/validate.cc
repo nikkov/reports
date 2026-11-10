@@ -34,6 +34,13 @@ bool isEnvName(const std::string &s) {
     return true;
 }
 
+// Значение поля источника может быть целиком подстановкой ${ИМЯ} (ADR-77).
+bool isEnvRefValue(const std::string &s) {
+    if (s.size() < 4 || s.rfind("${", 0) != 0 || s.back() != '}') return false;
+    const std::string name = s.substr(2, s.size() - 3);
+    return isEnvName(name);
+}
+
 bool isIdName(const std::string &s) {
     if (s.empty()) return false;
     if (!std::islower(static_cast<unsigned char>(s[0])) && !std::isdigit(static_cast<unsigned char>(s[0]))) {
@@ -592,6 +599,16 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         addError(r, base + ".database", "для postgres нужна database");
                     }
                     if (asString(conn["user"]).empty()) addError(r, base + ".user", "для postgres нужен user");
+                    // подстановка окружения допускается только целым значением поля: так
+                    // видно, что именно берётся извне, и ошибочная запись ловится заранее
+                    for (const char *field : {"host", "port", "database", "user", "schema"}) {
+                        const std::string raw = asString(conn[field]);
+                        if (raw.find("${") == std::string::npos) continue;
+                        if (!isEnvRefValue(raw)) {
+                            addError(r, base + "." + field,
+                                     "подстановка окружения задаётся целиком: ${ИМЯ_ПЕРЕМЕННОЙ}");
+                        }
+                    }
                     const std::string pwEnv = asString(conn["passwordEnv"]);
                     if (pwEnv.empty()) {
                         addError(r, base + ".passwordEnv",
@@ -603,8 +620,8 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         addError(r, base + ".port", "port должен быть числом или строкой");
                     }
                     const std::string schema = asString(conn["schema"]);
-                    if (!schema.empty() && !isIdName(schema)) {
-                        addError(r, base + ".schema", "schema должен быть идентификатором");
+                    if (!schema.empty() && !isIdName(schema) && !isEnvRefValue(schema)) {
+                        addError(r, base + ".schema", "schema должен быть идентификатором или ${ИМЯ_ПЕРЕМЕННОЙ}");
                     }
                     const std::string ssl = asString(conn.isMember("sslmode") ? conn["sslmode"] : conn["sslMode"]);
                     if (!ssl.empty()) {

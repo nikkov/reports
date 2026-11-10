@@ -110,6 +110,10 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
       PGDATABASE: reporting_ci
+      # шаблоны примеров читают данные под отдельной ролью (ADR-75/ADR-77):
+      # на CI-стенде это тот же postgres — роль только для чтения здесь не нужна
+      REP_RO_DB_USER: postgres
+      REP_RO_DB_PASSWORD: postgres
     services:
       postgres:
         image: postgres:16

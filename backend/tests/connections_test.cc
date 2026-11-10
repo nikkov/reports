@@ -118,6 +118,54 @@ TEST_CASE("connections: REST зарезервирован и отвечает о
     REQUIRE(err.find("ещё не поддерживается") != std::string::npos);
 }
 
+TEST_CASE("connections: адрес и база подставляются из окружения") {
+    EnvGuard pw("s3cret");
+    setenv("REP_TEST_CONN_HOST", "10.1.2.3", 1);
+    setenv("REP_TEST_CONN_DB", "warehouse", 1);
+    setenv("REP_TEST_CONN_USER", "reader", 1);
+    rep::ConnSpec spec;
+    spec.key = "main";
+    spec.host = "${REP_TEST_CONN_HOST}";
+    spec.port = "${REP_TEST_CONN_PORT_UNSET_FALLBACK}";
+    spec.database = "${REP_TEST_CONN_DB}";
+    spec.user = "${REP_TEST_CONN_USER}";
+    spec.passwordEnv = kEnvName;
+    spec.schema = "reports_examples";
+
+    std::string err;
+    const std::string dsn = rep::ConnRegistry::dsnFor(spec, err);
+    // порт не подставлен — источник целиком не собирается, но и не превращается в localhost
+    REQUIRE(dsn.empty());
+    REQUIRE(err.find("REP_TEST_CONN_PORT_UNSET_FALLBACK") != std::string::npos);
+
+    spec.port = "5432";
+    const std::string ok = rep::ConnRegistry::dsnFor(spec, err);
+    REQUIRE(err.empty());
+    REQUIRE(ok.find("host='10.1.2.3'") != std::string::npos);
+    REQUIRE(ok.find("dbname='warehouse'") != std::string::npos);
+    REQUIRE(ok.find("user='reader'") != std::string::npos);
+
+    unsetenv("REP_TEST_CONN_HOST");
+    unsetenv("REP_TEST_CONN_DB");
+    unsetenv("REP_TEST_CONN_USER");
+}
+
+TEST_CASE("connections: подстановка смешивается с текстом — только целым значением в шаблоне") {
+    EnvGuard pw("s3cret");
+    setenv("REP_TEST_CONN_HOST", "db.internal", 1);
+    rep::ConnSpec spec;
+    spec.key = "main";
+    spec.host = "${REP_TEST_CONN_HOST}";     // валидатор разрешает только это
+    spec.database = "d";
+    spec.user = "u";
+    spec.passwordEnv = kEnvName;
+    std::string err;
+    const std::string dsn = rep::ConnRegistry::dsnFor(spec, err);
+    REQUIRE(err.empty());
+    REQUIRE(dsn.find("host='db.internal'") != std::string::npos);
+    unsetenv("REP_TEST_CONN_HOST");
+}
+
 TEST_CASE("connections: неизвестный ключ не уходит в основной сервер") {
     rep::ConnRegistry registry;
     std::string err;

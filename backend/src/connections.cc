@@ -1,6 +1,7 @@
 #include "connections.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 
 #include "env.h"
@@ -19,6 +20,20 @@ std::string quote(const std::string &value) {
     }
     out += '\'';
     return out;
+}
+
+// Значение может ссылаться на окружение: "${PGHOST}", "${REP_RO_DB_USER}".
+// Так блок connections остаётся явным (в шаблоне видно, что и откуда берётся),
+// но переносимым: адрес и база не зашиты на конкретный стенд.
+bool isEnvRef(const std::string &value, std::string &name) {
+    if (value.size() < 4 || value.rfind("${", 0) != 0 || value.back() != '}') return false;
+    name = value.substr(2, value.size() - 3);
+    if (name.empty()) return false;
+    const auto first = static_cast<unsigned char>(name[0]);
+    if (!std::isalpha(first) && first != '_') return false;
+    return std::all_of(name.begin(), name.end(), [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '_';
+    });
 }
 
 bool isIdentifier(const std::string &value) {
@@ -64,7 +79,51 @@ bool parseConnections(const Json::Value &connections, std::map<std::string, Conn
     return true;
 }
 
+namespace {
+
+// Подстановка ${NAME} в строковых полях источника. Значение берётся из окружения
+// процесса; незаданная переменная — ошибка, а не пустая строка: иначе подключение
+// молча уйдёт на другой сервер (localhost вместо нужного).
+std::string expandEnv(const std::string &value, const std::string &key, std::string &error) {
+    if (value.find("${") == std::string::npos) return value;
+    std::string out;
+    size_t i = 0;
+    while (i < value.size()) {
+        if (value[i] == '$' && i + 1 < value.size() && value[i + 1] == '{') {
+            const size_t close = value.find('}', i + 2);
+            if (close == std::string::npos) {
+                error = "источник '" + key + "': незакрытая подстановка ${…}";
+                return {};
+            }
+            const std::string name = value.substr(i + 2, close - i - 2);
+            const auto first = name.empty() ? 0 : static_cast<unsigned char>(name[0]);
+            const bool valid = !name.empty() && (std::isalpha(first) || first == '_') &&
+                               std::all_of(name.begin(), name.end(), [](unsigned char ch) {
+                                   return std::isalnum(ch) || ch == '_';
+                               });
+            if (!valid) {
+                error = "источник '" + key + "': в подстановке ${…} ожидается имя переменной окружения";
+                return {};
+            }
+            const std::string resolved = envOr(name, "");
+            if (resolved.empty()) {
+                error = "источник '" + key + "': не задана переменная окружения " + name;
+                return {};
+            }
+            out += resolved;
+            i = close + 1;
+            continue;
+        }
+        out += value[i];
+        ++i;
+    }
+    return out;
+}
+
+}  // namespace
+
 std::string ConnRegistry::dsnFor(const ConnSpec &spec, std::string &error) {
+    error.clear();
     if (spec.kind != "postgres") {
         if (spec.kind == "rest") {
             error = "источник '" + spec.key + "' типа rest зарезервирован, но ещё не поддерживается";
@@ -73,9 +132,23 @@ std::string ConnRegistry::dsnFor(const ConnSpec &spec, std::string &error) {
         }
         return {};
     }
-    if (spec.host.empty()) { error = "источник '" + spec.key + "': не задан host"; return {}; }
-    if (spec.database.empty()) { error = "источник '" + spec.key + "': не задана database"; return {}; }
-    if (spec.user.empty()) { error = "источник '" + spec.key + "': не задан user"; return {}; }
+    // адрес и база могут ссылаться на окружение: ${PGHOST}, ${REP_RO_DB_USER} (ADR-77)
+    const std::string host = expandEnv(spec.host, spec.key, error);
+    if (!error.empty()) return {};
+    const std::string port = spec.port.empty() ? "5432" : expandEnv(spec.port, spec.key, error);
+    if (!error.empty()) return {};
+    const std::string database = expandEnv(spec.database, spec.key, error);
+    if (!error.empty()) return {};
+    const std::string user = expandEnv(spec.user, spec.key, error);
+    if (!error.empty()) return {};
+    const std::string schema = expandEnv(spec.schema, spec.key, error);
+    if (!error.empty()) return {};
+    const std::string ssl = expandEnv(spec.sslMode, spec.key, error);
+    if (!error.empty()) return {};
+
+    if (host.empty()) { error = "источник '" + spec.key + "': не задан host"; return {}; }
+    if (database.empty()) { error = "источник '" + spec.key + "': не задана database"; return {}; }
+    if (user.empty()) { error = "источник '" + spec.key + "': не задан user"; return {}; }
     if (spec.passwordEnv.empty()) {
         error = "источник '" + spec.key + "': секреты в шаблоне не хранятся — укажите passwordEnv";
         return {};
@@ -91,22 +164,22 @@ std::string ConnRegistry::dsnFor(const ConnSpec &spec, std::string &error) {
     }
 
     std::string options = "-c default_transaction_read_only=on";
-    if (!spec.schema.empty()) {
-        if (!isIdentifier(spec.schema)) {
+    if (!schema.empty()) {
+        if (!isIdentifier(schema)) {
             error = "источник '" + spec.key + "': schema должен быть идентификатором";
             return {};
         }
-        options += " -c search_path=" + spec.schema;
+        options += " -c search_path=" + schema;
     }
     if (spec.statementTimeoutMs > 0) {
         options += " -c statement_timeout=" + std::to_string(spec.statementTimeoutMs);
     }
 
-    std::string dsn = "host=" + quote(spec.host) + " port=" + quote(spec.port.empty() ? "5432" : spec.port) +
-                      " dbname=" + quote(spec.database) + " user=" + quote(spec.user) +
+    std::string dsn = "host=" + quote(host) + " port=" + quote(port) +
+                      " dbname=" + quote(database) + " user=" + quote(user) +
                       " password=" + quote(password) + " options=" + quote(options) +
                       " connect_timeout=" + std::to_string(spec.connectTimeout > 0 ? spec.connectTimeout : 5);
-    if (!spec.sslMode.empty()) dsn += " sslmode=" + quote(spec.sslMode);
+    if (!ssl.empty()) dsn += " sslmode=" + quote(ssl);
     return dsn;
 }
 

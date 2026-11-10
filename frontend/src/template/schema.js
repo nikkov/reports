@@ -264,7 +264,8 @@ export default {
         },
         "schema": {
           "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          "pattern": "^(\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}|[A-Za-z_][A-Za-z0-9_]*)$",
+          "description": "схема сессии или подстановка ${ИМЯ_ПЕРЕМЕННОЙ}"
         },
         "sslmode": {
           "enum": [

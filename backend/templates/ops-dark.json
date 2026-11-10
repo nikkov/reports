@@ -10,7 +10,8 @@
       "label": "Сервис",
       "source": {
         "kind": "lookup",
-        "sql": "SELECT '' AS value, 'Все сервисы' AS label UNION ALL SELECT DISTINCT o.service, o.service FROM reports_examples.ops o ORDER BY 2"
+        "sql": "SELECT '' AS value, 'Все сервисы' AS label UNION ALL SELECT DISTINCT o.service, o.service FROM reports_examples.ops o ORDER BY 2",
+        "connection": "main"
       }
     },
     {
@@ -34,6 +35,20 @@
       }
     }
   ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
   "datasets": {
     "ops": {
       "params": {
@@ -41,7 +56,8 @@
         "from": "$from",
         "to": "$to"
       },
-      "sql": "SELECT o.day, o.service, o.team, o.requests, o.failures, o.avg_ms FROM reports_examples.ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) ORDER BY o.day, o.service, o.id"
+      "sql": "SELECT o.day, o.service, o.team, o.requests, o.failures, o.avg_ms FROM reports_examples.ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) ORDER BY o.day, o.service, o.id",
+      "connection": "main"
     }
   },
   "styles": {

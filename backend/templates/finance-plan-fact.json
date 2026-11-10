@@ -10,7 +10,8 @@
       "label": "Центр затрат",
       "source": {
         "kind": "lookup",
-        "sql": "SELECT '' AS value, 'Все центры' AS label UNION ALL SELECT DISTINCT f.cost_center, f.cost_center FROM reports_examples.finance f WHERE f.cost_center IS NOT NULL ORDER BY 2"
+        "sql": "SELECT '' AS value, 'Все центры' AS label UNION ALL SELECT DISTINCT f.cost_center, f.cost_center FROM reports_examples.finance f WHERE f.cost_center IS NOT NULL ORDER BY 2",
+        "connection": "main"
       }
     },
     {
@@ -34,6 +35,20 @@
       }
     }
   ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
   "datasets": {
     "finance": {
       "params": {
@@ -41,7 +56,8 @@
         "from": "$from",
         "to": "$to"
       },
-      "sql": "SELECT f.period, f.cost_center, f.account, f.plan_amount, f.fact_amount FROM reports_examples.finance f WHERE f.period >= :from::date AND f.period <= :to::date AND (:cost_center = '' OR f.cost_center = :cost_center) ORDER BY f.period, f.account, f.id"
+      "sql": "SELECT f.period, f.cost_center, f.account, f.plan_amount, f.fact_amount FROM reports_examples.finance f WHERE f.period >= :from::date AND f.period <= :to::date AND (:cost_center = '' OR f.cost_center = :cost_center) ORDER BY f.period, f.account, f.id",
+      "connection": "main"
     }
   },
   "blocks": [

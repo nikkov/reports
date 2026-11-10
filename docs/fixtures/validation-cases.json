@@ -2603,6 +2603,69 @@
         ]
       },
       "errors": []
+    },
+    {
+      "name": "connections: подстановка окружения принимается",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x",
+            "connection": "main"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "connections": {
+          "main": {
+            "kind": "postgres",
+            "host": "${PGHOST}",
+            "port": "${PGPORT}",
+            "database": "${PGDATABASE}",
+            "user": "${REP_RO_DB_USER}",
+            "passwordEnv": "REP_RO_DB_PASSWORD",
+            "schema": "${REP_DB_SCHEMA}"
+          }
+        }
+      },
+      "errors": []
+    },
+    {
+      "name": "connections: подстановка не целиком",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "connections": {
+          "main": {
+            "kind": "postgres",
+            "host": "db-${ID}",
+            "database": "d",
+            "user": "u",
+            "passwordEnv": "REP_X_PASSWORD"
+          }
+        }
+      },
+      "errors": [
+        "connections.main.host"
+      ]
     }
   ]
 }

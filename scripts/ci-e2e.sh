@@ -22,6 +22,10 @@ MAIL_DIR="${REP_CI_MAIL_DIR:-$ROOT/tmp/ci-mail}"
 [ "$DB" != "reporting" ] || { echo "REP_CI_DB не может совпадать с рабочей базой reporting"; exit 1; }
 export REP_DB="$DB"
 export PGDATABASE="$DB"
+# примеры ссылаются на ${REP_RO_DB_USER}/REP_RO_DB_PASSWORD: на тестовом стенде
+# роль чтения совпадает с основной (ADR-77)
+export REP_RO_DB_USER="${REP_RO_DB_USER:-$PGUSER}"
+export REP_RO_DB_PASSWORD="${REP_RO_DB_PASSWORD:-$PGPASSWORD}"
 LOGDIR="$ROOT/tmp/ci-logs"
 mkdir -p "$LOGDIR" "$MAIL_DIR"
 
