@@ -39,6 +39,7 @@
 #include "env.h"
 #include "params.h"
 #include "queries.h"
+#include "static_web.h"
 
 namespace fs = std::filesystem;
 using namespace drogon;
@@ -3917,6 +3918,61 @@ int main() {
         if (closedRuns > 0) {
             LOG_WARN << "прерванные отправки: закрыто " << closedRuns
                      << " попыток (процесс останавливался во время отправки)";
+        }
+    }
+
+    // --- статика (ADR-79): один процесс отдаёт и API, и собранный фронтенд ------------
+    // Каталог ищется рядом с бинарником (<бинарник>/web), в ./web или — для репозитория —
+    // в ../../frontend/dist. Явный REP_WEB_ROOT главнее. Если статики нет, сервер
+    // продолжает работать как чистое API: это нужно для CI и для внешнего nginx.
+    {
+        rep::WebRoot web;
+        const std::string explicitRoot = rep::envOr("REP_WEB_ROOT", "");
+        const std::string exeDir = rep::net::exeDir();
+        if (rep::findWebRoot(explicitRoot, exeDir, web)) {
+            LOG_INFO << "статика: " << rep::describeWebRoot(web.path, exeDir)
+                     << " (" << web.source << ")";
+            const std::string root = web.path;
+            // Именно ViaRegex: registerHandler считает путь без «{…}» литералом,
+            // и «/.*» молча превращался в маршрут с именем «/.*».
+            app().registerHandlerViaRegex(
+                "/.*",
+                [root](const HttpRequestPtr &req,
+                       std::function<void(const HttpResponsePtr &)> &&cb) {
+                    const std::string path = req->path();
+                    // Неизвестный маршрут API остаётся JSON-ошибкой, а не страницей.
+                    if (path.rfind("/api", 0) == 0) {
+                        Json::Value err;
+                        err["error"]["code"] = "NOT_FOUND";
+                        err["error"]["message"] = "нет такого маршрута";
+                        auto resp = HttpResponse::newHttpJsonResponse(err);
+                        resp->setStatusCode(k404NotFound);
+                        cb(resp);
+                        return;
+                    }
+                    const rep::StaticFile file = rep::resolveStatic(root, path);
+                    if (!file.found && !file.spaFallback) {
+                        auto resp = HttpResponse::newHttpResponse();
+                        resp->setStatusCode(k404NotFound);
+                        resp->setContentTypeCode(CT_TEXT_PLAIN);
+                        resp->setBody("404: файл не найден");
+                        cb(resp);
+                        return;
+                    }
+                    auto resp = HttpResponse::newFileResponse(file.path);
+                    // Content-Type drogon ставит сам по расширению; свой добавлять не нужно —
+                    // иначе в ответе оказываются два одинаковых заголовка.
+                    resp->addHeader("Cache-Control", rep::cacheControlFor(path, file.path));
+                    if (req->method() == Head) resp->setBody("");
+                    cb(resp);
+                },
+                {Get, Head});
+        } else if (!explicitRoot.empty()) {
+            LOG_ERROR << "REP_WEB_ROOT=" << explicitRoot << " не содержит index.html —"
+                      << " сервер отдаёт только API";
+        } else {
+            LOG_WARN << "статика не найдена: сервер отдаёт только API"
+                     << " (соберите фронтенд или задайте REP_WEB_ROOT)";
         }
     }
 

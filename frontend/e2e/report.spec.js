@@ -2019,3 +2019,55 @@ test('внешний источник: данные второго набора 
   expect(String(east.shipped)).toBe('88350000')
   expect(String(east.orders)).toBe('1315')
 })
+
+test('статика: сервер сам отдаёт фронтенд и API на одном порту', async ({ request }) => {
+  // ADR-79: комплект «бинарник + web/», без nginx и node. Порт бэкенда — 8080.
+  // Без сохранённой сессии: проверяем именно «оболочка свободна, API закрыт»
+  const ctx = await apiRequest.newContext({
+    baseURL: 'http://127.0.0.1:8080',
+    storageState: { cookies: [], origins: [] }
+  })
+
+  const page = await ctx.get('/report.html?report=sales-summary')
+  expect(page.status()).toBe(200)
+  const html = await page.text()
+  expect(html).toContain('<div id="app"')
+
+  // ассеты сборки отдаются с immutable-кэшем (у Vite в имени хэш)
+  const assetPath = html.match(/src="\.?(\/assets\/[^"]+\.js)"/)
+  expect(assetPath).not.toBeNull()
+  const asset = await ctx.get(assetPath[1])
+  expect(asset.status()).toBe(200)
+  expect(asset.headers()['content-type']).toContain('javascript')
+  expect(asset.headers()['cache-control']).toContain('immutable')
+
+  // страница приложения не кэшируется, иначе после выкладки браузер покажет старую оболочку
+  const index = await ctx.get('/')
+  expect(index.status()).toBe(200)
+  expect(index.headers()['cache-control']).toBe('no-cache')
+
+  // API без входа закрыт, хотя оболочка страницы отдаётся свободно
+  const data = await ctx.post('/api/report/data', { data: { reportId: 'sales-summary' } })
+  expect(data.status()).toBe(401)
+
+  // с админской сессией неизвестный маршрут API — JSON-ошибка, а не HTML-страница
+  const admin = await apiRequest.newContext({
+    baseURL: 'http://127.0.0.1:8080',
+    storageState: '.auth/admin.json'
+  })
+  const api = await admin.get('/api/nope')
+  expect(api.status()).toBe(404)
+  expect(api.headers()['content-type']).toContain('application/json')
+  await admin.dispose()
+
+  // маршрут без расширения отдаёт приложение (SPA-fallback)
+  const spa = await ctx.get('/portal/x')
+  expect(spa.status()).toBe(200)
+  expect(await spa.text()).toContain('<div id="app"')
+
+  // отсутствующий файл с расширением — честный 404, а не подмена страницей
+  const missing = await ctx.get('/assets/nope.js')
+  expect(missing.status()).toBe(404)
+
+  await ctx.dispose()
+})

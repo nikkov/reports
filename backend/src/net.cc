@@ -1,5 +1,11 @@
 #include "net.h"
 
+#include <filesystem>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace rep {
 namespace net {
 
@@ -79,6 +85,27 @@ bool portFree(int port) {
     const bool busy = ::bind(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0;
     closeSocket(probe);
     return !busy;
+}
+
+std::string exeDir() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+#ifdef _WIN32
+    char buffer[MAX_PATH * 4];
+    const DWORD size = ::GetModuleFileNameA(nullptr, buffer, static_cast<DWORD>(sizeof(buffer)));
+    if (size == 0 || size >= sizeof(buffer)) return {};
+    const auto dir = fs::path(std::string(buffer, size)).parent_path();
+#elif defined(__linux__)
+    char buffer[4096];
+    const ssize_t size = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (size <= 0) return {};
+    buffer[size] = '\0';
+    const auto dir = fs::path(std::string(buffer, static_cast<size_t>(size))).parent_path();
+#else
+    return {};
+#endif
+    const auto canonical = fs::weakly_canonical(dir, ec);
+    return ec ? dir.string() : canonical.string();
 }
 
 std::time_t timegmUtc(std::tm *tm) {

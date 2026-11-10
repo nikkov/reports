@@ -34,6 +34,7 @@ add_library(rep_core STATIC
   src/net.cc
   src/params.cc
   src/queries.cc
+  src/static_web.cc
 )
 target_include_directories(rep_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(rep_core PUBLIC Drogon::Drogon OpenSSL::SSL OpenSSL::Crypto)
@@ -70,6 +71,7 @@ add_executable(rep_tests
   tests/template_migrate_test.cc
   tests/auth_test.cc
   tests/connections_test.cc
+  tests/static_web_test.cc
   tests/dataset_test.cc
   tests/queries_test.cc
   tests/params_test.cc

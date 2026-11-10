@@ -82,6 +82,9 @@ Role requiredRole(const std::string &method, const std::string &path) {
 
     if (path == "/api/health") return Role::Public;
     if (path.rfind("/api/auth/", 0) == 0) return Role::Public;
+    // Статика и SPA-страницы (ADR-79): отдаются без авторизации, иначе страница входа
+    // не загрузится. Защищены данные, а не оболочка: все /api-маршруты остаются под ролью.
+    if (path.rfind("/api", 0) != 0) return Role::Public;
 
     // черновик — автор и выше (проверяем раньше общего префикса /api/admin/)
     if ((put || del) && path.find("/draft") != std::string::npos) return Role::Author;

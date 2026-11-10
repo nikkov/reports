@@ -38,6 +38,11 @@ TEST_CASE("матрица ролей: чтение всем, запись авт
     REQUIRE(requiredRole("DELETE", "/api/reports/x") == Role::Admin);
     REQUIRE(requiredRole("PUT", "/api/reports/x") == Role::Admin);
 
+    // статика и страницы SPA отдаются без входа (ADR-79), вход — только на API
+    REQUIRE(requiredRole("GET", "/") == Role::Public);
+    REQUIRE(requiredRole("GET", "/report.html") == Role::Public);
+    REQUIRE(requiredRole("GET", "/assets/app-abc123.js") == Role::Public);
+
     // безопасное умолчание: неизвестный путь требует админа
     REQUIRE(requiredRole("GET", "/api/unknown") == Role::Admin);
 }
