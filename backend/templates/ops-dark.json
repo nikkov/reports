@@ -10,8 +10,7 @@
       "label": "Сервис",
       "source": {
         "kind": "lookup",
-        "sql": "SELECT '' AS value, 'Все сервисы' AS label UNION ALL SELECT DISTINCT o.service, o.service FROM reports_examples.ops o ORDER BY 2",
-        "connection": "main"
+        "dataset": "service_lookup"
       }
     },
     {
@@ -58,6 +57,10 @@
       },
       "sql": "SELECT o.day, o.service, o.team, o.requests, o.failures, o.avg_ms FROM reports_examples.ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) ORDER BY o.day, o.service, o.id",
       "connection": "main"
+    },
+    "service_lookup": {
+      "connection": "main",
+      "sql": "SELECT '' AS value, 'Все сервисы' AS label UNION ALL SELECT DISTINCT o.service, o.service FROM reports_examples.ops o ORDER BY 2"
     }
   },
   "styles": {

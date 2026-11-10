@@ -208,6 +208,8 @@ export function validateTemplate(template) {
   }
 
   const params = template.params || []
+  const datasetNames = Object.keys(template.datasets || {})
+  const datasetKeys = new Set(datasetNames)
 
   // Источники данных (ADR-76): блок connections описывает, куда идти за данными —
   // адрес, базу, пользователя, схему, режим SSL и имя переменной окружения с паролем.
@@ -314,25 +316,31 @@ export function validateTemplate(template) {
     }
 
     if (kind === 'lookup') {
-      if (!src.sql) {
-        errors.push({ path: `${path}.source`, message: 'для source.kind=lookup обязателен sql (SQL списка задаётся в шаблоне)' })
+      // Справочник — это набор данных (ADR-78): SQL и соединение живут в datasets,
+      // параметр ссылается на набор. Старый source.sql отклоняется с подсказкой.
+      if (src.sql) {
+        errors.push({
+          path: `${path}.source.sql`,
+          message: 'SQL справочника задаётся набором datasets.<ключ>: source.sql больше не поддерживается'
+        })
+      }
+      if (!src.dataset) {
+        errors.push({ path: `${path}.source`, message: 'для source.kind=lookup обязателен dataset — набор из datasets' })
+      } else if (!datasetKeys.has(src.dataset)) {
+        errors.push({ path: `${path}.source.dataset`, message: `набор «${src.dataset}» не объявлен в datasets` })
       }
       if (src.queryId) {
-        errors.push({ path: `${path}.source`, message: 'queryId больше не поддерживается: перенесите SQL в source.sql' })
+        errors.push({ path: `${path}.source`, message: 'queryId больше не поддерживается' })
       }
       if (src.options) errors.push({ path: `${path}.source`, message: 'lookup и options взаимоисключающие' })
+      if (src.connection) {
+        errors.push({ path: `${path}.source.connection`, message: 'соединение задаётся в datasets.<ключ>.connection' })
+      }
       if (p.type !== 'select') {
         errors.push({ path: `${path}.type`, message: 'параметр со справочником должен иметь type=select' })
       }
-      // справочник может читаться с другого сервера (ADR-76)
-      if (src.connection && !connKnown(src.connection)) {
-        errors.push({
-          path: `${path}.source.connection`,
-          message: `источник «${src.connection}» не объявлен в connections`
-        })
-      }
-    } else if (src.connection) {
-      errors.push({ path: `${path}.source.connection`, message: 'connection допустим только у source.kind=lookup' })
+    } else if (src.dataset) {
+      errors.push({ path: `${path}.source.dataset`, message: 'dataset допустим только у source.kind=lookup' })
     }
 
     if (kind === 'static') {
@@ -511,7 +519,6 @@ function checkGaugeZones(block, base, errors) {
     }
   }
 
-  const datasetKeys = Object.keys(template.datasets || {})
   const columnsByDataKey = {}
 
   template.blocks.forEach((block, index) => {
@@ -542,10 +549,10 @@ function checkGaugeZones(block, base, errors) {
       return
     }
 
-    if (!datasetKeys.includes(block.dataKey)) {
+    if (!datasetNames.includes(block.dataKey)) {
       errors.push({
         path: `${base}.dataKey`,
-        message: `набор данных «${block.dataKey}» не объявлен в datasets (есть: ${datasetKeys.join(', ') || '—'})`
+        message: `набор данных «${block.dataKey}» не объявлен в datasets (есть: ${datasetNames.join(', ') || '—'})`
       })
     }
 

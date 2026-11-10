@@ -119,19 +119,34 @@ describe('validateTemplate', () => {
 
   it('принимает справочник из БД и каскад от него', () => {
     const t = base()
+    // справочник — это набор данных (ADR-78): SQL живёт в datasets
+    t.datasets.region_lookup = { sql: 'SELECT id::text AS value, name AS label FROM reports_examples.regions' }
+    t.datasets.category_lookup = { sql: 'SELECT DISTINCT category AS value, category AS label FROM reports_examples.sales WHERE region_id = :region::int' }
     t.params = [
-      { name: 'region', type: 'select',        source: { kind: 'lookup', sql: 'SELECT id::text AS value, name AS label FROM reports_examples.regions' }, required: true },
-      { name: 'category', type: 'select', source: { kind: 'lookup', sql: 'SELECT DISTINCT category AS value, category AS label FROM reports_examples.sales WHERE region_id = :region::int', dependsOn: 'region' } }
+      { name: 'region', type: 'select',        source: { kind: 'lookup', dataset: 'region_lookup' }, required: true },
+      { name: 'category', type: 'select', source: { kind: 'lookup', dataset: 'category_lookup', dependsOn: 'region' } }
     ]
     t.datasets.sales.params = { from: '$region', to: '$region' }
     t.blocks[0].text = 'Регион {{region}}'
     expect(validateTemplate(t).errors).toEqual([])
   })
 
-  it('ловит справочник без sql', () => {
+  it('ловит справочник без dataset', () => {
     const t = base()
     t.params = [{ name: 'region', type: 'select', source: { kind: 'lookup' } }]
     expect(paths(validateTemplate(t))).toContain('params.0.source')
+  })
+
+  it('ловит справочник со старым source.sql', () => {
+    const t = base()
+    t.params = [{ name: 'region', type: 'select', source: { kind: 'lookup', sql: 'SELECT 1 AS value' } }]
+    expect(paths(validateTemplate(t))).toContain('params.0.source.sql')
+  })
+
+  it('ловит ссылку на необъявленный набор справочника', () => {
+    const t = base()
+    t.params = [{ name: 'region', type: 'select', source: { kind: 'lookup', dataset: 'nope' } }]
+    expect(paths(validateTemplate(t))).toContain('params.0.source.dataset')
   })
 
   it('ловит устаревший queryId в справочнике', () => {
@@ -155,24 +170,26 @@ describe('validateTemplate', () => {
 
   it('ловит зависимость от неизвестного или объявленного ниже параметра', () => {
     const t = base()
+    t.datasets.r = { sql: 'SELECT 1 AS value, \'a\' AS label' }
     t.params = [
-      { name: 'category', type: 'select', source: { kind: 'lookup', queryId: 'c', dependsOn: 'region' } },
-      { name: 'region', type: 'select', source: { kind: 'lookup', queryId: 'r' } }
+      { name: 'category', type: 'select', source: { kind: 'lookup', dataset: 'r', dependsOn: 'region' } },
+      { name: 'region', type: 'select', source: { kind: 'lookup', dataset: 'r' } }
     ]
     const errs = paths(validateTemplate(t))
     expect(errs).toContain('params.0.source.dependsOn')
 
     t.params = [
-      { name: 'category', type: 'select', source: { kind: 'lookup', queryId: 'c', dependsOn: 'nope' } }
+      { name: 'category', type: 'select', source: { kind: 'lookup', dataset: 'r', dependsOn: 'nope' } }
     ]
     expect(paths(validateTemplate(t))).toContain('params.0.source.dependsOn')
   })
 
   it('ловит зависимость от множественного выбора', () => {
     const t = base()
+    t.datasets.r = { sql: 'SELECT 1 AS value, \'a\' AS label' }
     t.params = [
-      { name: 'region', type: 'select', multiple: true, source: { kind: 'lookup', queryId: 'r' } },
-      { name: 'category', type: 'select', source: { kind: 'lookup', queryId: 'c', dependsOn: 'region' } }
+      { name: 'region', type: 'select', multiple: true, source: { kind: 'lookup', dataset: 'r' } },
+      { name: 'category', type: 'select', source: { kind: 'lookup', dataset: 'r', dependsOn: 'region' } }
     ]
     expect(paths(validateTemplate(t))).toContain('params.1.source.dependsOn')
   })

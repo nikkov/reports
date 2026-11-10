@@ -213,7 +213,7 @@
       ]
     },
     {
-      "name": "справочник без sql",
+      "name": "справочник без dataset",
       "template": {
         "version": 1,
         "id": "parity-lookup",
@@ -263,7 +263,7 @@
             "label": "Город",
             "source": {
               "kind": "lookup",
-              "sql": "SELECT 1 AS id, 'x' AS name",
+              "dataset": "region_lookup",
               "dependsOn": "region"
             }
           }
@@ -271,6 +271,9 @@
         "datasets": {
           "sales": {
             "sql": "SELECT 1 AS x"
+          },
+          "region_lookup": {
+            "sql": "SELECT 1 AS value, 'x' AS label"
           }
         },
         "blocks": [
@@ -2574,6 +2577,10 @@
         "datasets": {
           "sales": {
             "sql": "SELECT 1 AS x"
+          },
+          "cost_centers": {
+            "connection": "finance",
+            "sql": "SELECT 1 AS value, 'a' AS label"
           }
         },
         "blocks": [
@@ -2596,8 +2603,7 @@
             "type": "select",
             "source": {
               "kind": "lookup",
-              "sql": "SELECT 1 AS id, 'a' AS name",
-              "connection": "finance"
+              "dataset": "cost_centers"
             }
           }
         ]
@@ -2612,8 +2618,7 @@
         "title": "Проверка",
         "datasets": {
           "sales": {
-            "sql": "SELECT 1 AS x",
-            "connection": "main"
+            "sql": "SELECT 1 AS x"
           }
         },
         "blocks": [
@@ -2665,6 +2670,142 @@
       },
       "errors": [
         "connections.main.host"
+      ]
+    },
+    {
+      "name": "справочник: source.sql больше не поддерживается",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          },
+          "r": {
+            "sql": "SELECT 1 AS value, 'a' AS label"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "params": [
+          {
+            "name": "r",
+            "type": "select",
+            "source": {
+              "kind": "lookup",
+              "sql": "SELECT 1 AS value, 'a' AS label"
+            }
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source.sql",
+        "params.0.source"
+      ]
+    },
+    {
+      "name": "справочник: набор не объявлен",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "params": [
+          {
+            "name": "r",
+            "type": "select",
+            "source": {
+              "kind": "lookup",
+              "dataset": "nope"
+            }
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source.dataset"
+      ]
+    },
+    {
+      "name": "справочник: соединение задаётся в наборе",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          },
+          "r": {
+            "sql": "SELECT 1 AS value, 'a' AS label"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "params": [
+          {
+            "name": "r",
+            "type": "select",
+            "source": {
+              "kind": "lookup",
+              "dataset": "r",
+              "connection": "main"
+            }
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source.connection"
+      ]
+    },
+    {
+      "name": "dataset допустим только у справочника",
+      "template": {
+        "version": 2,
+        "id": "parity-ok",
+        "title": "Проверка",
+        "datasets": {
+          "sales": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "params": [
+          {
+            "name": "d",
+            "type": "date",
+            "source": {
+              "kind": "date",
+              "dataset": "sales"
+            }
+          }
+        ]
+      },
+      "errors": [
+        "params.0.source.dataset"
       ]
     }
   ]

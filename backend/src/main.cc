@@ -3182,19 +3182,34 @@ int main() {
                 return;
             }
 
+            // Справочник — это набор данных (ADR-78): параметр ссылается на datasets.<key>,
+            // поэтому SQL и соединение живут в одном блоке с остальными запросами шаблона.
             std::string sql;
             std::string lookupConn;
+            std::string lookupDataset;
             for (const auto &p : body["params"]) {
                 if (p.get("name", Json::Value("")).asString() != param) continue;
                 const Json::Value &src = p["source"];
                 if (src.isObject() && src.get("kind", Json::Value("")).asString() == "lookup") {
-                    sql = src.get("sql", Json::Value("")).asString();
-                    lookupConn = src.get("connection", Json::Value("")).asString();
+                    lookupDataset = src.get("dataset", Json::Value("")).asString();
                 }
             }
+            if (lookupDataset.empty()) {
+                sendError(cb, k404NotFound, "LOOKUP_NOT_FOUND",
+                          "у параметра '" + param + "' нет source.dataset (SQL справочника задаётся набором данных)");
+                return;
+            }
+            const Json::Value &lookupDs = body["datasets"][lookupDataset];
+            if (!lookupDs.isObject()) {
+                sendError(cb, k404NotFound, "LOOKUP_NOT_FOUND",
+                          "набор '" + lookupDataset + "' для справочника '" + param + "' не объявлен в datasets");
+                return;
+            }
+            sql = lookupDs.get("sql", Json::Value("")).asString();
+            lookupConn = lookupDs.get("connection", Json::Value("")).asString();
             if (sql.empty()) {
                 sendError(cb, k404NotFound, "LOOKUP_NOT_FOUND",
-                          "у параметра '" + param + "' нет source.sql (SQL справочника задаётся в шаблоне)");
+                          "у набора '" + lookupDataset + "' нет sql");
                 return;
             }
 

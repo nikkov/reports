@@ -38,8 +38,7 @@
       "default": "",
       "source": {
         "kind": "lookup",
-        "sql": "SELECT DISTINCT service AS value, service AS label FROM reports_examples.ops ORDER BY service",
-        "connection": "main"
+        "dataset": "service_lookup"
       }
     }
   ],
@@ -66,6 +65,10 @@
         "service": "$service"
       },
       "connection": "main"
+    },
+    "service_lookup": {
+      "connection": "main",
+      "sql": "SELECT DISTINCT service AS value, service AS label FROM reports_examples.ops ORDER BY service"
     }
   },
   "blocks": [

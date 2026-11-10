@@ -566,6 +566,12 @@ ValidationResult validateTemplateJson(const Json::Value &root,
     // хранить нельзя, поэтому поле password — ошибка, а не предупреждение. Наборы и
     // справочники ссылаются на источник по ключу; `default` (и пустое значение) — окружение
     // сервера, объявлять его не обязательно.
+    // ключи наборов нужны и для ссылок source.dataset (ADR-78), поэтому собираем заранее
+    std::set<std::string> datasetKeys;
+    if (root["datasets"].isObject()) {
+        for (const auto &key : root["datasets"].getMemberNames()) datasetKeys.insert(key);
+    }
+
     std::set<std::string> connKeys;
     if (!root["connections"].isNull()) {
         if (!root["connections"].isObject()) {
@@ -744,22 +750,27 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             }
 
             if (kind == "lookup") {
-                const std::string sql = asString(src["sql"]);
-                if (sql.empty()) {
-                    addError(r, path + ".source", "для source.kind=lookup обязателен sql (SQL списка задаётся в шаблоне)");
-                } else {
-                    std::string sqlErr;
-                    if (!checkSql(sql, sqlErr)) addError(r, path + ".source", sqlErr);
+                // Справочник — это набор данных (ADR-78): SQL и соединение живут в datasets,
+                // параметр ссылается на набор. Старый source.sql отклоняется с подсказкой.
+                if (src.isMember("sql")) {
+                    addError(r, path + ".source.sql",
+                             "SQL справочника задаётся набором datasets.<ключ>: source.sql больше не поддерживается");
+                }
+                const std::string dataset = asString(src["dataset"]);
+                if (dataset.empty()) {
+                    addError(r, path + ".source",
+                             "для source.kind=lookup обязателен dataset — набор из datasets");
+                } else if (!datasetKeys.count(dataset)) {
+                    addError(r, path + ".source.dataset",
+                             "набор «" + dataset + "» не объявлен в datasets");
                 }
                 if (src.isMember("queryId")) {
-                    addError(r, path + ".source", "queryId больше не поддерживается: перенесите SQL в source.sql");
+                    addError(r, path + ".source", "queryId больше не поддерживается");
                 }
                 if (src.isMember("options")) addError(r, path + ".source", "lookup и options взаимоисключающие");
-                // справочник тоже может читать другой сервер (ADR-76)
-                const std::string srcConn = asString(src["connection"]);
-                if (!srcConn.empty() && srcConn != "default" && !connKeys.count(srcConn)) {
+                if (src.isMember("connection")) {
                     addError(r, path + ".source.connection",
-                             "источник «" + srcConn + "» не объявлен в connections");
+                             "соединение задаётся в datasets.<ключ>.connection");
                 }
                 if (type != "select") addError(r, path + ".type", "параметр со справочником должен иметь type=select");
             } else if (kind == "static") {
@@ -777,9 +788,16 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                     addError(r, path + ".source", "для даты/времени queryId и options недопустимы");
                 }
                 if (type != kind) addError(r, path + ".type", "для source.kind=" + kind + " ожидался type=" + kind);
-                if (kind != "lookup" && src.isMember("connection")) {
-                    addError(r, path + ".source.connection", "connection допустим только у source.kind=lookup");
+                if (src.isMember("dataset")) {
+                    addError(r, path + ".source.dataset", "dataset допустим только у source.kind=lookup");
                 }
+            } else if (src.isMember("dataset")) {
+                addError(r, path + ".source.dataset", "dataset допустим только у source.kind=lookup");
+            }
+
+            // соединение и набор — свойства datasets (ADR-78), у параметра их быть не может
+            if (kind != "lookup" && src.isMember("connection")) {
+                addError(r, path + ".source.connection", "соединение задаётся в datasets.<ключ>.connection");
             }
 
             if (param["multiple"].asBool() && kind != "lookup" && kind != "static") {

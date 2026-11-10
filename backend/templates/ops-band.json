@@ -38,8 +38,7 @@
       "default": "",
       "source": {
         "kind": "lookup",
-        "sql": "SELECT DISTINCT service AS value, service AS label FROM reports_examples.ops ORDER BY service",
-        "connection": "main"
+        "dataset": "service_lookup"
       }
     }
   ],
@@ -66,6 +65,10 @@
       },
       "sql": "SELECT o.day, round(avg(o.avg_ms)::numeric, 1) AS value_ms, round(min(o.avg_ms)::numeric, 1) AS low_ms, round(max(o.avg_ms)::numeric, 1) AS high_ms, sum(o.requests) AS requests FROM reports_examples.ops o WHERE o.day >= :from::date AND o.day <= :to::date AND (:service = '' OR o.service = :service) GROUP BY o.day ORDER BY o.day",
       "connection": "main"
+    },
+    "service_lookup": {
+      "connection": "main",
+      "sql": "SELECT DISTINCT service AS value, service AS label FROM reports_examples.ops ORDER BY service"
     }
   },
   "blocks": [

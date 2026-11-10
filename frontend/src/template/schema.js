@@ -188,14 +188,10 @@ export default {
               "type": "string",
               "minLength": 1
             },
-            "sql": {
-              "type": "string",
-              "minLength": 1
-            },
-            "connection": {
+            "dataset": {
               "type": "string",
               "minLength": 1,
-              "description": "ключ источника из блока connections (только для lookup); пусто — сервер по умолчанию"
+              "description": "набор из datasets, откуда берутся значения справочника (SQL и соединение — там же)"
             }
           }
         },

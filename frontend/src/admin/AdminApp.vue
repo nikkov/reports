@@ -110,6 +110,10 @@
             <span class="tag kind">{{ p.kind }}</span>
             <span v-if="p.multiple" class="tag">мультивыбор</span>
             <span v-if="p.dependsOn" class="tag">зависит от {{ p.dependsOn }}</span>
+            <span v-if="p.dataset" class="tag" :title="'SQL и соединение — в datasets.' + p.dataset">
+              набор: {{ p.dataset }}
+            </span>
+            <span v-if="p.connection" class="tag">источник: {{ p.connection }}</span>
             <span
               v-if="p.guardOk !== null"
               class="tag"
@@ -118,7 +122,9 @@
             >{{ p.guardOk ? 'SELECT ok' : 'guard: не SELECT' }}</span>
           </div>
           <pre v-if="p.sql" class="psql">{{ p.sql }}</pre>
-          <p v-else class="dim small">SQL не задан — параметр берёт значение из контрола ({{ p.kind }}).</p>
+          <p v-else class="dim small">
+            SQL не задан — параметр берёт значение из контрола ({{ p.kind }}).
+          </p>
         </div>
       </section>
 
@@ -476,9 +482,15 @@ async function select(id) {
 const paramQueries = computed(() => {
   try {
     const tpl = JSON.parse(text.value)
+    const datasets = tpl.datasets || {}
     return (tpl.params || []).map((p) => {
-      const sql = p?.source?.sql || ''
-      const kind = p?.source?.kind || p?.type || ''
+      const src = p?.source || {}
+      // справочник — это набор данных (ADR-78): SQL и соединение показываем из datasets
+      const dataset = src.dataset || ''
+      const ds = dataset ? datasets[dataset] : null
+      const sql = src.sql || (ds && ds.sql) || ''
+      const connection = (ds && ds.connection) || ''
+      const kind = src.kind || p?.type || ''
       const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
       const guardOk = !sql
         ? null
@@ -491,7 +503,9 @@ const paramQueries = computed(() => {
         type: p.type || '',
         kind,
         multiple: !!p.multiple,
-        dependsOn: p?.source?.dependsOn || '',
+        dependsOn: src.dependsOn || '',
+        dataset,
+        connection,
         sql,
         guardOk
       }

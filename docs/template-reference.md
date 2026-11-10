@@ -85,15 +85,31 @@
 ```json
 {
   "kind": "lookup",
-  "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name"
+  "dataset": "region_lookup"
 }
 {
   "kind": "lookup",
-  "sql": "SELECT DISTINCT category AS value, category AS label FROM reports_examples.sales WHERE region_id = :region::int ORDER BY 1",
+  "dataset": "category_lookup",
   "dependsOn": "region"
 }
 { "kind": "static", "options": [{ "value": "all", "label": "Все строки" }] }
 { "kind": "date" }
+```
+
+SQL справочника живёт в блоке данных — это обычный набор `datasets.<ключ>` со своим `sql`
+и, при необходимости, `connection` (ADR-78):
+
+```json
+"datasets": {
+  "region_lookup": {
+    "connection": "main",
+    "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name"
+  },
+  "category_lookup": {
+    "connection": "main",
+    "sql": "SELECT DISTINCT category AS value, category AS label FROM reports_examples.sales WHERE region_id = :region::int ORDER BY 1"
+  }
+}
 ```
 
 | `kind` | Что даёт | Требования |
@@ -101,12 +117,14 @@
 | `date` | контрол `input[type=date]` | `type` = `date`, без `queryId`/`options` |
 | `datetime` | контрол `input[type=datetime-local]` | `type` = `datetime` |
 | `static` | список из `source.options` | непустой `options`, `type` = `select`, без `queryId` |
-| `lookup` | список из `GET /api/reports/{reportId}/lookups/{param}` | обязателен `sql` (ровно две колонки: `value`, `label`), `type` = `select`, без `options` и `queryId` |
+| `lookup` | список из `GET /api/reports/{reportId}/lookups/{param}` | обязателен `dataset` — ключ набора в `datasets` (ровно две колонки: `value`, `label`), `type` = `select`, без `options`, `queryId` и `connection` |
 
 Дополнительно:
 
-- `sql` — текст запроса списка; плейсхолдеры `:name` подставляются из query-строки (binding),
-  клиенту SQL не отдаётся: `GET /api/reports/{id}` вырезает его на сервере.
+- `dataset` — набор, из которого берутся значения; `sql` набора использует плейсхолдеры `:name`,
+  они подставляются из query-строки (binding). Сами SQL и `connection` живут в `datasets`,
+  параметр на них только ссылается; старый `source.sql` — ошибка валидатора.
+- Клиенту SQL не отдаётся: `GET /api/reports/{id}` вырезает его на сервере (как и `connections`).
 - `dependsOn: "<имя>"` — каскад: значение родителя передаётся в запрос справочника как его параметр.
   Родитель обязан быть объявлен **выше** (это же исключает циклы) и не может быть множественным.
 - `multiple: true` — выпадающий список с чекбоксами (`MultiSelect.vue`), наружу значение уходит строкой
