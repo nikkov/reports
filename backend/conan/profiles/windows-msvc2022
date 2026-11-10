@@ -1,0 +1,25 @@
+# Conan v1: профиль для Visual Studio 2022 (x64), рантайм MD.
+# Проект собирается Conan v1 (1.66.0): Conan 2.x читает этот файл иначе и падает
+# на незнакомых ключах.
+[settings]
+os=Windows
+os_build=Windows
+arch=x86_64
+arch_build=x86_64
+compiler=Visual Studio
+compiler.version=17
+compiler.runtime=MD
+build_type=Release
+
+[options]
+drogon:with_postgres=True
+drogon:with_orm=True
+drogon:with_brotli=False
+drogon:with_profile=False
+drogon:with_boost=False
+drogon:with_sqlite=False
+drogon:with_mysql=False
+drogon:with_redis=False
+
+[build_requires]
+[env]

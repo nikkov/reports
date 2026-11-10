@@ -1,3 +1,4 @@
+#include "net.h"
 #include "subscriptions.h"
 
 #include <cctype>
@@ -125,12 +126,12 @@ std::time_t nextRunNaive(const Cron &cron, std::time_t naiveAfter) {
     std::tm t = *std::gmtime(&naiveAfter);
     t.tm_sec = 0;
     t.tm_min += 1; // строго после указанной минуты
-    std::time_t candidate = ::timegm(&t);
+    std::time_t candidate = rep::net::timegmUtc(&t);
     for (int step = 0; step < 366 * 24 * 60; ++step) {
         std::tm local = *std::gmtime(&candidate);
         if (cron.matches(local)) return candidate;
         local.tm_min += 1;
-        candidate = ::timegm(&local);
+        candidate = rep::net::timegmUtc(&local);
         if (candidate == static_cast<std::time_t>(-1)) return 0;
     }
     return 0;

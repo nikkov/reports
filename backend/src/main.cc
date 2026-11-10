@@ -1,11 +1,10 @@
+// net.h первым: winsock2.h должен попасть в перевод до windows.h из drogon,
+// иначе MSVC ругается на конфликт winsock.h и winsock2.h
+#include "net.h"
+
 #include <drogon/drogon.h>
 #include <drogon/orm/DbClient.h>
 #include <drogon/orm/Result.h>
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include <libpq-fe.h>
 
@@ -226,7 +225,7 @@ std::time_t nextRunInZone(PGconn *conn, const rep::Cron &cron, const std::string
     local.tm_mday = day;
     local.tm_hour = hour;
     local.tm_min = minute;
-    const std::time_t nextNaive = rep::nextRunNaive(cron, ::timegm(&local));
+    const std::time_t nextNaive = rep::nextRunNaive(cron, rep::net::timegmUtc(&local));
     if (nextNaive == 0) return 0;
 
     std::tm out = *::gmtime(&nextNaive);
@@ -399,6 +398,15 @@ void runQuery(const orm::DbClientPtr &db, const std::string &sql,
 }  // namespace
 
 int main() {
+    // Winsock под Windows нужно поднять до первого сокета (проверка порта, SMTP);
+    // на POSIX вызов пустой.
+    {
+        std::string netErr;
+        if (!rep::net::startup(netErr)) {
+            std::fprintf(stderr, "сеть недоступна: %s\n", netErr.c_str());
+            return 1;
+        }
+    }
     rep::loadDotEnv(rep::envOr("REP_ENV_FILE", "backend/.env"));
 
     const std::string host = rep::envOr("REP_HOST", "0.0.0.0");
@@ -1909,7 +1917,7 @@ int main() {
         static const std::map<std::string, std::string> noDeclared;
         runQuery(
             dataDb, finalSql, query.values,
-            [done, leaves, bag, noDeclared, sheetTitle, groupColumns, subtotalLevels,
+            [done, leaves, bag, sheetTitle, groupColumns, subtotalLevels,
              grandTotal](const orm::Result &res) {
                 const auto ncols = static_cast<size_t>(res.columns());
                 std::vector<std::string> names;
@@ -3772,26 +3780,10 @@ int main() {
     // Порт проверяем сами: drogon при занятом порте уходит в abort(), а на аварийном
     // выходе с работающими потоками (планировщик) память уже рушилась — вместо
     // понятного сообщения получали SIGABRT и «corrupted double-linked list».
-    {
-        const int probe = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (probe >= 0) {
-            // SO_REUSEADDR — как у drogon: без него после остановки сервера сокет
-            // простаивает в TIME_WAIT и наша же проверка ложно сообщает «порт занят»,
-            // хотя перезапуск возможен.
-            const int one = 1;
-            ::setsockopt(probe, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-            sockaddr_in addr{};
-            addr.sin_family = AF_INET;
-            addr.sin_port = htons(static_cast<uint16_t>(port));
-            addr.sin_addr.s_addr = INADDR_ANY;
-            const bool busy = ::bind(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0;
-            ::close(probe);
-            if (busy) {
-                // _Exit: разрушать статику drogon на фатальном выходе нельзя — падало в SIGSEGV
-                LOG_ERROR << "порт " << port << " уже занят — сервер не запущен";
-                std::_Exit(1);
-            }
-        }
+    if (!rep::net::portFree(port)) {
+        // _Exit: разрушать статику drogon на фатальном выходе нельзя — падало в SIGSEGV
+        LOG_ERROR << "порт " << port << " уже занят — сервер не запущен";
+        std::_Exit(1);
     }
 
     // Сначала закрываем то, что осталось от прошлого запуска, потом начинаем принимать работу.

@@ -1,5 +1,50 @@
 # История версий
 
+## v1.46.0 — 2026-11-08
+
+Сборка под Windows / Visual Studio 2022 (ADR-73).
+
+### Что было не так
+
+Сервер собирался только под Linux: `main.cc` и `smtp.cc` напрямую звали POSIX-сокеты, расписание
+подписок опиралось на `timegm`, проверка порта — на `sockaddr_in` из `<netinet/in.h>`. Под MSVC это
+не компилируется, а русский текст в строках без `/utf-8` превращается в мусор.
+
+### Что сделано
+
+- платформенный слой `backend/src/net.h` + `net.cc`: тип `socket_t`, `create/valid/closeSocket`,
+  `setIoTimeout` (DWORD против `timeval`), `portFree`, `lastError/errorText` (Winsock не пишет в `errno`),
+  `startup()` (WSAStartup) и `timegmUtc` (`_mkgmtime` под MSVC);
+- `main.cc`, `smtp.cc`, `subscriptions.cc`, тесты переведены на этот слой, POSIX-заголовки остались
+  только внутри `net.h`;
+- CMake: `ws2_32`, `WIN32_LEAN_AND_MEAN`/`NOMINMAX`/`_WIN32_WINNT=0x0A00`, флаги MSVC
+  `/utf-8 /bigobj /permissive-` и CRT `MD/MDd`, `REP_SOURCE_DIR` через `file(TO_CMAKE_PATH)`;
+- `backend/CMakePresets.json` (пресеты `windows-msvc`, `windows-msvc-ninja`, `linux-release`),
+  профиль Conan v1 `backend/conan/profiles/windows-msvc2022`, скрипт `scripts/build.ps1`;
+- инструкция `docs/build-windows.md`: требования, шаги, запуск, типовые ошибки;
+- `.gitattributes`: `*.ps1/*.bat` с CRLF, остальное LF;
+- job `backend-windows` в `.github/workflows/check.yml` (windows-latest, MSVC, Conan v1, ctest) —
+  единственный способ проверить порт без Windows-машины.
+
+### Попутно: два предупреждения, которые на MSVC стали бы ошибками
+
+- `xlsx_export.cc` заменял недопустимые символы листа литералом `'·'` — это двухбайтовый UTF-8 в
+  `char`, gcc выдавал `-Wmultichar` и писал битый байт; теперь строка `"\u00B7"`;
+- в `main.cc` лямбда захватывала `static`-переменную `noDeclared` — захват не нужен и на MSVC
+  предупреждает; убран.
+
+### Проверено
+
+| Проверка | Результат |
+|---|---|
+| Linux-сборка не сломана | 68 тестов (340 проверок) зелёные, сборка без предупреждений |
+| POSIX-заголовки | остались только в `net.h` (ветка `#else`), в `main.cc`/`smtp.cc` — ноль |
+| `ssize_t` в SMTP | заменён на `int`, приведение `SSL_set_fd` явное |
+| Пресеты | `cmake --preset linux-release` конфигурирует и собирает |
+| Проверки без БД | `ALL CHECKS PASSED`: ctest 68 (340), vitest 233, шаблоны 15/15, ADR 71, лицензии |
+| e2e и golden | **не прогонялись**: БД `192.168.0.3:32770` недоступна с этой машины (ping — 100 % потерь) |
+| Сборка MSVC | **не проверена**: Windows-машины нет, инструкция содержит типовые ошибки |
+
 ## v1.45.0 — 2026-11-08
 
 Переход из цепочки уровней sankey (ADR-72).

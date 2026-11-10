@@ -30,11 +30,28 @@ add_library(rep_core STATIC
   src/template_migrate.cc
   src/validate.cc
   src/env.cc
+  src/net.cc
   src/params.cc
   src/queries.cc
 )
 target_include_directories(rep_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(rep_core PUBLIC Drogon::Drogon OpenSSL::SSL OpenSSL::Crypto)
+
+# Платформенные различия собраны в src/net.*: остальной код их не знает.
+if(WIN32)
+  # winsock: сокеты и разрешение имён
+  target_link_libraries(rep_core PUBLIC ws2_32)
+  # windows.h не должен тянуть winsock.h и ломать std::min/std::max
+  target_compile_definitions(rep_core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+endif()
+
+if(MSVC)
+  # /utf-8 обязателен: в строках русский текст, иначе MSVC читает файлы в CP1251
+  # и получает мусор в логах, JSON-ответах и сообщениях валидатора.
+  add_compile_options(/utf-8 /W3 /permissive- /Zc:__cplusplus /EHsc /bigobj)
+  # CRT как MD/MDd: conan-пакеты (drogon, openssl, libpq) собраны с этим рантаймом
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
 
 add_executable(rep src/main.cc src/xlsx_export.cc src/group_rows.cc)
 target_compile_definitions(rep PRIVATE REP_VERSION="${REP_VERSION}")
@@ -59,5 +76,9 @@ add_executable(rep_tests
 )
 target_link_libraries(rep_tests PRIVATE rep_core Catch2::Catch2WithMain libxlsxwriter::libxlsxwriter)
 # фикстуры parity лежат в репозитории: тест читает их по этому пути
-target_compile_definitions(rep_tests PRIVATE REP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
+# На Windows пути приходят с обратными слэшами, а это литерал C++: обратный слэш
+# перед U даёт неверный escape. Приводим к прямым слэшам — строка собирается
+# одинаково на обеих системах.
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/.." REP_SOURCE_DIR_POSIX)
+target_compile_definitions(rep_tests PRIVATE REP_SOURCE_DIR="${REP_SOURCE_DIR_POSIX}")
 add_test(NAME rep_tests COMMAND rep_tests)

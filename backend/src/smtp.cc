@@ -1,11 +1,6 @@
 #include "smtp.h"
 
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
+#include "net.h"
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -60,17 +55,15 @@ class Connection {
             return false;
         }
         for (addrinfo *it = res; it; it = it->ai_next) {
-            fd_ = ::socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-            if (fd_ < 0) continue;
-            timeval tv{timeoutSec, 0};
-            setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-            setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            if (::connect(fd_, it->ai_addr, it->ai_addrlen) == 0) break;
-            ::close(fd_);
-            fd_ = -1;
+            fd_ = rep::net::create(it->ai_family, it->ai_socktype, it->ai_protocol);
+            if (!rep::net::valid(fd_)) continue;
+            rep::net::setIoTimeout(fd_, timeoutSec);
+            if (::connect(fd_, it->ai_addr, static_cast<int>(it->ai_addrlen)) == 0) break;
+            rep::net::closeSocket(fd_);
+            fd_ = rep::net::kInvalidSocket;
         }
         freeaddrinfo(res);
-        if (fd_ < 0) {
+        if (!rep::net::valid(fd_)) {
             err = "не удалось подключиться к " + host + ":" + portText;
             return false;
         }
@@ -90,7 +83,9 @@ class Connection {
             err = "не удалось создать TLS-соединение";
             return false;
         }
-        SSL_set_fd(ssl_, fd_);
+        // OpenSSL принимает дескриптор как int: на Windows это SOCKET (uintptr_t),
+        // значения сокетов туда помещаются, но приведение делаем явно ради /W3.
+        SSL_set_fd(ssl_, static_cast<int>(fd_));
         SSL_set_tlsext_host_name(ssl_, host.c_str());
         if (SSL_connect(ssl_) != 1) {
             err = "ошибка STARTTLS: " + lastSslError();
@@ -102,10 +97,11 @@ class Connection {
     bool write(const std::string &data, std::string &err) {
         std::size_t sent = 0;
         while (sent < data.size()) {
-            ssize_t n = ssl_ ? SSL_write(ssl_, data.data() + sent, static_cast<int>(data.size() - sent))
-                             : ::send(fd_, data.data() + sent, data.size() - sent, 0);
+            const int n = ssl_ ? SSL_write(ssl_, data.data() + sent, static_cast<int>(data.size() - sent))
+                               : static_cast<int>(::send(fd_, data.data() + sent,
+                                                         static_cast<int>(data.size() - sent), 0));
             if (n <= 0) {
-                err = ssl_ ? lastSslError() : std::string(std::strerror(errno));
+                err = ssl_ ? lastSslError() : rep::net::errorText(rep::net::lastError());
                 return false;
             }
             sent += static_cast<std::size_t>(n);
@@ -139,9 +135,9 @@ class Connection {
             SSL_free(ssl_);
             ssl_ = nullptr;
         }
-        if (fd_ >= 0) {
-            ::close(fd_);
-            fd_ = -1;
+        if (rep::net::valid(fd_)) {
+            rep::net::closeSocket(fd_);
+            fd_ = rep::net::kInvalidSocket;
         }
     }
 
@@ -164,9 +160,9 @@ class Connection {
             err_ = lastSslError();
             return false;
         }
-        const ssize_t n = ::recv(fd_, &c, 1, 0);
+        const int n = static_cast<int>(::recv(fd_, &c, 1, 0));
         if (n == 1) return true;
-        err_ = std::strerror(errno);
+        err_ = rep::net::errorText(rep::net::lastError());
         return false;
     }
 
@@ -178,7 +174,7 @@ class Connection {
         return buffer;
     }
 
-    int fd_ = -1;
+    rep::net::socket_t fd_ = rep::net::kInvalidSocket;
     SSL *ssl_ = nullptr;
     std::string err_;
 };

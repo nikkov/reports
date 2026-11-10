@@ -1,3 +1,5 @@
+#include "../src/net.h"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <ctime>
@@ -114,7 +116,7 @@ TEST_CASE("cron: следующее срабатывание в наивном �
     base.tm_mday = 1;
     base.tm_hour = 8;
     base.tm_min = 0;
-    const std::time_t naive = ::timegm(&base);
+    const std::time_t naive = rep::net::timegmUtc(&base);
     const std::time_t next = rep::nextRunNaive(cron, naive);
     std::tm out = *std::gmtime(&next);
     REQUIRE(out.tm_hour == 9);
@@ -123,7 +125,7 @@ TEST_CASE("cron: следующее срабатывание в наивном �
     // ровно в момент срабатывания — следующее через сутки, а не «сейчас»
     std::tm atNine = base;
     atNine.tm_hour = 9;
-    const std::time_t nextAfter = rep::nextRunNaive(cron, ::timegm(&atNine));
+    const std::time_t nextAfter = rep::nextRunNaive(cron, rep::net::timegmUtc(&atNine));
     std::tm out2 = *std::gmtime(&nextAfter);
     REQUIRE(out2.tm_mday == 2);
     REQUIRE(out2.tm_hour == 9);
@@ -138,7 +140,7 @@ TEST_CASE("cron: будни в наивном времени не попадаю
     base.tm_mon = 2 - 1;
     base.tm_mday = 7; // суббота
     base.tm_hour = 10;
-    const std::time_t next = rep::nextRunNaive(cron, ::timegm(&base));
+    const std::time_t next = rep::nextRunNaive(cron, rep::net::timegmUtc(&base));
     std::tm out = *std::gmtime(&next);
     REQUIRE(out.tm_mday == 9); // понедельник
     REQUIRE(out.tm_hour == 9);

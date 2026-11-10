@@ -39,6 +39,45 @@ jobs:
         working-directory: backend/build
         run: ctest --output-on-failure
 
+  # Сборка под Windows: единственный способ проверить порт (ADR-73) без Windows-машины.
+  # Job не содержит e2e: только компиляция MSVC и юнит-тесты Catch2.
+  backend-windows:
+    runs-on: windows-latest
+    env:
+      CONAN_USER_HOME: ${{ github.workspace }}\.conan
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Conan v1
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'conan==1.66.0'
+          conan --version
+      - name: Кэш Conan
+        uses: actions/cache@v4
+        with:
+          path: .conan
+          key: conan-windows-${{ hashFiles('backend/conanfile.txt') }}
+      - name: Зависимости
+        shell: pwsh
+        working-directory: backend
+        run: |
+          conan install . -if build-windows\conan -pr conan\profiles\windows-msvc2022 `
+            -s build_type=Release -s compiler.runtime=MD --build=missing
+      - name: Сборка
+        shell: pwsh
+        working-directory: backend
+        run: |
+          cmake --preset windows-msvc
+          cmake --build --preset windows-release
+      - name: ctest
+        shell: pwsh
+        working-directory: backend
+        run: ctest --preset windows-release
+
   frontend:
     runs-on: ubuntu-latest
     steps:

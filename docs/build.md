@@ -1,5 +1,8 @@
 # Сборка проекта
 
+Windows (Visual Studio 2022) — отдельная инструкция: `docs/build-windows.md`, скрипт
+`scripts/build.ps1`, пресеты CMake в `backend/CMakePresets.json`.
+
 Сервер отчётов — два артефакта: C++/Drogon бэкенд (`backend/build/rep`) и собранный фронтенд
 (`frontend/dist`).
 

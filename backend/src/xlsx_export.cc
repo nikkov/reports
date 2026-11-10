@@ -27,7 +27,11 @@ std::string sheetName(const std::string &title) {
         case '\\':
         case '/':
         case '[':
-        case ']': out += '·'; break;
+        case ']':
+            // '·' — двухбайтовый UTF-8: в char-литерал он не влезает (MSVC ругается
+            // и пишет мусор), поэтому добавляем строкой
+            out += "\u00B7";
+            break;
         default: out += c;
         }
     }

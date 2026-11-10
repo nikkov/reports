@@ -1,0 +1,9 @@
+# Единые переводы строк: Windows-скрипты должны запускаться без правки байтов,
+# остальное — LF, чтобы diff и тесты не зависели от машины.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.xlsx binary
+*.pdf binary
