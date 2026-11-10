@@ -39,6 +39,7 @@
 #include "env.h"
 #include "params.h"
 #include "queries.h"
+#include "base_path.h"
 #include "static_web.h"
 
 namespace fs = std::filesystem;
@@ -1267,6 +1268,29 @@ int main() {
             },
             [done](const std::exception_ptr &e) { done("", describeError(e)); });
     };
+
+    // Префикс приложения (ADR-81): адрес — http(s)://host:port/reports/…, как за прокси.
+    // Снимаем префикс ДО маршрутизации и ДО проверки прав, поэтому все обработчики,
+    // матрица прав и статика остаются на своих путях. `/` ведёт на префикс со слэшем,
+    // иначе относительные ссылки на ассеты (`./assets/…`) поехали бы на уровень выше.
+    const std::string basePath = rep::normalizeBasePath(rep::envOr("REP_BASE_PATH", "/reports"));
+    if (!basePath.empty()) {
+        LOG_INFO << "префикс приложения: " << basePath << "/";
+        app().registerPreRoutingAdvice(
+            [basePath](const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
+                const std::string path = req->path();
+                if (path == "/" || path == basePath) {
+                    auto redirect = HttpResponse::newRedirectionResponse(basePath + "/");
+                    respond(redirect);
+                    return;
+                }
+                std::string rest;
+                if (rep::stripBasePath(path, basePath, rest)) {
+                    req->setPath(rest);
+                }
+                next();
+            });
+    }
 
     // Проверка сессии до маршрутизации: один раз на запрос, роль зависит от метода и пути.
     if (authEnabled) {

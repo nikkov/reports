@@ -128,8 +128,8 @@ node scripts/templates-push.mjs backend/templates/*.json
 ## 6. Проверка в браузере
 
 ```bash
-open http://127.0.0.1:8080/                                 # список отчётов
-open "http://127.0.0.1:8080/report.html?report=<id>"        # сам отчёт
+open http://127.0.0.1:8080/reports/                         # список отчётов
+open "http://127.0.0.1:8080/reports/report.html?report=<id>"  # сам отчёт
 ```
 
 В списке карточка должна показать заголовок, описание и бейджи параметров с их видом

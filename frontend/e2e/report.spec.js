@@ -2071,3 +2071,43 @@ test('статика: сервер сам отдаёт фронтенд и API �
 
   await ctx.dispose()
 })
+
+test('префикс /reports: страницы, ассеты и API под одним префиксом', async () => {
+  const ctx = await apiRequest.newContext({
+    baseURL: 'http://127.0.0.1:8080',
+    storageState: { cookies: [], origins: [] }
+  })
+
+  const page = await ctx.get('/reports/report.html?report=sales-summary')
+  expect(page.status()).toBe(200)
+  const html = await page.text()
+  expect(html).toContain('<div id="app"')
+
+  // ассеты запрашиваются по /reports/assets/... (клиент считает базу из расположения страницы)
+  const asset = html.match(/src="\.?(\/assets\/[^"]+\.js)"/)
+  expect(asset).not.toBeNull()
+  const file = await ctx.get('/reports' + asset[1])
+  expect(file.status()).toBe(200)
+  expect(file.headers()['content-type']).toContain('javascript')
+
+  // API живёт там же: /reports/api/...
+  const health = await ctx.get('/reports/api/health')
+  expect(health.status()).toBe(200)
+  expect((await health.json()).status).toBe('ok')
+
+  // корень уводит на префикс, чтобы относительные ссылки на ассеты не поехали
+  const root = await ctx.get('/', { maxRedirects: 0 })
+  expect(root.status()).toBe(302)
+  expect(root.headers()['location']).toBe('/reports/')
+
+  // защита не зависит от префикса: без сессии данные закрыты
+  const data = await ctx.post('/reports/api/report/data', { data: { reportId: 'sales-summary' } })
+  expect(data.status()).toBe(401)
+
+  await ctx.dispose()
+})
+
+test('префикс /reports: отчёт открывается и данные приходят через /reports/api', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8080/reports/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк: 2748')
+})

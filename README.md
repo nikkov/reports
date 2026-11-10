@@ -1,4 +1,4 @@
-# Report Server — версия 1.55.0
+# Report Server — версия 1.56.0
 
 Принята постановщиком 2026-11-05. Шаблон самодостаточен: оформление, форматы, правила подсветки,
 SQL наборов данных и SQL справочников живут в нём. Есть админка `/admin.html`, экспорт в Excel (числа с форматами, объединения, подытоги), печать
@@ -143,10 +143,11 @@ REP_E2E=1 ./scripts/ci.sh    # то же + Playwright (нужны backend и pre
 # один процесс: и API, и статика (ADR-79). Порт всегда 8080
 ./backend/build/rep &
 
-open http://127.0.0.1:8080/                                            # список отчётов
-open "http://127.0.0.1:8080/report.html?report=sales-summary&from=2026-01-01&to=2026-03-31"
-open http://127.0.0.1:8080/report.html?report=params-demo              # все виды параметров
-open http://127.0.0.1:8080/spike.html                                  # песочница рендерера
+# приложение живёт под префиксом /reports (ADR-81)
+open http://127.0.0.1:8080/reports/                                    # список отчётов
+open "http://127.0.0.1:8080/reports/report.html?report=sales-summary&from=2026-01-01&to=2026-03-31"
+open http://127.0.0.1:8080/reports/report.html?report=params-demo      # все виды параметров
+open http://127.0.0.1:8080/reports/spike.html                          # песочница рендерера
 cd frontend && npm run e2e                 # Playwright против :8080
 REP_E2E=1 ./scripts/check.sh               # всё вместе
 ```
