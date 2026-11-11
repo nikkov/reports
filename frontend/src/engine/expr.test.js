@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { evaluate } from './expr.js'
+import { analyzeExpression, evaluate } from './expr.js'
 
 const row = (data) => ({ field: (n) => data[n], agg: () => undefined })
 const totals = (data) => ({ field: () => undefined, agg: (_fn, name) => data[name] })
@@ -32,5 +32,18 @@ describe('evaluate', () => {
     expect(() => evaluate('sum(', row({}))).toThrow()
     expect(() => evaluate('2 +', row({}))).toThrow()
     expect(() => evaluate('2 $ 3', row({}))).toThrow()
+    expect(() => evaluate(') 2', row({}))).toThrow(/неожиданный токен/)
+  })
+
+  it('унарный минус работает и для поля, и для null', () => {
+    expect(evaluate('-amount', row({ amount: 7 }))).toBe(-7)
+    expect(evaluate('-amount', row({}))).toBeNull()
+  })
+
+  it('analyzeExpression собирает поля и агрегаты без вычисления', () => {
+    expect(analyzeExpression('sum(profit) / amount')).toEqual({
+      fields: ['profit', 'amount'],
+      aggs: [{ fn: 'sum', field: 'profit' }]
+    })
   })
 })

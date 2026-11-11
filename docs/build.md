@@ -21,6 +21,30 @@ Conan v1 живёт в отдельном venv (`~/python_venv`), потому �
 с несовместимым кэшем `~/.conan2` (ADR-13). Все скрипты ходят через `scripts/conan`, он проверяет
 мажорную версию и падает с понятным сообщением, если это v2.
 
+## Зависимости фронтенда
+
+`npm install` должен проходить без `npm warn deprecated`. Единственная библиотека, которая тянула
+устаревшие пакеты, — `exceljs@4.4.0` (последняя версия, обновлений нет): `unzipper@0.10` → `fstream`,
+`rimraf@2`, `glob@7`; `archiver@5` → `glob@7`; `fast-csv@4` → `lodash.isequal`; `uuid@8`. В
+`frontend/package.json` заданы `overrides` для её транзитивных зависимостей:
+
+```json
+"overrides": {
+  "exceljs": {
+    "archiver": "^8.0.0",
+    "unzipper": "^0.12.5",
+    "fast-csv": "^5.0.8",
+    "uuid": "^11.1.0"
+  }
+}
+```
+
+Проверка после обновления: `rm -rf node_modules && npm ci` — в выводе не должно быть строк
+`warn deprecated`; затем `npm run build`, `npx vitest run`, `npm run coverage` (порог: ветви 90 %)
+и e2e-тесты экспорта Excel — они и пишут (`archiver`), и читают (`unzipper`) файл.
+Второй источник — `@vitest/coverage-v8@2` → `test-exclude` → `glob@10`; с версией 5.1 coverage
+`test-exclude` больше не использует. Vitest 5 требует vite ≥ 6.4, поэтому vite обновлён до 7.3.
+
 ## CI (GitHub Actions)
 
 Job'ы `backend` и `e2e` работают на `ubuntu-24.04` с явно выбранным gcc 13: Conan 1.66 знает

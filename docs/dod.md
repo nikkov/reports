@@ -986,7 +986,7 @@ SQL наборов данных в шаблон.
 | Пустой пункт задаётся в шаблоне | `finance-plan-fact`, `finance-print`, `ops-sla`, `ops-dark`, `ops-band`, `ops-corridors`: `emptyOption {value, label}`, `UNION ALL SELECT ''` из SQL убран |
 | Значение по умолчанию задаётся явно | `default: ""` в этих же шаблонах → выбран «Все центры», 576 строк (было столько же) |
 | Валидация обоих валидаторов | parity 75/75: `emptyOption` у справочника — ок; у даты, с `multiple`, без `label` — ошибки с теми же путями |
-| Ничего не сломано | `ALL CHECKS PASSED`: ctest 93 (464), vitest 249, golden 15/15, e2e 75 |
+| Ничего не сломано | `ALL CHECKS PASSED`: ctest 93 (464), vitest 255, golden 15/15, e2e 75 |
 
 ## Приёмка версии 1.57
 

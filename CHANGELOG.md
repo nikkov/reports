@@ -1,5 +1,33 @@
 # История версий
 
+## v1.58.2 — 2026-11-11
+
+Убраны deprecated-зависимости фронтенда (причина предупреждений `npm install`).
+
+### Что было не так
+
+`npm install` во фронтенде печатал восемь предупреждений `npm warn deprecated`: `fstream@1.0.12`,
+`rimraf@2.7.1`, `inflight@1.0.6`, `lodash.isequal@4.5.0`, три `glob@7.2.3`, `uuid@8.3.2` и
+`glob@10.5.0`. Источник — `exceljs@4.4.0` (последняя версия, обновлений нет): она тянет
+`unzipper@0.10` → `fstream`/`rimraf@2`/`glob@7`, `archiver@5` → `archiver-utils@2` → `glob@7`,
+`fast-csv@4` → `lodash.isequal`, `uuid@8`; плюс `@vitest/coverage-v8@2` → `test-exclude@7` → `glob@10`.
+
+### Что сделано
+- `overrides` для `exceljs`: `archiver@^8`, `unzipper@^0.12.5`, `fast-csv@^5`, `uuid@^11` —
+  ни одна из этих цепочек больше не тянет `fstream`, `rimraf@2`, `inflight`, `glob@7`,
+  `lodash.isequal` и `uuid@8`;
+- `vitest` и `@vitest/coverage-v8` обновлены до 5.1: у coverage больше нет `test-exclude` → `glob@10`;
+- вместе с ними `vite` 5 → 7.3 и `@vitejs/plugin-vue` 5 → 6 (vitest 5 требует vite ≥ 6.4),
+  `@playwright/test` — 1.65 (браузеры переустановлены);
+- добавлены три теста `expr` (`analyzeExpression`, унарный минус на поле, «неожиданный токен»):
+  после смены движка покрытия ветвей стало 89.75 %, теперь 90.64 % при пороге 90 %.
+
+### Проверки
+`npm install` — **0 строк `deprecated`** (в `warnings.txt` было 8); `glob` в дереве отсутствует.
+`vite build` — 18,8 с; `vitest` — 12 файлов, 255 тестов; `coverage` — ветви 90.64 % (порог 90);
+e2e Excel (запись `archiver@8` + чтение `unzipper@0.12`) — 3 из 3; полный `REP_E2E=1 ./scripts/check.sh`
+— `ALL CHECKS PASSED`.
+
 ## v1.58.1 — 2026-11-11
 
 Смена `VERSION` сама запускает пересборку с новой версией.
