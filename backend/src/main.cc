@@ -493,6 +493,11 @@ int main() {
     const std::string templatesSource = rep::envOr("REP_TEMPLATES_SOURCE", "db");
     std::map<std::string, TemplateInfo> templates;
     std::map<std::string, std::string> templatesRaw;  // id → исходный JSON, отдаётся клиенту как есть
+    // Черновики (ADR-82): просмотр черновика исполняет ЕГО SQL, а не опубликованный.
+    // Держим разобранные черновики в памяти рядом с шаблонами — тогда data/lookups/export
+    // не ходят в БД синхронно и не дублируют логику.
+    std::map<std::string, TemplateInfo> draftsParsed;
+    std::map<std::string, std::string> draftsRaw;
 
     if (templatesSource == "files") {
         if (fs::is_directory(templatesDir)) {
@@ -528,6 +533,21 @@ int main() {
                 templatesRaw[id] = body;
             }
             LOG_INFO << "loaded " << templates.size() << " templates from database";
+            auto draftRows = db->execSqlSync(
+                "SELECT id, draft::text AS draft FROM report_templates WHERE draft IS NOT NULL");
+            for (const auto &row : draftRows) {
+                const std::string id = row["id"].as<std::string>();
+                const std::string draft = row["draft"].as<std::string>();
+                TemplateInfo info;
+                if (!parseTemplate(draft, id, info)) {
+                    LOG_WARN << "черновик в БД не разобран: " << id;
+                    continue;
+                }
+                info.id = id;
+                draftsParsed[id] = info;
+                draftsRaw[id] = draft;
+            }
+            if (!draftsParsed.empty()) LOG_INFO << "черновиков: " << draftsParsed.size();
         } catch (const std::exception &e) {
             LOG_FATAL << "не удалось загрузить шаблоны из БД: " << e.what();
             return 1;
@@ -625,6 +645,22 @@ int main() {
         const auto &first = result.errors.front();
         err = first.path == "(корень)" ? first.message : first.path + ": " + first.message;
         return false;
+    };
+
+    // --- Просмотр черновика (ADR-82) -------------------------------------------------
+    // Черновик не опубликован: его SQL исполняется только по явному запросу draft=true
+    // и только автору/администратору. Зритель видит исключительно опубликованную версию.
+    auto draftAllowed = [authEnabled](const HttpRequestPtr &req) {
+        if (!authEnabled) return true;
+        const auto role = req->attributes()->get<std::string>("session_role");
+        return rep::roleAtLeast(role, rep::Role::Author);
+    };
+    auto draftTemplate = [&draftsParsed, &templatesMutex](const std::string &id, TemplateInfo &out) {
+        std::lock_guard<std::mutex> lock(templatesMutex);
+        const auto it = draftsParsed.find(id);
+        if (it == draftsParsed.end()) return false;
+        out = it->second;
+        return true;
     };
 
     // Атомарная замена шаблона в памяти: сначала разбор, потом запись под мьютексом.
@@ -875,7 +911,7 @@ int main() {
 
     app().registerHandler(
         "/api/reports/{id}",
-        [db, adminEnabled, &dropTemplateFromMemory](const HttpRequestPtr &req,
+        [db, adminEnabled, &dropTemplateFromMemory, &draftsParsed, &draftsRaw, &templatesMutex](const HttpRequestPtr &req,
                                                     std::function<void(const HttpResponsePtr &)> &&cb,
                                                     const std::string &id) {
             if (!adminEnabled) {
@@ -887,7 +923,13 @@ int main() {
                 "INSERT INTO report_templates_history (report_id, title, body) "
                 "SELECT id, title, body FROM report_templates WHERE id = $1",
                 {id},
-                [cb, db, id, &dropTemplateFromMemory, req](const orm::Result &) {
+                [cb, db, id, &dropTemplateFromMemory, &draftsParsed, &draftsRaw, &templatesMutex, req](
+                    const orm::Result &) {
+                    {
+                        std::lock_guard<std::mutex> lock(templatesMutex);
+                        draftsParsed.erase(id);
+                        draftsRaw.erase(id);
+                    }
                     runQuery(
                         db, "DELETE FROM report_templates WHERE id = $1", {id},
                         [cb, id, &dropTemplateFromMemory, req](const orm::Result &del) {
@@ -1059,7 +1101,8 @@ int main() {
     // PUT /api/admin/reports/{id}/draft — сохранить черновик (валидируется, в память не идёт)
     app().registerHandler(
         "/api/admin/reports/{id}/draft",
-        [db, adminEnabled, &validateTemplate](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
+        [db, adminEnabled, &validateTemplate, &draftsParsed, &draftsRaw, &templatesMutex](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
                            const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
@@ -1083,10 +1126,17 @@ int main() {
             runQuery(
                 db, "UPDATE report_templates SET draft = $2::jsonb, draft_updated_at = now() WHERE id = $1",
                 {id, raw},
-                [cb, id](const orm::Result &updated) {
+                [cb, id, raw, &draftsParsed, &draftsRaw, &templatesMutex](const orm::Result &updated) {
                     if (updated.affectedRows() == 0) {
                         sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
                         return;
+                    }
+                    // черновик сразу доступен для просмотра (ADR-82)
+                    TemplateInfo info;
+                    if (parseTemplate(raw, id, info)) {
+                        std::lock_guard<std::mutex> lock(templatesMutex);
+                        draftsParsed[id] = info;
+                        draftsRaw[id] = raw;
                     }
                     Json::Value out;
                     out["id"] = id;
@@ -1100,7 +1150,8 @@ int main() {
     // DELETE /api/admin/reports/{id}/draft — отменить черновик
     app().registerHandler(
         "/api/admin/reports/{id}/draft",
-        [db, adminEnabled](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+        [db, adminEnabled, &draftsParsed, &draftsRaw, &templatesMutex](
+            const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
                            const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
@@ -1108,7 +1159,12 @@ int main() {
             }
             runQuery(
                 db, "UPDATE report_templates SET draft = NULL, draft_updated_at = NULL WHERE id = $1", {id},
-                [cb, id](const orm::Result &) {
+                [cb, id, &draftsParsed, &draftsRaw, &templatesMutex](const orm::Result &) {
+                    {
+                        std::lock_guard<std::mutex> lock(templatesMutex);
+                        draftsParsed.erase(id);
+                        draftsRaw.erase(id);
+                    }
                     Json::Value out;
                     out["id"] = id;
                     out["discarded"] = true;
@@ -1122,7 +1178,7 @@ int main() {
     // тело = draft, draft очищается, память обновляется (hot-reload без рестарта)
     app().registerHandler(
         "/api/admin/reports/{id}/publish",
-        [db, adminEnabled, &applyTemplateInMemory, &prepareTemplate](
+        [db, adminEnabled, &applyTemplateInMemory, &prepareTemplate, &draftsParsed, &draftsRaw, &templatesMutex](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb, const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
@@ -1130,7 +1186,8 @@ int main() {
             }
             runQuery(
                 db, "SELECT draft::text AS draft FROM report_templates WHERE id = $1", {id},
-                [cb, db, id, &applyTemplateInMemory, &prepareTemplate, req](const orm::Result &res) {
+                [cb, db, id, &applyTemplateInMemory, &prepareTemplate, &draftsParsed, &draftsRaw,
+                 &templatesMutex, req](const orm::Result &res) {
                     if (res.empty()) {
                         sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
                         return;
@@ -1160,14 +1217,21 @@ int main() {
                         "INSERT INTO report_templates_history (report_id, title, body) "
                         "SELECT id, title, body FROM report_templates WHERE id = $1",
                         {id},
-                        [cb, db, id, raw, title, &applyTemplateInMemory, req](const orm::Result &) {
+                        [cb, db, id, raw, title, &applyTemplateInMemory, &draftsParsed, &draftsRaw,
+                         &templatesMutex, req](const orm::Result &) {
                             runQuery(
                                 db,
                                 "UPDATE report_templates SET title = $2, body = $3::jsonb, updated_at = now(), "
                                 "draft = NULL, draft_updated_at = NULL WHERE id = $1",
                                 {id, title, raw},
-                                [cb, id, raw, title, &applyTemplateInMemory, req](const orm::Result &) {
+                                [cb, id, raw, title, &applyTemplateInMemory, &draftsParsed, &draftsRaw,
+                                 &templatesMutex, req](const orm::Result &) {
                                     applyTemplateInMemory(id, raw, title);
+                                    {
+                                        std::lock_guard<std::mutex> lock(templatesMutex);
+                                        draftsParsed.erase(id);
+                                        draftsRaw.erase(id);
+                                    }
                                     Json::Value out;
                                     out["id"] = id;
                                     auditEvent(requestActor(req), "template.publish", "report", id, "{}", requestIp(req));
@@ -1538,7 +1602,8 @@ int main() {
     // уходит параметром, SQL набора — в подзапрос, без интерполяции.
     app().registerHandler(
         "/api/report/group",
-        [dataDb, &templates, &templatesMutex, &connRegistry](const HttpRequestPtr &req,
+        [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed](
+            const HttpRequestPtr &req,
                                               std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -1561,19 +1626,37 @@ int main() {
             std::map<std::string, std::string> datasetParams;
             std::string datasetConn;
             std::map<std::string, rep::ConnSpec> conns;
+            const bool wantDraft = (*body).get("draft", false).asBool();
+            if (wantDraft && !draftAllowed(req)) {
+                sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN", "черновик доступен автору и администратору");
+                return;
+            }
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
-                const auto it = templates.find(reportId);
-                if (it == templates.end()) {
-                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
-                    return;
+                const TemplateInfo *tpl = nullptr;
+                TemplateInfo draftCopy;
+                if (wantDraft) {
+                    const auto dit = draftsParsed.find(reportId);
+                    if (dit == draftsParsed.end()) {
+                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "у отчёта нет черновика");
+                        return;
+                    }
+                    draftCopy = dit->second;
+                    tpl = &draftCopy;
+                } else {
+                    const auto it = templates.find(reportId);
+                    if (it == templates.end()) {
+                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
+                        return;
+                    }
+                    tpl = &it->second;
                 }
-                conns = it->second.connections;
-                const auto &all = it->second.datasets;
+                conns = tpl->connections;
+                const auto &all = tpl->datasets;
                 if (all.empty()) {
-                    datasetSql = it->second.datasetSql;
-                    datasetParams = it->second.datasetParams;
-                    datasetConn = it->second.datasetConnection;
+                    datasetSql = tpl->datasetSql;
+                    datasetParams = tpl->datasetParams;
+                    datasetConn = tpl->datasetConnection;
                 } else {
                     const std::string key = (*body).get("dataset", "").asString();
                     const auto ds = all.find(key.empty() ? all.begin()->first : key);
@@ -1743,7 +1826,8 @@ int main() {
     // Клиент получает уже сгруппированные строки — на 2 746 строках это 5 вместо тысяч.
     app().registerHandler(
         "/api/report/aggregate",
-        [dataDb, &templates, &templatesMutex, maxRows, &connRegistry](const HttpRequestPtr &req,
+        [dataDb, &templates, &templatesMutex, maxRows, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed](
+            const HttpRequestPtr &req,
                                                        std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -1760,19 +1844,37 @@ int main() {
             std::map<std::string, std::string> datasetParams;
             std::string datasetConn;
             std::map<std::string, rep::ConnSpec> conns;
+            const bool wantDraft = (*body).get("draft", false).asBool();
+            if (wantDraft && !draftAllowed(req)) {
+                sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN", "черновик доступен автору и администратору");
+                return;
+            }
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
-                const auto it = templates.find(reportId);
-                if (it == templates.end()) {
-                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
-                    return;
+                const TemplateInfo *tpl = nullptr;
+                TemplateInfo draftCopy;
+                if (wantDraft) {
+                    const auto dit = draftsParsed.find(reportId);
+                    if (dit == draftsParsed.end()) {
+                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "у отчёта нет черновика");
+                        return;
+                    }
+                    draftCopy = dit->second;
+                    tpl = &draftCopy;
+                } else {
+                    const auto it = templates.find(reportId);
+                    if (it == templates.end()) {
+                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
+                        return;
+                    }
+                    tpl = &it->second;
                 }
-                conns = it->second.connections;
-                const auto &all = it->second.datasets;
+                conns = tpl->connections;
+                const auto &all = tpl->datasets;
                 if (all.empty()) {
-                    datasetSql = it->second.datasetSql;
-                    datasetParams = it->second.datasetParams;
-                    datasetConn = it->second.datasetConnection;
+                    datasetSql = tpl->datasetSql;
+                    datasetParams = tpl->datasetParams;
+                    datasetConn = tpl->datasetConnection;
                 } else {
                     const std::string key = (*body).get("dataset", "").asString();
                     const auto ds = all.find(key.empty() ? all.begin()->first : key);
@@ -1884,9 +1986,10 @@ int main() {
     // CSV-экспорт (ADR-40): тот же расчёт, что у .xlsx, но текстом; ';' и BOM — для Excel.
     // Общая сборка листа отчёта: один расчёт для CSV, XLSX и рассылки (ADR-46, ADR-48).
     // status 200 — sheet заполнен; иначе message содержит причину, code — машинный код.
-    auto buildSheet = [dataDb, &templates, &templatesRaw, &templatesMutex, &connRegistry](
+    auto buildSheet = [dataDb, &templates, &templatesRaw, &draftsParsed, &draftsRaw, &templatesMutex,
+                       &connRegistry](
                           const std::string &reportId, const std::string &requestedDataset,
-                          const Json::Value &rawParams,
+                          const Json::Value &rawParams, const bool wantDraft,
                           std::function<void(int status, const std::string &code,
                                              const rep::ExportSheet &sheet, const std::string &message)> done) {
         std::string datasetSql;
@@ -1896,16 +1999,29 @@ int main() {
         std::string raw;
         {
             std::lock_guard<std::mutex> lock(templatesMutex);
-            const auto it = templates.find(reportId);
-            if (it == templates.end()) {
-                done(404, "REPORT_NOT_FOUND", rep::ExportSheet{}, "отчёт '" + reportId + "' не найден");
-                return;
+            const TemplateInfo *tpl = nullptr;
+            TemplateInfo draftCopy;
+            if (wantDraft) {
+                const auto dit = draftsParsed.find(reportId);
+                if (dit == draftsParsed.end()) {
+                    done(404, "DRAFT_NOT_FOUND", rep::ExportSheet{}, "у отчёта нет черновика");
+                    return;
+                }
+                draftCopy = dit->second;
+                tpl = &draftCopy;
+            } else {
+                const auto it = templates.find(reportId);
+                if (it == templates.end()) {
+                    done(404, "REPORT_NOT_FOUND", rep::ExportSheet{}, "отчёт '" + reportId + "' не найден");
+                    return;
+                }
+                tpl = &it->second;
             }
-            const auto &all = it->second.datasets;
+            const auto &all = tpl->datasets;
             if (all.empty()) {
-                datasetSql = it->second.datasetSql;
-                datasetParams = it->second.datasetParams;
-                datasetConn = it->second.datasetConnection;
+                datasetSql = tpl->datasetSql;
+                datasetParams = tpl->datasetParams;
+                datasetConn = tpl->datasetConnection;
             } else {
                 const auto ds = all.find(requestedDataset.empty() ? all.begin()->first : requestedDataset);
                 if (ds == all.end()) {
@@ -1917,8 +2033,9 @@ int main() {
                 datasetParams = ds->second.params;
                 datasetConn = ds->second.connection;
             }
-            const auto rawIt = templatesRaw.find(reportId);
-            if (rawIt != templatesRaw.end()) raw = rawIt->second;
+            const auto &source = wantDraft ? draftsRaw : templatesRaw;
+            const auto rawIt = source.find(reportId);
+            if (rawIt != source.end()) raw = rawIt->second;
         }
 
         rep::ParamBag bag;
@@ -2076,9 +2193,9 @@ int main() {
 
     // CSV и XLSX строятся из одного листа: письмо и скачивание не расходятся.
     auto buildCsv = [buildSheet](const std::string &reportId, const std::string &requestedDataset,
-                                 const Json::Value &rawParams,
+                                 const Json::Value &rawParams, const bool wantDraft,
                                  std::function<void(int, const std::string &, const std::string &, int)> done) {
-        buildSheet(reportId, requestedDataset, rawParams,
+        buildSheet(reportId, requestedDataset, rawParams, wantDraft,
                    [done](int status, const std::string &code, const rep::ExportSheet &sheet,
                           const std::string &message) {
                        if (status != 200) {
@@ -2093,9 +2210,9 @@ int main() {
     };
 
     auto buildXlsx = [buildSheet](const std::string &reportId, const std::string &requestedDataset,
-                                  const Json::Value &rawParams,
+                                  const Json::Value &rawParams, const bool wantDraft,
                                   std::function<void(int, const std::string &, const std::string &, int)> done) {
-        buildSheet(reportId, requestedDataset, rawParams,
+        buildSheet(reportId, requestedDataset, rawParams, wantDraft,
                    [done, reportId](int status, const std::string &code, const rep::ExportSheet &sheet,
                                     const std::string &message) {
                        if (status != 200) {
@@ -2125,7 +2242,7 @@ int main() {
     // в письмо, но не в скачиваемый файл — один и тот же отчёт выглядел по-разному.
     app().registerHandler(
         "/api/report/export.xlsx",
-        [buildXlsx](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [buildXlsx, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -2136,8 +2253,16 @@ int main() {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
                 return;
             }
+            const bool wantDraft = (*body).get("draft", false).asBool();
+            if (wantDraft && authEnabled) {
+                const auto role = req->attributes()->get<std::string>("session_role");
+                if (!rep::roleAtLeast(role, rep::Role::Author)) {
+                    sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN", "черновик доступен автору и администратору");
+                    return;
+                }
+            }
             buildXlsx(
-                reportId, (*body).get("dataset", "").asString(), (*body)["params"],
+                reportId, (*body).get("dataset", "").asString(), (*body)["params"], wantDraft,
                 [cb, reportId](int status, const std::string &code, const std::string &bytes, int) {
                     if (status != 200) {
                         sendError(cb, static_cast<HttpStatusCode>(status), code, bytes);
@@ -2156,7 +2281,7 @@ int main() {
 
     app().registerHandler(
         "/api/report/export.csv",
-        [&buildCsv](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [&buildCsv, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -2167,7 +2292,15 @@ int main() {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
                 return;
             }
-            buildCsv(reportId, (*body).get("dataset", "").asString(), (*body)["params"],
+            const bool wantDraft = (*body).get("draft", false).asBool();
+            if (wantDraft && authEnabled) {
+                const auto role = req->attributes()->get<std::string>("session_role");
+                if (!rep::roleAtLeast(role, rep::Role::Author)) {
+                    sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN", "черновик доступен автору и администратору");
+                    return;
+                }
+            }
+            buildCsv(reportId, (*body).get("dataset", "").asString(), (*body)["params"], wantDraft,
                      [cb, reportId](int status, const std::string &code, const std::string &payload, int) {
                          if (status != 200) {
                              sendError(cb, static_cast<HttpStatusCode>(status), code, payload);
@@ -3188,13 +3321,20 @@ int main() {
     // Кэша на сервере нет — списки кэширует клиент; защита от тяжёлого SQL — statement_timeout.
     app().registerHandler(
         "/api/reports/{reportId}/lookups/{param}",
-        [dataDb, &templatesRaw, &templatesMutex, &connRegistry](const HttpRequestPtr &req,
+        [dataDb, &templatesRaw, &draftsRaw, &templatesMutex, &connRegistry, &draftAllowed](
+            const HttpRequestPtr &req,
                                                  std::function<void(const HttpResponsePtr &)> &&cb,
                                                  const std::string &reportId, const std::string &param) {
+            // draft=1 — справочники считаются по черновику (ADR-82)
+            const bool wantDraft = req->getParameter("draft") == "1";
+            if (wantDraft && !draftAllowed(req)) {
+                sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN", "черновик доступен автору и администратору");
+                return;
+            }
             std::map<std::string, std::string> snapshot;
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
-                snapshot = templatesRaw;
+                snapshot = wantDraft ? draftsRaw : templatesRaw;
             }
             const auto it = snapshot.find(reportId);
             if (it == snapshot.end()) {
@@ -3317,7 +3457,8 @@ int main() {
     app().registerHandler(
         "/api/report/data",
         [dataDb, &registry, &templates, &templatesMutex, maxRows, &resultCache, &templatesVersion,
-         &connRegistry](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+         &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -3336,19 +3477,39 @@ int main() {
             std::string datasetKey; // какой набор отдаём: '' — первый в шаблоне (ADR-36)
             std::string datasetConn;
             std::map<std::string, rep::ConnSpec> conns;
+            // draft=true — считаем по телу черновика, а не по опубликованному (ADR-82)
+            const bool wantDraft = (*body).get("draft", false).asBool();
+            if (wantDraft && !draftAllowed(req)) {
+                sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN",
+                          "черновик доступен автору и администратору");
+                return;
+            }
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
-                const auto it = templates.find(reportId);
-                if (it == templates.end()) {
-                    sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
-                    return;
+                const TemplateInfo *tpl = nullptr;
+                TemplateInfo draftCopy;
+                if (wantDraft) {
+                    const auto dit = draftsParsed.find(reportId);
+                    if (dit == draftsParsed.end()) {
+                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "у отчёта нет черновика");
+                        return;
+                    }
+                    draftCopy = dit->second;
+                    tpl = &draftCopy;
+                } else {
+                    const auto it = templates.find(reportId);
+                    if (it == templates.end()) {
+                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
+                        return;
+                    }
+                    tpl = &it->second;
                 }
-                conns = it->second.connections;
-                const auto &all = it->second.datasets;
+                conns = tpl->connections;
+                const auto &all = tpl->datasets;
                 if (all.empty()) {
-                    datasetSql = it->second.datasetSql; // шаблон без данных: прежнее поведение
-                    datasetParams = it->second.datasetParams;
-                    datasetConn = it->second.datasetConnection;
+                    datasetSql = tpl->datasetSql; // шаблон без данных: прежнее поведение
+                    datasetParams = tpl->datasetParams;
+                    datasetConn = tpl->datasetConnection;
                 } else {
                     datasetKey = (*body).get("dataset", "").asString();
                     const auto ds = all.find(datasetKey.empty() ? all.begin()->first : datasetKey);
@@ -3404,6 +3565,7 @@ int main() {
             std::string cacheKey = reportId;
             cacheKey += '|';
             cacheKey += datasetKey; // набор данных — часть ключа: у блоков разные запросы
+            if (wantDraft) cacheKey += "|draft"; // тело черновика — другой результат
             cacheKey += '|';
             cacheKey += std::to_string(tplVersion);
             for (const auto &kv : bag.values()) {
@@ -3651,9 +3813,9 @@ int main() {
                 promise->set_value({status, code, payload, count});
             };
             if (wantXlsx) {
-                buildXlsx(reportId, "", params, emit);
+                buildXlsx(reportId, "", params, false, emit);
             } else {
-                buildCsv(reportId, "", params, emit);
+                buildCsv(reportId, "", params, false, emit);
             }
         });
 

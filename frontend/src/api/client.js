@@ -52,11 +52,13 @@ export const api = {
   reports: () => request('/api/reports'),
   template: (id) => request(`/api/reports/${encodeURIComponent(id)}`),
   // справочник параметра: SQL живёт в шаблоне, адрес — отчёт + имя параметра (ADR-24)
-  lookups: (reportId, param, params = {}, signal) => {
+  lookups: (reportId, param, params = {}, signal, draft = false) => {
     const q = new URLSearchParams()
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
     }
+    // справочник черновика считается по его телу (ADR-82)
+    if (draft) q.set('draft', '1')
     const suffix = q.toString() ? `?${q}` : ''
     return request(
       `/api/reports/${encodeURIComponent(reportId)}/lookups/${encodeURIComponent(param)}${suffix}`,
@@ -64,13 +66,14 @@ export const api = {
     )
   },
   // серверная агрегация (ADR-37): GROUP BY по groupBy, агрегаты по measures
-  aggregate: (reportId, params, spec, signal, dataset) =>
+  aggregate: (reportId, params, spec, signal, dataset, draft = false) =>
     request('/api/report/aggregate', {
       method: 'POST',
       body: JSON.stringify({
         reportId,
         params,
         ...(dataset ? { dataset } : {}),
+        ...(draft ? { draft: true } : {}),
         groupBy: spec.groupBy || [],
         measures: spec.measures || []
       }),
@@ -87,6 +90,7 @@ export const api = {
         field: spec.field,
         value: spec.value === undefined ? null : spec.value,
         ...(spec.dataset ? { dataset: spec.dataset } : {}),
+        ...(spec.draft ? { draft: true } : {}),
         ...(spec.limit ? { limit: spec.limit } : {}),
         ...(spec.offset ? { offset: spec.offset } : {}),
         ...(Array.isArray(spec.order) && spec.order.length ? { order: spec.order } : {})
@@ -95,10 +99,15 @@ export const api = {
     }),
 
   // dataset — ключ из datasets шаблона (ADR-36); без него сервер отдаёт первый набор
-  data: (reportId, params, signal, dataset) =>
+  data: (reportId, params, signal, dataset, draft = false) =>
     request('/api/report/data', {
       method: 'POST',
-      body: JSON.stringify(dataset ? { reportId, params, dataset } : { reportId, params }),
+      body: JSON.stringify({
+        reportId,
+        params,
+        ...(dataset ? { dataset } : {}),
+        ...(draft ? { draft: true } : {})
+      }),
       signal
     }),
 

@@ -33,6 +33,7 @@
     <ParamsForm
       v-if="template"
       :report-id="reportId"
+      :draft="draftMode"
       :model-value="paramValues"
       :params="template.params || []"
       :loading="loading"
@@ -87,6 +88,10 @@ import { drillAllowed, resolveDrill } from '../engine/drill.js'
 
 const params = new URLSearchParams(location.search)
 const reportId = params.get('report') || 'sales-summary'
+// Просмотр черновика (ADR-82): данные и справочники считаются по телу черновика,
+// а не по опубликованной версии. Иначе новый отчёт (опубликован каркас) падал
+// с «в шаблоне не задан datasets» и «нет source.dataset».
+const draftMode = params.get('draft') === '1'
 
 const template = ref(null)
 const rows = ref([])
@@ -162,7 +167,7 @@ async function loadGroupDetails(block, pathKey, spec) {
   const key = block?.dataKey || ''
   // порядок деталей задаёт шаблон (ADR-71): без него строки идут по содержимому
   const order = Array.isArray(block?.detailOrder) ? block.detailOrder : undefined
-  return api.group(reportId, { ...paramValues }, { ...spec, dataset: key || undefined, order })
+  return api.group(reportId, { ...paramValues }, { ...spec, dataset: key || undefined, order, draft: draftMode })
 }
 
 function rowsFor(block) {
@@ -190,8 +195,8 @@ async function load() {
       // получают сырые строки, иначе сервер отвечал 422 «нужен хотя бы один groupBy».
       const serverAgg = block?.aggregate && typeof block.aggregate === 'object' ? block.aggregate : null
       loaded[key] = serverAgg
-        ? (await api.aggregate(reportId, { ...paramValues }, serverAgg, controller.signal, key)).rows
-        : (await api.data(reportId, { ...paramValues }, controller.signal, key)).rows
+        ? (await api.aggregate(reportId, { ...paramValues }, serverAgg, controller.signal, key, draftMode)).rows
+        : (await api.data(reportId, { ...paramValues }, controller.signal, key, draftMode)).rows
     }
     dataByKey.value = loaded
     const data = { rows: loaded[keys[0]] || [] }
@@ -229,6 +234,14 @@ onMounted(async () => {
       if (raw) {
         try {
           draft = JSON.parse(raw)
+        } catch {
+          draft = null
+        }
+      }
+      // localStorage пуст (другой браузер/вкладка) — берём сохранённый черновик из админки
+      if (!draft) {
+        try {
+          draft = await api.adminDraft(reportId)
         } catch {
           draft = null
         }

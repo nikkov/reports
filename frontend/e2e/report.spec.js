@@ -2111,3 +2111,79 @@ test('префикс /reports: отчёт открывается и данные
   await page.goto('http://127.0.0.1:8080/reports/report.html?report=sales-summary&from=2026-03-01&to=2026-03-10')
   await expect(page.locator('.meta')).toContainText('строк: 2748')
 })
+
+test('черновик нового отчёта: просмотр считает данные по черновику, а не по каркасу', async ({ request, page }) => {
+  const id = 'draft-view-e2e'
+  const cleanup = () => request.delete(`/reports/api/reports/${id}`)
+  await cleanup()
+  try {
+    // так создаёт новый отчёт админка: каркас без datasets
+    const frame = { version: 1, id, title: 'Каркас', blocks: [{ type: 'text', text: 'каркас' }] }
+    expect((await request.post('/reports/api/reports', { data: { id, body: frame } })).ok()).toBeTruthy()
+
+    // в черновике — настоящий шаблон со справочником и данными
+    const full = {
+      version: 2,
+      id,
+      title: 'Черновик с данными',
+      connections: {
+        main: {
+          kind: 'postgres',
+          host: '${PGHOST}',
+          port: '${PGPORT}',
+          database: '${PGDATABASE}',
+          user: '${REP_RO_DB_USER}',
+          passwordEnv: 'REP_RO_DB_PASSWORD',
+          schema: 'reports_examples'
+        }
+      },
+      params: [{ name: 'region', type: 'select', source: { kind: 'lookup', dataset: 'regions' } }],
+      datasets: {
+        regions: {
+          connection: 'main',
+          sql: 'SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name'
+        },
+        sales: {
+          connection: 'main',
+          sql: 'SELECT region, amount FROM reports_examples.sales ORDER BY id LIMIT 5'
+        }
+      },
+      blocks: [
+        {
+          type: 'table',
+          dataKey: 'sales',
+          columns: [
+            { field: 'region', title: 'Регион' },
+            { field: 'amount', title: 'Сумма' }
+          ]
+        }
+      ]
+    }
+    expect((await request.put(`/reports/api/admin/reports/${id}/draft`, { data: { body: full } })).ok()).toBeTruthy()
+
+    // опубликованный каркас без datasets — именно здесь раньше падало
+    const bare = await request.post('/reports/api/report/data', { data: { reportId: id, params: {} } })
+    expect(bare.status()).toBe(422)
+
+    // просмотр черновика: тело берётся из админского API (localStorage в тесте пуст),
+    // данные и справочник — по draft=true
+    await page.goto(`/reports/report.html?report=${id}&draft=1`)
+    await expect(page.locator('.error')).toHaveCount(0)
+    await expect(page.locator('.meta')).toContainText('строк: 5')
+    await expect(page.locator('table')).toContainText('Восток')
+
+    // а зритель черновик не увидит
+    const viewer = await apiRequest.newContext({
+      baseURL: 'http://127.0.0.1:8080',
+      storageState: '.auth/viewer.json'
+    })
+    const denied = await viewer.post('/reports/api/report/data', {
+      data: { reportId: id, params: {}, draft: true }
+    })
+    expect(denied.status()).toBe(403)
+    await viewer.dispose()
+  } finally {
+    // иначе упавший тест оставит отчёт и сломает счётчики каталога
+    await cleanup()
+  }
+})

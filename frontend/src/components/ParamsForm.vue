@@ -85,7 +85,9 @@ const props = defineProps({
   reportId: { type: String, required: true },
   params: { type: Array, required: true },
   modelValue: { type: Object, required: true },
-  loading: { type: Boolean, default: false }
+  loading: { type: Boolean, default: false },
+  // просмотр черновика: справочники считаются по телу черновика (ADR-82)
+  draft: { type: Boolean, default: false }
 })
 const emit = defineEmits(['update:modelValue', 'submit', 'labels', 'ready'])
 
@@ -131,13 +133,13 @@ async function loadOptions(p) {
   }
 
   const query = dep ? { [dep]: props.modelValue[dep] } : {}
-  const key = props.reportId + '.' + p.name + '|' + JSON.stringify(query)
+  const key = props.reportId + '.' + p.name + '|' + JSON.stringify(query) + (props.draft ? '|draft' : '')
 
   if (cache.has(key)) {
     fetched[p.name] = cache.get(key)
   } else {
     try {
-      const list = await api.lookups(props.reportId, p.name, query)
+      const list = await api.lookups(props.reportId, p.name, query, undefined, props.draft)
       cache.set(key, list)
       fetched[p.name] = list
     } catch (e) {
