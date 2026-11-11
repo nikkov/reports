@@ -5,6 +5,28 @@ import Ajv2020 from 'ajv/dist/2020.js'
 import schema from './schema.js'
 import { analyzeExpression } from '../engine/expr.js'
 
+// Шаблон даты (ADR-88): только известные токены и разделители, и только для формата даты.
+const DATE_PATTERN_RE = /YYYY|YY|MM|M|DD|D|HH|H|mm|ss/g
+function checkDatePattern(fmt, path, errors) {
+  if (!fmt || typeof fmt !== 'object' || fmt.pattern === undefined) return
+  if (typeof fmt.pattern !== 'string' || fmt.pattern === '') {
+    errors.push({ path: `${path}.pattern`, message: 'pattern: непустая строка с токенами даты' })
+    return
+  }
+  if (fmt.style !== undefined && fmt.style !== 'date') {
+    errors.push({ path: `${path}.pattern`, message: 'pattern допустим только для формата даты (style: "date")' })
+  }
+  const rest = fmt.pattern.replace(DATE_PATTERN_RE, '')
+  // как на сервере: после токенов допустимы только цифры и разделители
+  if (/[^\d\s.,:/;\-T]/.test(rest)) {
+    errors.push({
+      path: `${path}.pattern`,
+      message: 'pattern: недопустимые буквы; допустимы YYYY, YY, MM, M, DD, D, HH, H, mm, ss'
+    })
+  }
+}
+
+
 const ajv = new Ajv2020({ allErrors: true, strict: false })
 
 // Корневая проверка без содержимого блоков: их валидируем отдельно по типу.
@@ -164,6 +186,7 @@ function checkStyles(styles, path, knownFields, errors, warnings, palette = {}) 
       if (fmt.style === 'integer' && fmt.decimals !== undefined && fmt.decimals > 0) {
         warnings.push({ path: `${path}.columns.${field}.format`, message: 'decimals не влияет на целочисленный формат' })
       }
+      checkDatePattern(fmt, `${path}.columns.${field}.format`, errors)
     }
   }
 
@@ -675,6 +698,7 @@ function checkGaugeZones(block, base, errors) {
         if (!col.group && col.aggregate && !hasField) {
           errors.push({ path: cpath, message: 'агрегат требует поля field' })
         }
+        checkDatePattern(col.format, `${cpath}.format`, errors)
         if (col.format === 'percent' && hasField && !col.aggregate && !hasExpr) {
           warnings.push({
             path: cpath,

@@ -52,8 +52,8 @@
                   href="#"
                   :title="drill.label || 'Открыть детали'"
                   @click.stop.prevent="emit('drill', { row, spec: drill })"
-                >{{ pretty(cell.text) }}</a>
-                <template v-else>{{ pretty(cell.text) }}</template>
+                >{{ cellTextOf(cell) }}</a>
+                <template v-else>{{ cellTextOf(cell) }}</template>
               </td>
             </template>
           </tr>
@@ -106,7 +106,7 @@
                 inherit: cell.inherit,
                 cont: cell.continued
               }"
-            >{{ pretty(cell.text) }}</td>
+            >{{ cellTextOf(cell) }}</td>
           </tr>
         </tbody>
       </table>
@@ -115,10 +115,15 @@
 </template>
 
 <script setup>
-// Подписи групп и ячеек с датой: ISO → 05.03.2026 (модель хранит исходные значения).
+// Подписи групп и итогов приходят из движка с ISO-датами («Итого 2025-10-01»).
+// Ячейки данных уже отформатированы TableView по шаблону (pattern даты, ADR-88):
+// их трогать нельзя, иначе «2026-03-01» превратится в «01.03.2026».
 function pretty(value) {
-  // подписи бывают с префиксом («Итого 2025-10-01»), поэтому заменяем ISO-дату в любом месте строки
   return String(value ?? '').replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (_, y, m, d) => `${d}.${m}.${y}`)
+}
+
+function cellTextOf(cell) {
+  return cell.plain ? String(cell.text ?? '') : pretty(cell.text)
 }
 
 // Свой рендерер таблицы отчёта (ADR-20): нативная <table>, объединения из модели.
@@ -355,7 +360,8 @@ const colWidths = computed(() => {
       const row = rows[i]
       const font = row.kind === 'grandtotal' ? fonts.grandtotal
         : row.kind === 'subtotal' ? fonts.subtotal : fonts.detail
-      push(pretty(props.cellText(row, col.field)), font)
+      const text = props.cellText(row, col.field)
+      push(row.kind === 'detail' ? String(text ?? '') : pretty(text), font)
     }
     return long.sort((a, b) => b.len - a.len).slice(0, 12)
   })
@@ -545,6 +551,7 @@ function printCells(index, chunk) {
         colspan: 1,
         continued: false,
         text: props.cellText(row, props.columns[col].field),
+        plain: row.kind === 'detail',
         inherit: row.kind === 'subtotal' && col < row.level
       })
       continue
@@ -561,6 +568,7 @@ function printCells(index, chunk) {
       colspan: 1,
       continued: from > run.start,
       text: props.cellText(props.rows[run.start], props.columns[col].field),
+      plain: row.kind === 'detail',
       inherit: row.kind === 'subtotal' && col < row.level
     })
   }
@@ -590,6 +598,7 @@ function cellsAt(index) {
         colspan: 1,
         continued: false,
         text: props.cellText(row, props.columns[col].field),
+        plain: row.kind === 'detail',
         inherit: row.kind === 'subtotal' && col < row.level,
         // строка итога: клик по её подписи разворачивает группу обратно
         toggle: row.kind === 'subtotal' && col === row.level ? row.groupPath : null,

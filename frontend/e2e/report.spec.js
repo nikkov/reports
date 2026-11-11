@@ -760,9 +760,11 @@ test('админка показывает параметры и SQL их зап�
   await page.goto('/admin.html')
   await expect(page.locator('.rep-row, li').first()).toBeVisible()
 
-  // открываем отчёт со справочником
-  const edit = page.getByRole('button', { name: 'Изменить' }).first()
-  await edit.click()
+  // открываем конкретный отчёт со справочником, а не «первый в списке»:
+  // от его порядка зависит, есть ли в панели cost_center
+  await page.locator('.admin-search, input[type=search]').first().fill('finance-plan-fact')
+  const row = page.locator('.rep-row, li').filter({ hasText: 'finance-plan-fact' }).first()
+  await row.getByRole('button', { name: 'Изменить' }).click()
 
   const panel = page.locator('.params')
   await expect(panel).toBeVisible()
@@ -2291,4 +2293,23 @@ test('параметры даты и времени: интервал фильт
   await inputs.nth(1).dispatchEvent('change')
   await expect.poll(() => page.locator('.rt-table tbody tr.detail').first().innerText()).toContain('31.03.2026')
   await expect.poll(() => page.url()).toContain('dt_from=2026-03-31T00')
+})
+
+test('форматы дат в колонках: pattern из шаблона и styles.columns', async ({ page }) => {
+  await page.goto('/report.html?report=date-formats&from=2026-03-01&to=2026-03-01')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const cells = await page.evaluate(() => {
+    const tr = document.querySelector('.rt-table tbody tr.detail')
+    return tr ? [...tr.children].map((td) => td.innerText) : []
+  })
+  // DD.MM.YYYY HH:mm — формат самой колонки
+  expect(cells[0]).toMatch(/^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$/)
+  // YYYY-MM-DD — «сырой» ISO не должен переформатироваться рендерером
+  expect(cells[1]).toBe('2026-03-01')
+  // DD.MM — без года
+  expect(cells[2]).toBe('01.03')
+  // DD/MM/YYYY — задан в styles.columns, а не в колонке
+  expect(cells[3]).toBe('01/03/2026')
+  expect(cells[4]).toBe('search')
 })

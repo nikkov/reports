@@ -11,13 +11,16 @@ const NBSP = '\u00a0' // разделитель тысяч по умолчани
 export function normalizeFormat(format, decimals) {
   if (format && typeof format === 'object') {
     return {
-      style: format.style || 'number',
+      // pattern подразумевает дату: «format: {pattern: "YYYY-MM-DD"}» без style — валидно
+      style: format.style || (format.pattern ? 'date' : 'number'),
       decimals: format.decimals ?? decimals,
       group: format.group ?? NBSP,
       decimal: format.decimal ?? ',',
       prefix: format.prefix ?? '',
       suffix: format.suffix ?? '',
-      negative: format.negative || 'minus'
+      negative: format.negative || 'minus',
+      // шаблон даты: 'DD.MM.YYYY', 'YYYY-MM-DD HH:mm' (ADR-88); пусто — прежний вид
+      pattern: format.pattern || ''
     }
   }
   const style = format || 'number'
@@ -28,8 +31,33 @@ export function normalizeFormat(format, decimals) {
     decimal: ',',
     prefix: '',
     suffix: '',
-    negative: 'minus'
+    negative: 'minus',
+    pattern: ''
   }
+}
+
+// Токены шаблона даты (ADR-88). Порядок замены важен: длинные раньше коротких,
+// 'MM' — месяц, 'mm' — минуты (регистр значим, как в Moment/date-fns).
+export const DATE_PATTERN_TOKENS = ['YYYY', 'YY', 'MM', 'M', 'DD', 'D', 'HH', 'H', 'mm', 'ss']
+
+export function formatDateByPattern(parts, pattern) {
+  const date = `${parts.day}.${parts.month}.${parts.year}`
+  if (!pattern) {
+    return parts.hour ? `${date} ${parts.hour}:${parts.minute}` : date
+  }
+  const values = {
+    YYYY: parts.year,
+    YY: parts.year.slice(2),
+    MM: parts.month,
+    M: String(Number(parts.month)),
+    DD: parts.day,
+    D: String(Number(parts.day)),
+    HH: parts.hour || '00',
+    H: String(Number(parts.hour || 0)),
+    mm: parts.minute || '00',
+    ss: parts.second || '00'
+  }
+  return pattern.replace(/YYYY|YY|MM|M|DD|D|HH|H|mm|ss/g, (t) => values[t])
 }
 
 function groupDigits(intPart, separator) {
@@ -71,10 +99,12 @@ export function formatCell(format, decimals, value) {
   const spec = normalizeFormat(format, decimals)
 
   if (spec.style === 'date') {
-    const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/)
+    const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/)
     if (!m) return String(value)
-    const date = `${m[3]}.${m[2]}.${m[1]}`
-    return m[4] ? `${date} ${m[4]}:${m[5]}` : date
+    return formatDateByPattern(
+      { year: m[1], month: m[2], day: m[3], hour: m[4], minute: m[5], second: m[6] },
+      spec.pattern
+    )
   }
 
   if (spec.style === 'percent') {

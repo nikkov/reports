@@ -32,11 +32,24 @@ export function excelNumberFormat(format, decimals) {
     case 'integer':
       return '# ##0'
     case 'date':
-      return 'dd.mm.yyyy'
+      // pattern из шаблона → коды Excel (ADR-88): YYYY→yyyy, DD→dd, HH→hh, mm остаётся mm
+      return spec.pattern
+        ? spec.pattern
+            .replace(/YYYY/g, 'yyyy')
+            .replace(/YY/g, 'yy')
+            .replace(/MM/g, 'mm')
+            .replace(/DD/g, 'dd')
+            .replace(/HH/g, 'hh')
+            .replace(/ss/g, 'ss')
+            .replace(/(^|[^a-zA-Z])([MD])(?![a-zA-Z])/g, (m0, p, t) => p + t.toLowerCase())
+        : 'dd.mm.yyyy'
     default:
       return digits ? `# ##0${'.' + '0'.repeat(digits)}` : '# ##0'
   }
 }
+
+// формат даты задан объектом с pattern — та же ветка, что и у колонки type=date
+const isDateStyle = (format) => format === 'date' || (format && typeof format === 'object' && (format.style === 'date' || !!format.pattern))
 
 const isNumericStyle = (format, decimals) => {
   const spec = normalizeFormat(format, decimals)
@@ -165,11 +178,11 @@ export async function buildWorkbook({ block, rows, styles, params = {}, labels =
         } else {
           cell.value = formatCell(col.format, col.decimals, raw) ?? String(raw)
         }
-      } else if (col.type === 'date' || col.format === 'date') {
+      } else if (col.type === 'date' || isDateStyle(col.format)) {
         const d = toDate(raw)
         if (d) {
           cell.value = d
-          numFmt = 'dd.mm.yyyy'
+          numFmt = isDateStyle(col.format) ? excelNumberFormat(col.format, col.decimals) : 'dd.mm.yyyy'
         } else cell.value = String(raw ?? '')
       } else if (typeof raw === 'number') {
         cell.value = raw
@@ -181,7 +194,7 @@ export async function buildWorkbook({ block, rows, styles, params = {}, labels =
       cell.style = { ...base }
       if (numFmt) cell.numFmt = numFmt
       if (col.align) cell.alignment = { ...cell.alignment, horizontal: col.align }
-      if (col.type === 'date' || col.format === 'date') cell.alignment = { ...cell.alignment, horizontal: 'center' }
+      if (col.type === 'date' || isDateStyle(col.format)) cell.alignment = { ...cell.alignment, horizontal: 'center' }
 
       // правила условного форматирования — те же, что на экране
       if (block.rules?.length) {

@@ -1010,6 +1010,12 @@ export default {
             "minus",
             "parentheses"
           ]
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "шаблон даты: YYYY, YY, MM, M, DD, D, HH, H, mm, ss и разделители (ADR-88)"
         }
       }
     },

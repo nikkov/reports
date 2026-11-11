@@ -1,0 +1,135 @@
+{
+  "version": 2,
+  "id": "date-formats",
+  "title": "Форматы дат в колонках",
+  "description": "Одно и то же поле даты в разных шаблонах: ДД.ММ.ГГГГ, ISO, без года, с временем",
+  "folder": "Примеры",
+  "tags": [
+    "форматы",
+    "дата"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "events": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT o.logged_at, o.logged_at::date AS day_iso, o.logged_at::date AS day_short, o.logged_at::date AS day_slash, o.service FROM reports_examples.ops o WHERE o.logged_at::date BETWEEN :from::date AND :to::date ORDER BY o.logged_at"
+    }
+  },
+  "styles": {
+    "preset": "default",
+    "font": {
+      "family": "Inter",
+      "size": 13,
+      "weight": 400,
+      "lineHeight": 1.35
+    },
+    "layout": {
+      "rowHeight": 30,
+      "headerHeight": 34,
+      "cellPadding": "4px 10px",
+      "borders": "grid",
+      "zebra": true
+    },
+    "header": {
+      "font": {
+        "weight": 700
+      },
+      "colors": {
+        "background": "#eef3fa",
+        "text": "#12314f"
+      }
+    },
+    "columns": {
+      "day_slash": {
+        "format": {
+          "style": "date",
+          "pattern": "DD/MM/YYYY"
+        },
+        "width": 170
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Четыре шаблона даты: «ДД.ММ.ГГГГ ЧЧ:ММ» (дата и время), «ГГГГ-ММ-ДД» (ISO), «ДД.ММ» (без года) и «ДД/ММ/ГГГГ» — последний задан в styles.columns, а не в самой колонке."
+    },
+    {
+      "type": "table",
+      "dataKey": "events",
+      "columns": [
+        {
+          "field": "logged_at",
+          "title": "Дата и время",
+          "format": {
+            "style": "date",
+            "pattern": "DD.MM.YYYY HH:mm"
+          }
+        },
+        {
+          "field": "day_iso",
+          "title": "ISO",
+          "format": {
+            "pattern": "YYYY-MM-DD"
+          }
+        },
+        {
+          "field": "day_short",
+          "title": "Без года",
+          "format": {
+            "style": "date",
+            "pattern": "DD.MM"
+          }
+        },
+        {
+          "field": "day_slash",
+          "title": "Слэши (styles.columns)"
+        },
+        {
+          "field": "service",
+          "title": "Сервис"
+        }
+      ],
+      "grandTotal": false
+    }
+  ]
+}

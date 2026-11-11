@@ -3154,6 +3154,197 @@
       "errors": [
         "blocks.0.height"
       ]
+    },
+    {
+      "name": "шаблон даты принимается",
+      "template": {
+        "version": 2,
+        "id": "parity-datefmt",
+        "title": "Даты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT order_date, region FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "columns": [
+              {
+                "field": "order_date",
+                "title": "Дата",
+                "format": {
+                  "style": "date",
+                  "pattern": "DD.MM.YYYY"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "шаблон даты без style — дата по pattern",
+      "template": {
+        "version": 2,
+        "id": "parity-datefmt",
+        "title": "Даты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT order_date, region FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "columns": [
+              {
+                "field": "order_date",
+                "title": "Дата",
+                "format": {
+                  "pattern": "YYYY-MM-DD HH:mm"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "шаблон даты без года принимается",
+      "template": {
+        "version": 2,
+        "id": "parity-datefmt",
+        "title": "Даты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT order_date, region FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "columns": [
+              {
+                "field": "order_date",
+                "title": "Дата",
+                "format": {
+                  "style": "date",
+                  "pattern": "DD.MM"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "шаблон даты с буквой отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-datefmt",
+        "title": "Даты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT order_date, region FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "columns": [
+              {
+                "field": "order_date",
+                "title": "Дата",
+                "format": {
+                  "style": "date",
+                  "pattern": "DD месяц YYYY"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.columns.0.format.pattern"
+      ]
+    },
+    {
+      "name": "pattern у числового формата отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-datefmt",
+        "title": "Даты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT order_date, region FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "columns": [
+              {
+                "field": "order_date",
+                "title": "Дата",
+                "format": {
+                  "style": "number",
+                  "pattern": "YYYY"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.columns.0.format.pattern"
+      ]
+    },
+    {
+      "name": "шаблон даты в styles.columns проверяется",
+      "template": {
+        "version": 2,
+        "id": "parity-datefmt",
+        "title": "Даты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT order_date, region FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "columns": [
+              {
+                "field": "order_date",
+                "title": "Дата"
+              }
+            ]
+          }
+        ],
+        "styles": {
+          "columns": {
+            "order_date": {
+              "format": {
+                "style": "date",
+                "pattern": "DD.MM.YYYY Q"
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        "styles.columns.order_date.format.pattern"
+      ]
     }
   ]
 }

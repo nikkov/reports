@@ -136,8 +136,9 @@ void checkDrill(ValidationResult &r, const Json::Value &block, const std::string
     }
 }
 
-// объявлена ниже: нужна и табличному блоку, и диаграмме
+// объявлены ниже: нужны и табличному блоку, и диаграмме
 void checkBlockHeight(ValidationResult &r, const Json::Value &block, const std::string &path);
+void checkDateFormat(ValidationResult &r, const Json::Value &fmt, const std::string &path);
 
 void checkTableBlock(ValidationResult &r,
                      const Json::Value &block,
@@ -199,6 +200,7 @@ void checkTableBlock(ValidationResult &r,
             if (!group && !col["aggregate"].isNull() && !hasField) {
                 addError(r, cpath, "агрегат требует поля field");
             }
+            checkDateFormat(r, col["format"], cpath + ".format");
             if (hasField) leafFields.insert(asString(col["field"]));
         };
 
@@ -278,13 +280,60 @@ void checkTableBlock(ValidationResult &r,
             };
             checkColor(asString(style["colors"]["text"]), spath + ".colors.text");
             checkColor(asString(style["colors"]["background"]), spath + ".colors.background");
+            checkDateFormat(r, style["format"], spath + ".format");
         }
     }
     (void)leafFields;
 }
 
+// Глобальные styles.columns: шаблон даты проверяется так же, как у блока (ADR-88).
+void checkGlobalStyleColumns(ValidationResult &r, const Json::Value &root) {
+    const Json::Value &styles = root["styles"];
+    if (!styles.isObject() || !styles["columns"].isObject()) return;
+    for (const auto &field : styles["columns"].getMemberNames()) {
+        const Json::Value &style = styles["columns"][field];
+        checkDateFormat(r, style["format"], "styles.columns." + field + ".format");
+    }
+}
+
 // Высота блока (ADR-85): пиксели целым числом или процент от высоты окна строкой «60%».
 // Ограничения общие для таблицы и диаграммы; клиент переводит процент в пиксели.
+// Шаблон даты в format.pattern (ADR-88): известные токены и разделители,
+// обязателен год. Те же правила, что в клиентском валидаторе (parity).
+void checkDateFormat(ValidationResult &r, const Json::Value &fmt, const std::string &path) {
+    if (!fmt.isObject() || !fmt.isMember("pattern") || fmt["pattern"].isNull()) return;
+    const std::string pattern = asString(fmt["pattern"]);
+    if (pattern.empty()) {
+        addError(r, path + ".pattern", "pattern: непустая строка с токенами даты");
+        return;
+    }
+    if (!fmt["style"].isNull() && asString(fmt["style"]) != "date") {
+        addError(r, path + ".pattern", "pattern допустим только для формата даты (style: \"date\")");
+    }
+    static const std::vector<std::string> tokens = {"YYYY", "YY", "MM", "M", "DD", "D", "HH", "H", "mm", "ss"};
+    size_t i = 0;
+    while (i < pattern.size()) {
+        bool matched = false;
+        for (const auto &t : tokens) {
+            if (pattern.compare(i, t.size(), t) == 0) {
+                i += t.size();
+                matched = true;
+                break;
+            }
+        }
+        if (matched) continue;
+        const unsigned char c = static_cast<unsigned char>(pattern[i]);
+        const bool separator = std::isdigit(c) || c == ' ' || c == '.' || c == ',' || c == ':' ||
+                               c == '/' || c == ';' || c == '-' || c == 'T';
+        if (!separator) {
+            addError(r, path + ".pattern",
+                     "pattern: недопустимые буквы; допустимы YYYY, YY, MM, M, DD, D, HH, H, mm, ss");
+            return;
+        }
+        ++i;
+    }
+}
+
 void checkBlockHeight(ValidationResult &r, const Json::Value &block, const std::string &path) {
     if (!block.isMember("height") || block["height"].isNull()) return;
     const Json::Value &h = block["height"];
@@ -1029,6 +1078,8 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             ++index;
         }
     }
+
+    checkGlobalStyleColumns(r, root);
 
     return r;
 }

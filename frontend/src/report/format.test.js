@@ -49,6 +49,21 @@ describe('formatCell: числа', () => {
     expect(formatCell('date', undefined, 'не дата')).toBe('не дата')
   })
 
+  it('шаблон даты из шаблона отчёта (ADR-88)', () => {
+    expect(formatCell({ style: 'date', pattern: 'YYYY-MM-DD' }, undefined, '2026-03-05')).toBe('2026-03-05')
+    expect(formatCell({ style: 'date', pattern: 'DD.MM.YY' }, undefined, '2026-03-05')).toBe('05.03.26')
+    expect(formatCell({ style: 'date', pattern: 'D.M' }, undefined, '2026-03-05')).toBe('5.3')
+    expect(formatCell({ pattern: 'DD/MM/YYYY' }, undefined, '2026-03-05')).toBe('05/03/2026')
+    expect(formatCell({ style: 'date', pattern: 'DD.MM.YYYY HH:mm' }, undefined, '2026-03-05T14:30:00')).toBe(
+      '05.03.2026 14:30'
+    )
+    expect(formatCell({ style: 'date', pattern: 'YYYY-MM-DD HH:mm:ss' }, undefined, '2026-03-05T14:30:07')).toBe(
+      '2026-03-05 14:30:07'
+    )
+    // минут нет (только дата) — получаем «00:00», а не пустоту
+    expect(formatCell({ style: 'date', pattern: 'DD.MM.YYYY HH:mm' }, undefined, '2026-03-05')).toBe('05.03.2026 00:00')
+  })
+
   it('пустые значения не форматируются', () => {
     expect(formatCell('number', undefined, null)).toBeNull()
     expect(formatCell('number', undefined, '')).toBeNull()
