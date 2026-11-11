@@ -56,7 +56,7 @@
           v-else-if="block.type === 'table'"
           :block="block"
           :rows="rowsFor(block)"
-          :height="460"
+          :height="heightFor(block)"
           :styles="stylesFor(block)"
           :print-mode="printMode"
           :load-group="(pathKey, spec) => loadGroupDetails(block, pathKey, spec)"
@@ -67,7 +67,7 @@
           v-else-if="block.type === 'chart'"
           :block="block"
           :rows="rowsFor(block)"
-          :height="block.height || 320"
+          :height="heightFor(block)"
           :styles="stylesFor(block)"
           :drill="block.drill || null"
           @drill="onChartDrill"
@@ -79,7 +79,8 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { API_BASE, api } from '../api/client.js'
+import { api, API_BASE } from '../api/client.js'
+import { resolveBlockHeight } from '../engine/layout.js'
 import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
 import ChartBlock from './ChartBlock.vue'
@@ -225,6 +226,7 @@ const needsLookups = (tpl) =>
   (tpl.params || []).some((p) => p.source?.kind === 'lookup' || p.source?.kind === 'static')
 
 onMounted(async () => {
+  window.addEventListener('resize', onResize)
   try {
     // Черновик из админки: report.html?report=<id>&draft=1 читает тело из localStorage,
     // а не из API — так можно посмотреть несохранённые правки.
@@ -277,6 +279,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
   clearTimeout(reloadTimer)
   stopLive()
   stopRefresh()
@@ -289,6 +292,16 @@ onBeforeUnmount(() => {
 // Первый табличный блок — источник экспорта и печати (в шаблонах он один).
 const tableBlock = computed(() => (template.value?.blocks || []).find((b) => b.type === 'table'))
 const printMode = ref(false)
+
+// Высота блоков «в процентах» считается от окна (ADR-85): при изменении размера
+// окна блоки пересчитываются, иначе таблица осталась бы с прошлой высотой.
+const viewportHeight = ref(typeof window === 'undefined' ? 0 : window.innerHeight)
+function onResize() {
+  viewportHeight.value = window.innerHeight
+}
+function heightFor(block) {
+  return resolveBlockHeight(block?.type, block?.height, viewportHeight.value)
+}
 const exporting = ref(false)
 const printing = ref(false)
 // Автообновление (ADR-39): период задаётся шаблоном, вкладка в фоне не опрашивает сервер.

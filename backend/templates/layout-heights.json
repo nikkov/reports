@@ -1,0 +1,126 @@
+{
+  "version": 2,
+  "id": "layout-heights",
+  "title": "Размеры блоков: проценты и пиксели",
+  "description": "Высота блока задаётся в пикселях числом или в процентах от высоты окна строкой",
+  "folder": "Примеры",
+  "tags": [
+    "вёрстка",
+    "размеры"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, customer, amount, profit FROM reports_examples.sales WHERE order_date BETWEEN :from::date AND :to::date ORDER BY id LIMIT 120"
+    },
+    "by_region": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, sum(amount) AS amount FROM reports_examples.sales WHERE order_date BETWEEN :from::date AND :to::date GROUP BY region ORDER BY amount DESC"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Таблица ниже занимает 60 % высоты окна, диаграмма — фиксированные 320 px, последняя таблица — 240 px."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "title": "Таблица: height = \"60%\"",
+      "height": "60%",
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "product",
+          "title": "Товар"
+        },
+        {
+          "field": "customer",
+          "title": "Клиент"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": "number"
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "by_region",
+      "chartType": "bar",
+      "xField": "region",
+      "yField": "amount",
+      "title": "Диаграмма: height = 320",
+      "height": 320
+    },
+    {
+      "type": "table",
+      "dataKey": "by_region",
+      "title": "Таблица: height = 240",
+      "height": 240,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": "number"
+        }
+      ]
+    }
+  ]
+}

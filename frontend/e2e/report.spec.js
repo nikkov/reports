@@ -2213,3 +2213,25 @@ test('черновик нового отчёта: просмотр считае�
     await cleanup()
   }
 })
+
+test('высота блоков: процент от окна пересчитывается, пиксели не зависят от окна', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/report.html?report=layout-heights')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const sections = page.locator('section.block')
+  // 0 — текст, 1 — таблица height "60%", 2 — диаграмма height 320, 3 — таблица height 240
+  const bigTable = sections.nth(1).locator('.rt')
+  const chart = sections.nth(2).locator('.chart')
+  const smallTable = sections.nth(3).locator('.rt')
+
+  // 60 % от 900 = 540 px (таблица не растягивается сверх содержимого, строк достаточно)
+  expect((await bigTable.boundingBox()).height).toBeGreaterThanOrEqual(520)
+  expect((await chart.boundingBox()).height).toBe(320)
+  expect((await smallTable.boundingBox()).height).toBeLessThanOrEqual(242)
+
+  // окно ниже: процентный блок становится меньше, пиксельный — нет
+  await page.setViewportSize({ width: 1400, height: 700 })
+  await expect.poll(async () => (await bigTable.boundingBox()).height).toBeLessThan(520)
+  expect((await chart.boundingBox()).height).toBe(320)
+})

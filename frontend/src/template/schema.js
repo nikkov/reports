@@ -84,6 +84,20 @@ export default {
     }
   },
   "$defs": {
+    "blockHeight": {
+      "description": "высота блока: число (px, 160…2000) или строка-процент от высоты окна (\"60%\")",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 160,
+          "maximum": 2000
+        },
+        {
+          "type": "string",
+          "pattern": "^(100|[1-9][0-9]?)%$"
+        }
+      ]
+    },
     "param": {
       "type": "object",
       "additionalProperties": false,
@@ -447,6 +461,9 @@ export default {
           "type": "string",
           "minLength": 1
         },
+        "height": {
+          "$ref": "#/$defs/blockHeight"
+        },
         "detailOrder": {
           "type": "array",
           "minItems": 1,
@@ -602,10 +619,7 @@ export default {
           "minLength": 1
         },
         "height": {
-          "type": "number",
-          "minimum": 240,
-          "maximum": 900,
-          "description": "высота области диаграммы в px (по умолчанию 320); для многоуровневого sankey нужно больше"
+          "$ref": "#/$defs/blockHeight"
         },
         "bands": {
           "type": "array",

@@ -2974,6 +2974,186 @@
       "errors": [
         "params.0.emptyOption.label"
       ]
+    },
+    {
+      "name": "высота таблицы в процентах принимается",
+      "template": {
+        "version": 2,
+        "id": "parity-height",
+        "title": "Высоты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT region, amount FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "height": "60%",
+            "columns": [
+              {
+                "field": "region",
+                "title": "R"
+              }
+            ]
+          },
+          {
+            "type": "chart",
+            "dataKey": "s",
+            "chartType": "bar",
+            "xField": "region",
+            "yField": "amount",
+            "height": 320
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "высота диаграммы в пикселях принимается",
+      "template": {
+        "version": 2,
+        "id": "parity-height",
+        "title": "Высоты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT region, amount FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "height": "100%",
+            "columns": [
+              {
+                "field": "region",
+                "title": "R"
+              }
+            ]
+          },
+          {
+            "type": "chart",
+            "dataKey": "s",
+            "chartType": "bar",
+            "xField": "region",
+            "yField": "amount",
+            "height": 160
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "высота больше 100% отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-height",
+        "title": "Высоты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT region, amount FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "height": "150%",
+            "columns": [
+              {
+                "field": "region",
+                "title": "R"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.height"
+      ]
+    },
+    {
+      "name": "высота в пикселях меньше 160 отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-height",
+        "title": "Высоты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT region, amount FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "height": 50,
+            "columns": [
+              {
+                "field": "region",
+                "title": "R"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.height"
+      ]
+    },
+    {
+      "name": "высота с единицами px отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-height",
+        "title": "Высоты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT region, amount FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "s",
+            "height": "60px",
+            "columns": [
+              {
+                "field": "region",
+                "title": "R"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.height"
+      ]
+    },
+    {
+      "name": "высота у текстового блока отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-height",
+        "title": "Высоты",
+        "datasets": {
+          "s": {
+            "sql": "SELECT region, amount FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "т",
+            "height": 300
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.height"
+      ]
     }
   ]
 }

@@ -181,13 +181,31 @@ function checkStyles(styles, path, knownFields, errors, warnings, palette = {}) 
   }
 }
 
-// Высота диаграммы: у многоуровневого sankey узлов десятки, на 320 px подписи не читаются.
-function checkChartHeight(block, base, errors) {
-  if (block.height === undefined) return
+// Высота блока (ADR-85): пиксели числом или процент от высоты окна строкой.
+// У многоуровневого sankey узлов десятки — на 320 px подписи не читаются, но это
+// забота шаблона, а не отдельного правила: ограничения общие для таблицы и диаграммы.
+function checkBlockHeight(block, base, errors) {
   const height = block.height
-  if (typeof height !== 'number' || !Number.isFinite(height) || height < 240 || height > 900) {
-    errors.push({ path: `${base}.height`, message: 'height: число от 240 до 900 (px)' })
+  if (height === undefined) return
+  if (typeof height === 'number') {
+    if (!Number.isInteger(height) || height < 160 || height > 2000) {
+      errors.push({ path: `${base}.height`, message: 'height: пиксели — целое 160…2000 или процент от окна («60%»)' })
+    }
+    return
   }
+  if (typeof height === 'string') {
+    const m = /^(\d{1,3})%$/.exec(height)
+    if (!m) {
+      errors.push({ path: `${base}.height`, message: 'height: пиксели — целое 160…2000 или процент от окна («60%»)' })
+      return
+    }
+    const pct = Number(m[1])
+    if (pct < 10 || pct > 100) {
+      errors.push({ path: `${base}.height`, message: 'height: процент от высоты окна — от 10 до 100 («60%»)' })
+    }
+    return
+  }
+  errors.push({ path: `${base}.height`, message: 'height: пиксели — целое 160…2000 или процент от окна («60%»)' })
 }
 
 export function validateTemplate(template) {
@@ -780,7 +798,6 @@ function checkGaugeZones(block, base, errors) {
         }
       } else if (type === 'sankey') {
         // Поток задаётся либо парой source/target, либо цепочкой уровней (ADR-68)
-        checkChartHeight(block, base, errors)
         need('valueField')
         if (block.levels !== undefined) {
           if (!Array.isArray(block.levels) || block.levels.length < 2 || block.levels.length > 4) {
@@ -878,6 +895,17 @@ function checkGaugeZones(block, base, errors) {
     for (const { col } of list) if (col.field) allFields.add(col.field)
   }
   checkStyles(template?.styles, 'styles', allFields, errors, warnings, template?.styles?.palette || {})
+
+  // Высота блоков (ADR-85): у таблицы и диаграммы — пиксели или процент от окна
+  ;(template.blocks || []).forEach((block, i) => {
+    if (block.type !== 'table' && block.type !== 'chart') {
+      if (block.height !== undefined) {
+        errors.push({ path: `blocks.${i}.height`, message: 'height допустим только у таблицы и диаграммы' })
+      }
+      return
+    }
+    checkBlockHeight(block, `blocks.${i}`, errors)
+  })
 
   return { errors, warnings }
 }

@@ -136,11 +136,15 @@ void checkDrill(ValidationResult &r, const Json::Value &block, const std::string
     }
 }
 
+// объявлена ниже: нужна и табличному блоку, и диаграмме
+void checkBlockHeight(ValidationResult &r, const Json::Value &block, const std::string &path);
+
 void checkTableBlock(ValidationResult &r,
                      const Json::Value &block,
                      const std::string &base,
                      const std::map<std::string, std::set<std::string>> &columnsByDataKey) {
     (void)columnsByDataKey;
+    checkBlockHeight(r, block, base);
     // поля этой таблицы: по ним проверяются правила и стили
     std::set<std::string> known;
     std::function<void(const Json::Value &)> collect = [&](const Json::Value &col) {
@@ -279,7 +283,39 @@ void checkTableBlock(ValidationResult &r,
     (void)leafFields;
 }
 
+// Высота блока (ADR-85): пиксели целым числом или процент от высоты окна строкой «60%».
+// Ограничения общие для таблицы и диаграммы; клиент переводит процент в пиксели.
+void checkBlockHeight(ValidationResult &r, const Json::Value &block, const std::string &path) {
+    if (!block.isMember("height") || block["height"].isNull()) return;
+    const Json::Value &h = block["height"];
+    const std::string hint = "height: пиксели — целое 160…2000 или процент от окна («60%»)";
+    if (h.isInt()) {
+        const int px = h.asInt();
+        if (px < 160 || px > 2000) addError(r, path + ".height", hint);
+        return;
+    }
+    if (h.isString()) {
+        const std::string s = h.asString();
+        if (s.size() < 2 || s.size() > 4 || s.back() != '%') {
+            addError(r, path + ".height", hint);
+            return;
+        }
+        const std::string digits = s.substr(0, s.size() - 1);
+        if (digits.find_first_not_of("0123456789") != std::string::npos) {
+            addError(r, path + ".height", hint);
+            return;
+        }
+        const int pct = std::stoi(digits);
+        if (pct < 10 || pct > 100) {
+            addError(r, path + ".height", "height: процент от высоты окна — от 10 до 100 («60%»)");
+        }
+        return;
+    }
+    addError(r, path + ".height", hint);
+}
+
 void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::string &base) {
+    checkBlockHeight(r, block, base);
     static const std::vector<std::string> types = {"bar", "line", "pie", "area", "scatter", "gauge", "sankey", "band"};
     const std::string type = asString(block["chartType"]);
     if (!isOneOf(type, types)) {
@@ -295,12 +331,6 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
     const auto need = [&](const char *field) {
         if (asString(block[field]).empty()) {
             addError(r, base + "." + field, std::string("для диаграммы «") + type + "» обязательно поле " + field);
-        }
-    };
-    const auto checkHeight = [&](const Json::Value &b, const std::string &path) {
-        if (b["height"].isNull()) return;
-        if (!b["height"].isNumeric() || b["height"].asDouble() < 240 || b["height"].asDouble() > 900) {
-            addError(r, path + ".height", "height: число от 240 до 900 (px)");
         }
     };
     const auto forbid = [&](const char *field, const char *why) {
@@ -407,7 +437,6 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
         }
     } else if (type == "sankey") {
         // Поток задаётся либо парой source/target, либо цепочкой уровней (ADR-68)
-        checkHeight(block, base);
         need("valueField");
         std::vector<std::string> chain;
         const bool hasLevels = !block["levels"].isNull();
@@ -917,6 +946,9 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             }
 
             if (type == "text") {
+                if (block.isMember("height") && !block["height"].isNull()) {
+                    addError(r, base + ".height", "height допустим только у таблицы и диаграммы");
+                }
                 const std::string text = asString(block["text"]);
                 if (text.empty()) addError(r, base + ".text", "text обязателен для текстового блока");
                 for (std::size_t pos = 0; (pos = text.find("{{", pos)) != std::string::npos;) {
