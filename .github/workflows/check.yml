@@ -2,9 +2,15 @@ name: check
 
 # Проверки без e2e: e2e требуют живых сервисов и БД, их запуск — локально
 # (REP_E2E=1 ./scripts/ci.sh) или отдельным стендом.
+#
+# Автозапуск ОТКЛЮЧЁН по решению постановщика (v1.57.2): прогоны на каждый push
+# и PR не нужны, проверки идут локально (`REP_E2E=1 ./scripts/check.sh`).
+# Включить обратно — вернуть триггеры push/pull_request:
+# on:
+#   push:
+#   pull_request:
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   backend:
