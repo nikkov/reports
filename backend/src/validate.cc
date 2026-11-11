@@ -729,6 +729,42 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             const std::string path = "params." + std::to_string(index);
             const std::string type = asString(param["type"]);
             const Json::Value &src = param["source"];
+            const std::string kind = src.isObject() ? asString(src["kind"]) : "";
+
+            // Явный пустой элемент списка (ADR-84): интерфейс больше не подставляет «—»,
+            // шаблон сам говорит, что добавить в начало списка и с каким значением.
+            // Проверяется до раннего выхода: от source не зависит.
+            if (param.isMember("emptyOption")) {
+                const Json::Value &blank = param["emptyOption"];
+                if (kind != "lookup") {
+                    addError(r, path + ".emptyOption",
+                             "emptyOption допустим только у справочника (source.kind=lookup)");
+                }
+                if (param["multiple"].asBool()) {
+                    addError(r, path + ".emptyOption",
+                             "emptyOption не сочетается с multiple: пустой элемент — для одиночного выбора");
+                }
+                if (!blank.isObject()) {
+                    addError(r, path + ".emptyOption",
+                             "emptyOption должен быть объектом {value, label}");
+                } else {
+                    if (!blank.isMember("value") ||
+                        !(blank["value"].isString() || blank["value"].isNumeric() || blank["value"].isBool())) {
+                        addError(r, path + ".emptyOption.value",
+                                 "emptyOption.value должен быть строкой, числом или логическим значением");
+                    }
+                    if (!blank["label"].isString() || asString(blank["label"]).empty()) {
+                        addError(r, path + ".emptyOption.label",
+                                 "emptyOption.label должен быть непустой строкой");
+                    }
+                    for (const auto &name : blank.getMemberNames()) {
+                        if (name != "value" && name != "label") {
+                            addError(r, path + ".emptyOption." + name,
+                                     "недопустимое поле: «" + name + "»");
+                        }
+                    }
+                }
+            }
 
             if (src.isNull()) {
                 if (type == "select" && (!param["options"].isArray() || param["options"].empty())) {
@@ -743,7 +779,6 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 continue;
             }
 
-            const std::string kind = asString(src["kind"]);
             static const std::vector<std::string> kinds = {"lookup", "static", "date", "datetime"};
             if (!kind.empty() && !isOneOf(kind, kinds)) {
                 addError(r, path + ".source", "неизвестный source.kind «" + kind + "»");
@@ -803,6 +838,7 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             if (param["multiple"].asBool() && kind != "lookup" && kind != "static") {
                 addError(r, path + ".multiple", "множественный выбор допустим только для справочника или набора");
             }
+
 
             const std::string parentName = asString(src["dependsOn"]);
             if (!parentName.empty()) {

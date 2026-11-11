@@ -28,9 +28,11 @@
         :required="p.required"
         @change="onSelect(p, $event)"
       >
-        <!-- пустой вариант выбираем, если параметр необязательный: иначе браузер
-             показывает первый пункт списка, хотя в запрос уходит пустая строка -->
-        <option v-if="!p.multiple" value="" :disabled="p.required">—</option>
+        <!-- пустой вариант больше не подставляется автоматически: шаблон объявляет его
+             явно в emptyOption (ADR-84). Нет emptyOption — нет и пустого пункта -->
+        <option v-if="emptyOption(p)" :value="String(emptyOption(p).value)">
+          {{ emptyOption(p).label }}
+        </option>
         <option
           v-for="o in optionsFor(p)"
           :key="o.value"
@@ -99,8 +101,15 @@ const kind = (p) =>
   p.source?.kind || (p.type === 'date' ? 'date' : p.type === 'select' ? 'static' : 'text')
 
 function optionsFor(p) {
-  if (p.source?.kind === 'static') return p.source.options || p.options || []
-  return fetched[p.name] || []
+  const list = p.source?.kind === 'static' ? p.source.options || p.options || [] : fetched[p.name] || []
+  // пустой элемент из emptyOption не дублируем, если справочник вернул то же значение
+  const blank = emptyOption(p)
+  return blank ? list.filter((o) => String(o.value) !== String(blank.value)) : list
+}
+
+// пустой элемент списка — часть шаблона, а не догадка интерфейса (ADR-84)
+function emptyOption(p) {
+  return p.emptyOption && typeof p.emptyOption === 'object' ? p.emptyOption : null
 }
 
 // выбранность задаём на каждом option: для <select multiple> это надёжнее value-биндинга,
@@ -167,10 +176,24 @@ async function loadOptions(p) {
     return
   }
 
-  const valid = list.some((o) => o.value === current)
+  // текущее значение может совпадать с объявленным пустым элементом
+  const blank = emptyOption(p)
+  const cur = String(current ?? '')
+  const inList = (v) =>
+    list.some((o) => String(o.value) === v) || (blank !== null && String(blank.value) === v)
 
-  if (!valid && list.length) {
-    update(p.name, p.default !== undefined ? String(p.default) : String(list[0].value))
+  // значение по умолчанию из шаблона применяется, когда ничего не выбрано
+  // или выбранное значение пропало после каскадной перезагрузки (ADR-84)
+  if (p.default !== undefined && (!cur || !inList(cur))) {
+    const wanted = String(p.default)
+    if (wanted !== cur) update(p.name, wanted)
+    return
+  }
+
+  if (!inList(cur)) {
+    // иначе: объявленный пустой элемент → первое значение; без них — ничего не навязываем
+    const next = blank ? String(blank.value) : list.length ? String(list[0].value) : null
+    if (next !== null && next !== cur) update(p.name, next)
   }
 }
 

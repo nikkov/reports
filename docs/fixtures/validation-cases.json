@@ -2807,6 +2807,173 @@
       "errors": [
         "params.0.source.dataset"
       ]
+    },
+    {
+      "name": "emptyOption у справочника принимается",
+      "template": {
+        "version": 2,
+        "id": "parity-empty",
+        "title": "Пустой элемент",
+        "params": [
+          {
+            "name": "cc",
+            "type": "select",
+            "label": "Центр",
+            "source": {
+              "kind": "lookup",
+              "dataset": "cc"
+            },
+            "emptyOption": {
+              "value": "",
+              "label": "Все центры"
+            },
+            "default": ""
+          }
+        ],
+        "datasets": {
+          "cc": {
+            "sql": "SELECT DISTINCT cost_center AS value, cost_center AS label FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "cc",
+            "columns": [
+              {
+                "field": "value",
+                "title": "V"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "emptyOption у даты отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-empty",
+        "title": "Пустой элемент",
+        "params": [
+          {
+            "name": "d",
+            "type": "date",
+            "label": "с",
+            "emptyOption": {
+              "value": "",
+              "label": "Все"
+            }
+          }
+        ],
+        "datasets": {
+          "cc": {
+            "sql": "SELECT DISTINCT cost_center AS value, cost_center AS label FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "cc",
+            "columns": [
+              {
+                "field": "value",
+                "title": "V"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0.emptyOption"
+      ]
+    },
+    {
+      "name": "emptyOption с multiple отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-empty",
+        "title": "Пустой элемент",
+        "params": [
+          {
+            "name": "cc",
+            "type": "select",
+            "label": "Центр",
+            "source": {
+              "kind": "lookup",
+              "dataset": "cc"
+            },
+            "multiple": true,
+            "emptyOption": {
+              "value": "",
+              "label": "Все центры"
+            }
+          }
+        ],
+        "datasets": {
+          "cc": {
+            "sql": "SELECT DISTINCT cost_center AS value, cost_center AS label FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "cc",
+            "columns": [
+              {
+                "field": "value",
+                "title": "V"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0.emptyOption"
+      ]
+    },
+    {
+      "name": "emptyOption без label отклоняется",
+      "template": {
+        "version": 2,
+        "id": "parity-empty",
+        "title": "Пустой элемент",
+        "params": [
+          {
+            "name": "cc",
+            "type": "select",
+            "label": "Центр",
+            "source": {
+              "kind": "lookup",
+              "dataset": "cc"
+            },
+            "emptyOption": {
+              "value": ""
+            }
+          }
+        ],
+        "datasets": {
+          "cc": {
+            "sql": "SELECT DISTINCT cost_center AS value, cost_center AS label FROM t"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "cc",
+            "columns": [
+              {
+                "field": "value",
+                "title": "V"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0.emptyOption.label"
+      ]
     }
   ]
 }

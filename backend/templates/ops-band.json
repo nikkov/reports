@@ -36,6 +36,10 @@
       "label": "Сервис",
       "required": false,
       "default": "",
+      "emptyOption": {
+        "value": "",
+        "label": "Все сервисы"
+      },
       "source": {
         "kind": "lookup",
         "dataset": "service_lookup"

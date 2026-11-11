@@ -307,6 +307,18 @@ export function validateTemplate(template) {
     const src = p.source
     const kind = src?.kind
 
+    // Пустой элемент списка задаётся шаблоном явно (ADR-84): интерфейс больше не
+    // подставляет «—» сам. Значения value/label проверяет схема, здесь — область действия.
+    // Проверяем до раннего выхода: она не зависит от source.
+    if (p.emptyOption !== undefined) {
+      if (kind !== 'lookup') {
+        errors.push({ path: `${path}.emptyOption`, message: 'emptyOption допустим только у справочника (source.kind=lookup)' })
+      }
+      if (p.multiple) {
+        errors.push({ path: `${path}.emptyOption`, message: 'emptyOption не сочетается с multiple: пустой элемент — для одиночного выбора' })
+      }
+    }
+
     if (!src) {
       // старый стиль: select обязан иметь options, иначе пользователю нечего выбрать
       if (p.type === 'select' && !(p.options && p.options.length)) {
@@ -361,6 +373,7 @@ export function validateTemplate(template) {
         errors.push({ path: `${path}.type`, message: `для source.kind=${kind} ожидался type=${kind}` })
       }
     }
+
 
     if (p.multiple && kind !== 'lookup' && kind !== 'static') {
       errors.push({ path: `${path}.multiple`, message: 'множественный выбор допустим только для справочника или набора' })

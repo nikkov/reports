@@ -142,6 +142,27 @@ export default {
             }
           }
         },
+        "emptyOption": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "label"
+          ],
+          "properties": {
+            "value": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
         "source": {
           "type": "object",
           "additionalProperties": false,

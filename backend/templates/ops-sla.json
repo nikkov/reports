@@ -8,6 +8,11 @@
       "name": "service",
       "type": "select",
       "label": "Сервис",
+      "default": "",
+      "emptyOption": {
+        "value": "",
+        "label": "Все сервисы"
+      },
       "source": {
         "kind": "lookup",
         "dataset": "service_lookup"
@@ -60,7 +65,7 @@
     },
     "service_lookup": {
       "connection": "main",
-      "sql": "SELECT '' AS value, 'Все сервисы' AS label UNION ALL SELECT DISTINCT o.service, o.service FROM reports_examples.ops o ORDER BY 2"
+      "sql": "SELECT DISTINCT o.service AS value, o.service AS label FROM reports_examples.ops o WHERE o.service IS NOT NULL ORDER BY 1"
     }
   },
   "blocks": [

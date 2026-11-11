@@ -1568,17 +1568,43 @@ test('band: два коридора на одном графике, подпис
   await expect(legend.nth(1)).toContainText('среднее ± σ')
 })
 
-// Необязательный параметр-справочник: пустой выбор должен показываться как «—», а не первым пунктом списка
-test('параметр-справочник без значения показывает «—» и не фильтрует данные', async ({ page }) => {
+// Пустой элемент списка объявляет шаблон (ADR-84): фронт больше не подставляет «—»
+test('параметр-справочник показывает объявленный в шаблоне элемент, а не «—»', async ({ page }) => {
   await page.goto('/report.html?report=ops-corridors&from=2026-03-01&to=2026-03-31&service=')
   await expect(page.locator('.meta')).toContainText('строк: 31')
   const select = page.locator('select').first()
   await expect(select).toHaveValue('')
-  await expect(select.locator('option:checked')).toHaveText('—')
+  // firstOption — из emptyOption шаблона; тире интерфейс не добавляет
+  await expect(select.locator('option').first()).toHaveText('Все сервисы')
+  await expect(select.locator('option:checked')).toHaveText('Все сервисы')
+  const texts = await select.locator('option').allInnerTexts()
+  expect(texts).not.toContain('—')
 
   await select.selectOption('api')
   await expect(page.locator('.meta')).toContainText('строк: 5')
   await expect(select).toHaveValue('api')
+})
+
+test('без emptyOption пустого пункта нет, а default выбирает объявленное значение', async ({ page }) => {
+  // справочник без emptyOption: ни тире, ни пустого пункта — только данные из БД
+  await page.goto('/report.html?report=sales-by-region')
+  const plain = page.locator('.params select').first()
+  await expect(plain).not.toHaveValue('')
+  const plainTexts = await plain.locator('option').allInnerTexts()
+  expect(plainTexts).not.toContain('—')
+  expect(plainTexts.every((t) => t.trim() !== '')).toBe(true)
+
+  // emptyOption «Все центры» + default "" → выбран он, данных больше, чем по одному центру
+  await page.goto('/report.html?report=finance-plan-fact')
+  const cc = page.locator('.params select').first()
+  await expect(cc.locator('option').first()).toHaveText('Все центры')
+  await expect(cc).toHaveValue('')
+  const rowsAll = Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])
+  expect(rowsAll).toBeGreaterThan(0)
+
+  const values = await cc.locator('option').evaluateAll((els) => els.map((e) => e.value))
+  await cc.selectOption(values[1])
+  await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThan(rowsAll)
 })
 
 test('band: одна полоса остаётся без подписи коридоров', async ({ page }) => {

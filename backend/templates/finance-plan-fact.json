@@ -8,6 +8,11 @@
       "name": "cost_center",
       "type": "select",
       "label": "Центр затрат",
+      "default": "",
+      "emptyOption": {
+        "value": "",
+        "label": "Все центры"
+      },
       "source": {
         "kind": "lookup",
         "dataset": "cost_center_lookup"
@@ -60,7 +65,7 @@
     },
     "cost_center_lookup": {
       "connection": "main",
-      "sql": "SELECT '' AS value, 'Все центры' AS label UNION ALL SELECT DISTINCT f.cost_center, f.cost_center FROM reports_examples.finance f WHERE f.cost_center IS NOT NULL ORDER BY 2"
+      "sql": "SELECT DISTINCT f.cost_center AS value, f.cost_center AS label FROM reports_examples.finance f WHERE f.cost_center IS NOT NULL ORDER BY 1"
     }
   },
   "blocks": [
