@@ -1,5 +1,28 @@
 # История версий
 
+## v1.57.1 — 2026-11-11
+
+CI собирает на фиксированном компиляторе (ADR-83).
+
+### Что было не так
+
+`ubuntu-latest` принёс gcc 15, а Conan 1.66 знает версии компилятора только до 14.1. Профиль
+создавался автоматическим `detect`, поэтому в него попадало `compiler.version=15`, и
+`conan install` падал: `ERROR: Invalid setting '15' is not a valid 'settings.compiler.version'
+value`. Job `backend` и `e2e` не доходили до сборки.
+
+### Что сделано
+- job `backend` и `e2e` переведены на `ubuntu-24.04` и ставят `g++-13`;
+- профиль Conan создаётся явно (`compiler=gcc`, `compiler.version=13`, `libstdc++11`,
+  `env.CC/CXX=/usr/bin/gcc-13`) — `detect` для сборки не используется;
+- в ключ кэша Conan добавлен `gcc13`, чтобы пакеты другого компилятора не мешали.
+
+### Проверки
+Локально: `conan install -s compiler.version=15` воспроизводит ошибку из CI; с профилем
+gcc 13 валидация проходит (остаются только `Missing binary`, их собирает `--build missing`).
+YAML workflow разбирается, профиль из шага генерируется и читается `conan profile show`.
+Реальный прогон GitHub Actions — после пуша.
+
 ## v1.57.0 — 2026-11-11
 
 Просмотр черновика считает по телу черновика (ADR-82).

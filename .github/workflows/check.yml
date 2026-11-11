@@ -8,9 +8,13 @@ on:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    # Образ фиксирован: ubuntu-latest принёс gcc 15, а Conan 1.66 знает компиляторы
+    # только до 14.1 — detect писал невалидную версию и install падал (ADR-83).
+    runs-on: ubuntu-24.04
     env:
       CONAN_USER_HOME: ${{ github.workspace }}/.conan
+      CC: gcc-13
+      CXX: g++-13
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,14 +23,36 @@ jobs:
       - name: Conan v1 и компилятор
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libpq-dev
+          sudo apt-get install -y build-essential g++-13 cmake libpq-dev
           python -m pip install --upgrade pip
           pip install 'conan==1.66.0'
+      - name: Профиль Conan (gcc 13)
+        # профиль задаётся явно, а не detect: версия компилятора в образе может
+        # оказаться новее той, что знает Conan 1.66 (ADR-83)
+        run: |
+          mkdir -p "$CONAN_USER_HOME/.conan/profiles"
+          cat > "$CONAN_USER_HOME/.conan/profiles/default" <<'EOF'
+          [settings]
+          os=Linux
+          os_build=Linux
+          arch=x86_64
+          arch_build=x86_64
+          compiler=gcc
+          compiler.version=13
+          compiler.libcxx=libstdc++11
+          build_type=Release
+          [options]
+          [build_requires]
+          [env]
+          CC=/usr/bin/gcc-13
+          CXX=/usr/bin/g++-13
+          EOF
+          conan profile show default
       - name: Кэш Conan
         uses: actions/cache@v4
         with:
           path: .conan
-          key: conan-${{ runner.os }}-${{ hashFiles('backend/conanfile.txt', 'backend/conanfile.py') }}
+          key: conan-${{ runner.os }}-gcc13-${{ hashFiles('backend/conanfile.txt', 'backend/conanfile.py') }}
       - name: Зависимости
         working-directory: backend
         run: conan install . -if build --build missing -s build_type=Release
@@ -101,10 +127,12 @@ jobs:
         run: npm run --silent build
 
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       CONAN_USER_HOME: ${{ github.workspace }}/.conan
+      CC: gcc-13
+      CXX: g++-13
       PGHOST: 127.0.0.1
       PGPORT: 5432
       PGUSER: postgres
@@ -140,14 +168,34 @@ jobs:
       - name: Зависимости системы
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libpq-dev postgresql-client
+          sudo apt-get install -y build-essential g++-13 cmake libpq-dev postgresql-client
           python -m pip install --upgrade pip
           pip install 'conan==1.66.0'
+      - name: Профиль Conan (gcc 13)
+        run: |
+          mkdir -p "$CONAN_USER_HOME/.conan/profiles"
+          cat > "$CONAN_USER_HOME/.conan/profiles/default" <<'EOF'
+          [settings]
+          os=Linux
+          os_build=Linux
+          arch=x86_64
+          arch_build=x86_64
+          compiler=gcc
+          compiler.version=13
+          compiler.libcxx=libstdc++11
+          build_type=Release
+          [options]
+          [build_requires]
+          [env]
+          CC=/usr/bin/gcc-13
+          CXX=/usr/bin/g++-13
+          EOF
+          conan profile show default
       - name: Кэш Conan
         uses: actions/cache@v4
         with:
           path: .conan
-          key: conan-e2e-${{ runner.os }}-${{ hashFiles('backend/conanfile.txt', 'backend/conanfile.py') }}
+          key: conan-e2e-${{ runner.os }}-gcc13-${{ hashFiles('backend/conanfile.txt', 'backend/conanfile.py') }}
       - name: Сборка бэкенда
         working-directory: backend
         run: |

@@ -21,6 +21,37 @@ Conan v1 живёт в отдельном venv (`~/python_venv`), потому �
 с несовместимым кэшем `~/.conan2` (ADR-13). Все скрипты ходят через `scripts/conan`, он проверяет
 мажорную версию и падает с понятным сообщением, если это v2.
 
+## CI (GitHub Actions)
+
+Job'ы `backend` и `e2e` работают на `ubuntu-24.04` с явно выбранным gcc 13: Conan 1.66 знает
+`settings.compiler.version` только до 14.1, а `ubuntu-latest` приносит gcc 15 — автоматический
+`detect` писал невалидную версию и `conan install` падал с
+`Invalid setting '15' is not a valid 'settings.compiler.version' value` (ADR-83).
+Поэтому профиль создаётся вручную:
+
+```bash
+mkdir -p "$CONAN_USER_HOME/.conan/profiles"
+cat > "$CONAN_USER_HOME/.conan/profiles/default" <<'EOF'
+[settings]
+os=Linux
+os_build=Linux
+arch=x86_64
+arch_build=x86_64
+compiler=gcc
+compiler.version=13
+compiler.libcxx=libstdc++11
+build_type=Release
+[options]
+[build_requires]
+[env]
+CC=/usr/bin/gcc-13
+CXX=/usr/bin/g++-13
+EOF
+```
+
+Кэш Conan в CI включает `gcc13` в ключ: пакеты, собранные другим компилятором, там не нужны.
+При обновлении компилятора правьте и workflow, и этот профиль.
+
 ## Полная сборка одной командой
 
 ```bash
