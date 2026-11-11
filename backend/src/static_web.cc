@@ -55,7 +55,11 @@ bool startsWith(const std::string &value, const std::string &prefix) {
 }
 
 bool insideRoot(const std::string &root, const std::string &candidate) {
+#ifdef _WIN32
+    const std::string normalizedRoot = root.back() == '\\' ? root : root + "\\";
+#else
     const std::string normalizedRoot = root.back() == '/' ? root : root + "/";
+#endif
     return startsWith(candidate, normalizedRoot) || candidate == root;
 }
 
