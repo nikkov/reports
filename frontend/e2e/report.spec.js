@@ -1599,11 +1599,15 @@ test('без emptyOption пустого пункта нет, а default выби
   const cc = page.locator('.params select').first()
   await expect(cc.locator('option').first()).toHaveText('Все центры')
   await expect(cc).toHaveValue('')
+  // в текстовом блоке печатается подпись пустого пункта, а не пустая строка/value (ADR-86)
+  await expect(page.locator('section.block .text').first()).toContainText('Все центры. Период')
   const rowsAll = Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])
   expect(rowsAll).toBeGreaterThan(0)
 
   const values = await cc.locator('option').evaluateAll((els) => els.map((e) => e.value))
   await cc.selectOption(values[1])
+  // выбрали центр затрат — в тексте его label, а не идентификатор
+  await expect(page.locator('section.block .text').first()).toContainText(`${values[1]}. Период`)
   await expect.poll(async () => Number((await page.locator('.meta').innerText()).match(/строк:\s*(\d+)/)[1])).toBeLessThan(rowsAll)
 })
 

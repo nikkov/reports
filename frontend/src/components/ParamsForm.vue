@@ -112,6 +112,14 @@ function emptyOption(p) {
   return p.emptyOption && typeof p.emptyOption === 'object' ? p.emptyOption : null
 }
 
+// Список для подписей: пустой пункт входит в него, хотя в <select> рисуется отдельно.
+// Без этого {{param}} печатал пустоту вместо «Все центры» (ADR-84/ADR-86).
+function labelOptions(p) {
+  const blank = emptyOption(p)
+  const list = optionsFor(p)
+  return blank ? [blank, ...list] : list
+}
+
 // выбранность задаём на каждом option: для <select multiple> это надёжнее value-биндинга,
 // который применяется до появления опций после загрузки справочника
 function isSelected(p, value) {
@@ -215,12 +223,17 @@ watch(
   () => {
     const labels = {}
     for (const p of props.params) {
-      const list = optionsFor(p)
+      const list = labelOptions(p)
       const raw = String(props.modelValue[p.name] ?? '')
-      const picked = raw
-        .split(',')
-        .filter(Boolean)
-        .map((v) => list.find((o) => String(o.value) === v)?.label ?? v)
+      const blank = emptyOption(p)
+      // пустой пункт — это значение "" с собственной подписью («Все центры»)
+      const picked =
+        raw === '' && blank
+          ? [blank.label]
+          : raw
+              .split(',')
+              .filter(Boolean)
+              .map((v) => list.find((o) => String(o.value) === v)?.label ?? v)
       labels[p.name] = picked.join(', ')
     }
     emit('labels', labels)
