@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.20)
 # Версия приложения — из файла VERSION в корне репозитория (единая точка).
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" REP_VERSION)
 string(STRIP "${REP_VERSION}" REP_VERSION)
+# VERSION участвует в компиляции (REP_VERSION), поэтому изменение файла должно
+# само запускать configure: иначе `cmake --build` оставлял в бинарнике старую версию.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
 
 project(rep VERSION ${REP_VERSION} LANGUAGES CXX)
 
