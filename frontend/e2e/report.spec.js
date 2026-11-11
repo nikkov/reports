@@ -2239,3 +2239,38 @@ test('высота блоков: процент от окна пересчиты
   await expect.poll(async () => (await bigTable.boundingBox()).height).toBeLessThan(520)
   expect((await chart.boundingBox()).height).toBe(320)
 })
+
+test('пример с размерами шрифта: зоны и колонки', async ({ page }) => {
+  await page.goto('/report.html?report=font-sizes')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const sizes = await page.evaluate(() => {
+    const f = (el) => (el ? `${getComputedStyle(el).fontSize}/${getComputedStyle(el).fontWeight}` : 'нет')
+    const tr = document.querySelector('.rt-table tbody tr.detail')
+    return {
+      header: f(document.querySelector('.rt-table th')),
+      region: f(tr?.children[0]),
+      product: f(tr?.children[2]),
+      amount: f(tr?.children[3]),
+      profit: f(tr?.children[4])
+    }
+  })
+  expect(sizes.header).toBe('14px/700')
+  expect(sizes.region).toBe('12px/400')
+  expect(sizes.product).toBe('11px/400')
+  expect(sizes.amount).toBe('16px/700')
+  expect(sizes.profit).toBe('10px/400')
+
+  // подытог и ИТОГО — внизу виртуализированной таблицы: сначала прокрутить
+  await page.evaluate(() => {
+    const rt = document.querySelector('.rt')
+    rt.scrollTop = rt.scrollHeight
+  })
+  const zone = (sel) =>
+    page.evaluate((s) => {
+      const td = document.querySelector(s)
+      return td ? `${getComputedStyle(td).fontSize}/${getComputedStyle(td).fontWeight}` : 'нет'
+    }, sel)
+  await expect.poll(() => zone('.rt-table tr.grandtotal td')).toBe('18px/800')
+  expect(await zone('.rt-table tr.subtotal td')).toBe('13px/600')
+})

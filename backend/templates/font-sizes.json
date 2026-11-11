@@ -1,0 +1,212 @@
+{
+  "version": 2,
+  "id": "font-sizes",
+  "title": "Размеры шрифта: зоны и колонки",
+  "description": "Разный размер шрифта по зонам таблицы и в отдельных колонках",
+  "folder": "Примеры",
+  "tags": [
+    "вёрстка",
+    "типографика"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "Период по",
+      "required": true,
+      "default": "2026-03-10",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, amount, profit FROM reports_examples.sales WHERE order_date BETWEEN :from::date AND :to::date ORDER BY region, amount DESC LIMIT 80"
+    }
+  },
+  "styles": {
+    "preset": "default",
+    "font": {
+      "family": "Inter",
+      "size": 12,
+      "weight": 400,
+      "lineHeight": 1.35
+    },
+    "colors": {
+      "text": "#1d2430",
+      "background": "#ffffff",
+      "border": "#c7d2e0"
+    },
+    "layout": {
+      "rowHeight": 34,
+      "headerHeight": 44,
+      "subtotalHeight": 32,
+      "grandtotalHeight": 46,
+      "cellPadding": "6px 12px",
+      "borders": "grid",
+      "zebra": true,
+      "stripeColor": "#f6f8fb",
+      "numericAlign": "right",
+      "tableLayout": "fixed"
+    },
+    "header": {
+      "font": {
+        "size": 14,
+        "weight": 700
+      },
+      "colors": {
+        "text": "#0f2440",
+        "background": "#e9eff8"
+      },
+      "align": "left",
+      "verticalAlign": "middle"
+    },
+    "body": {
+      "font": {
+        "size": 12,
+        "weight": 400
+      },
+      "colors": {
+        "text": "#1d2430",
+        "background": "#ffffff"
+      },
+      "verticalAlign": "middle"
+    },
+    "subtotal": {
+      "font": {
+        "size": 13,
+        "weight": 600
+      },
+      "colors": {
+        "text": "#10314f",
+        "background": "#eef3fa"
+      },
+      "verticalAlign": "middle"
+    },
+    "grandtotal": {
+      "font": {
+        "size": 18,
+        "weight": 800
+      },
+      "colors": {
+        "text": "#08203a",
+        "background": "#dbe6f4"
+      },
+      "verticalAlign": "middle"
+    },
+    "columns": {
+      "region": {
+        "width": 150
+      },
+      "category": {
+        "width": 160
+      },
+      "product": {
+        "width": 170,
+        "font": {
+          "size": 11
+        }
+      },
+      "amount": {
+        "width": 170,
+        "align": "right",
+        "headerAlign": "right",
+        "format": {
+          "style": "number",
+          "decimals": 0,
+          "group": " "
+        },
+        "font": {
+          "size": 16,
+          "weight": 700
+        }
+      },
+      "profit": {
+        "width": 140,
+        "align": "right",
+        "headerAlign": "right",
+        "format": {
+          "style": "number",
+          "decimals": 0,
+          "group": " "
+        },
+        "font": {
+          "size": 10
+        }
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Шапка 14 px / 700, тело 12 px, подытоги групп 13 px / 600, строка ИТОГО 18 px / 800. В колонках: «Товар» 11 px, «Сумма» 16 px / 700, «Прибыль» 10 px. Прокрутите таблицу вниз — строка ИТОГО заметно крупнее остальных."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "collapsible": true,
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "product",
+          "title": "Товар"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "aggregate": "sum"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "aggregate": "sum"
+        },
+        {
+          "title": "Рентаб.",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent"
+        }
+      ]
+    }
+  ]
+}
