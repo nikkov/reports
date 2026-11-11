@@ -1,0 +1,140 @@
+{
+  "version": 2,
+  "id": "ops-events",
+  "title": "Журнал сервиса: выбор даты и времени",
+  "description": "Параметры даты и времени: фильтр событий с точностью до минуты",
+  "folder": "Примеры",
+  "tags": [
+    "параметры",
+    "дата",
+    "время"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "service",
+      "type": "select",
+      "label": "Сервис",
+      "default": "",
+      "emptyOption": {
+        "value": "",
+        "label": "Все сервисы"
+      },
+      "source": {
+        "kind": "lookup",
+        "dataset": "service_lookup"
+      }
+    },
+    {
+      "name": "dt_from",
+      "type": "datetime",
+      "label": "События с",
+      "required": true,
+      "default": "2026-03-01T00:00",
+      "source": {
+        "kind": "datetime"
+      }
+    },
+    {
+      "name": "dt_to",
+      "type": "datetime",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-01T23:59",
+      "source": {
+        "kind": "datetime"
+      }
+    }
+  ],
+  "datasets": {
+    "service_lookup": {
+      "connection": "main",
+      "sql": "SELECT DISTINCT o.service AS value, o.service AS label FROM reports_examples.ops o WHERE o.service IS NOT NULL ORDER BY 1"
+    },
+    "events": {
+      "connection": "main",
+      "params": {
+        "from": "$dt_from",
+        "to": "$dt_to",
+        "service": "$service"
+      },
+      "sql": "SELECT to_char(o.logged_at, 'DD.MM.YYYY HH24:MI') AS ts, o.service, o.requests, o.failures, o.avg_ms FROM reports_examples.ops o WHERE o.logged_at BETWEEN :from::timestamp AND :to::timestamp AND (:service = '' OR o.service = :service) ORDER BY o.logged_at"
+    }
+  },
+  "styles": {
+    "preset": "default",
+    "font": {
+      "family": "Inter",
+      "size": 13,
+      "weight": 400,
+      "lineHeight": 1.35
+    },
+    "layout": {
+      "rowHeight": 28,
+      "headerHeight": 32,
+      "cellPadding": "4px 10px",
+      "borders": "grid",
+      "zebra": true
+    },
+    "header": {
+      "font": {
+        "weight": 700
+      },
+      "colors": {
+        "background": "#eef3fa",
+        "text": "#12314f"
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "События с {{dt_from}} по {{dt_to}}. Время — в минутах; в таблице оно показано как ДД.ММ.ГГГГ ЧЧ:ММ. Выберите другой интервал — поля «События с» и «по» принимают дату и время."
+    },
+    {
+      "type": "table",
+      "dataKey": "events",
+      "columns": [
+        {
+          "field": "ts",
+          "title": "Время"
+        },
+        {
+          "field": "service",
+          "title": "Сервис"
+        },
+        {
+          "field": "requests",
+          "title": "Запросов",
+          "format": "number",
+          "aggregate": "sum"
+        },
+        {
+          "field": "failures",
+          "title": "Ошибок",
+          "format": "number",
+          "aggregate": "sum"
+        },
+        {
+          "field": "avg_ms",
+          "title": "Среднее, мс",
+          "format": "number",
+          "aggregate": "avg"
+        }
+      ]
+    }
+  ]
+}

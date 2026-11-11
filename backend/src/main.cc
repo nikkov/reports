@@ -300,13 +300,7 @@ std::string columnType(const std::string &name,
     for (const auto &row : res) {
         const orm::Field f = row[name];
         if (f.isNull()) continue;
-        const std::string v = f.as<std::string>();
-        if (v.size() >= 10 && v[4] == '-' && v[7] == '-') return "date";
-        if (v.find_first_of(".eE") != std::string::npos) return "float";
-        const bool digits = !v.empty() && std::all_of(v.begin(), v.end(), [](char c) {
-                                return std::isdigit(static_cast<unsigned char>(c)) || c == '-';
-                            });
-        return digits ? "int" : "text";
+        return rep::inferColumnType(f.as<std::string>());
     }
     return "text";
 }
@@ -3595,66 +3589,6 @@ int main() {
                 resp->addHeader("Cache-Control", "no-store");
                 cb(resp);
                 return;
-            }
-
-            // ':name' → $N, значения из bag; '::' остаётся кастом типа
-            std::string compiled;
-            std::vector<std::string> values;
-            for (size_t i = 0; i < datasetSql.size();) {
-                const char c = datasetSql[i];
-                if (c == ':') {
-                    if (i + 1 < datasetSql.size() && datasetSql[i + 1] == ':') {
-                        compiled += "::";
-                        i += 2;
-                        continue;
-                    }
-                    size_t j = i + 1;
-                    while (j < datasetSql.size() &&
-                           (std::isalnum(static_cast<unsigned char>(datasetSql[j])) || datasetSql[j] == '_')) ++j;
-                    const std::string name = datasetSql.substr(i + 1, j - i - 1);
-                    if (name.empty()) {
-                        compiled.push_back(c);
-                        ++i;
-                        continue;
-                    }
-                    const auto *v = bag.find(name);
-                    if (v == nullptr) {
-                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
-                                  "не передан параметр '" + name + "'");
-                        return;
-                    }
-                    // тип параметра берём из каста в SQL: без реестра это единственный источник.
-                    const std::string tail = datasetSql.substr(std::min(j, datasetSql.size()));
-                    const bool asDate = tail.rfind("::date", 0) == 0;
-                    const bool asInt = tail.rfind("::int", 0) == 0;
-                    if (asDate && !v->empty()) {
-                        const std::string &s = *v;
-                        const bool ok = (s.size() >= 10 && std::isdigit(static_cast<unsigned char>(s[0])) && s[4] == '-' && s[7] == '-');
-                        if (!ok) {
-                            sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
-                                      "параметр '" + name + "' должен быть датой в формате ГГГГ-ММ-ДД");
-                            return;
-                        }
-                    }
-                    if (asInt && !v->empty()) {
-                        const std::string &s = *v;
-                        const bool ok = std::all_of(s.begin(), s.end(), [](char c) {
-                            return std::isdigit(static_cast<unsigned char>(c)) || c == '-';
-                        });
-                        if (!ok) {
-                            sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
-                                      "параметр '" + name + "' должен быть целым числом");
-                            return;
-                        }
-                    }
-                    // пустая строка — законное значение («все», фильтр не задан)
-                    values.push_back(*v);
-                    compiled += "$" + std::to_string(values.size());
-                    i = j;
-                    continue;
-                }
-                compiled.push_back(c);
-                ++i;
             }
 
             static const std::map<std::string, std::string> noDeclared;

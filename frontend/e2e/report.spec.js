@@ -2274,3 +2274,21 @@ test('пример с размерами шрифта: зоны и колонк�
   await expect.poll(() => zone('.rt-table tr.grandtotal td')).toBe('18px/800')
   expect(await zone('.rt-table tr.subtotal td')).toBe('13px/600')
 })
+
+test('параметры даты и времени: интервал фильтрует события по минутам', async ({ page }) => {
+  await page.goto('/report.html?report=ops-events')
+  const inputs = page.locator('.params input[type=datetime-local]')
+  await expect(inputs).toHaveCount(2)
+  await expect(page.locator('.meta')).toContainText('строк: 6')
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toContainText('01.03.2026')
+  // ИТОГО считается по тем же отфильтрованным строкам
+  await expect(page.locator('.rt-table tr.grandtotal').first()).toContainText('3 288')
+
+  // другой интервал — другие события (время внутри дня, а не только дата)
+  await inputs.nth(0).fill('2026-03-31T00:00')
+  await inputs.nth(0).dispatchEvent('change')
+  await inputs.nth(1).fill('2026-03-31T23:59')
+  await inputs.nth(1).dispatchEvent('change')
+  await expect.poll(() => page.locator('.rt-table tbody tr.detail').first().innerText()).toContain('31.03.2026')
+  await expect.poll(() => page.url()).toContain('dt_from=2026-03-31T00')
+})

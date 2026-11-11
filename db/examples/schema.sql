@@ -53,3 +53,10 @@ CREATE TABLE IF NOT EXISTS reports_examples.ops (
 );
 
 CREATE INDEX IF NOT EXISTS ops_day_idx ON reports_examples.ops (day);
+
+-- Время события (2026-02-11): параметры вида datetime фильтруют по нему.
+-- ADD COLUMN IF NOT EXISTS нужен для уже развёрнутых баз: CREATE TABLE её не добавит.
+ALTER TABLE reports_examples.ops ADD COLUMN IF NOT EXISTS logged_at timestamp;
+UPDATE reports_examples.ops SET logged_at = day::timestamp WHERE logged_at IS NULL;
+ALTER TABLE reports_examples.ops ALTER COLUMN logged_at SET NOT NULL;
+CREATE INDEX IF NOT EXISTS ops_logged_at_idx ON reports_examples.ops (logged_at);

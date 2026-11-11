@@ -98,7 +98,8 @@ const errors = reactive({})
 const cache = new Map() // queryId + параметры → список
 
 const kind = (p) =>
-  p.source?.kind || (p.type === 'date' ? 'date' : p.type === 'select' ? 'static' : 'text')
+  p.source?.kind ||
+  (p.type === 'date' ? 'date' : p.type === 'datetime' ? 'datetime' : p.type === 'select' ? 'static' : 'text')
 
 function optionsFor(p) {
   const list = p.source?.kind === 'static' ? p.source.options || p.options || [] : fetched[p.name] || []

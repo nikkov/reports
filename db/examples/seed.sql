@@ -39,14 +39,17 @@ SELECT i,
 FROM generate_series(1, 576) AS g(i);
 
 -- reports_examples.ops: 90 дней x 6 сервисов = 540 строк
-INSERT INTO reports_examples.ops (id, day, service, team, requests, failures, avg_ms)
+INSERT INTO reports_examples.ops (id, day, service, team, requests, failures, avg_ms, logged_at)
 SELECT i,
        DATE '2026-01-01' + ((i * 11) % 90),
        (ARRAY['api','web','etl','auth','billing','search'])[1 + (i * 5) % 6],
        CASE WHEN i % 53 = 0 THEN NULL ELSE 'Team-' || (1 + (i * 3) % 4) END,
        100 + (i * 37) % 900,
        (i * 7 + (i % 97)) % 12,
-       50 + (i * 13) % 400
+       50 + (i * 13) % 400,
+       -- время внутри дня: 0..1439 минут, чтобы фильтр «с/по дате-времени» был осмысленным
+       DATE '2026-01-01' + ((i * 11) % 90)
+           + (((i * 37) % 1440) * INTERVAL '1 minute')
 FROM generate_series(1, 540) AS g(i);
 
 ANALYZE reports_examples.sales;
