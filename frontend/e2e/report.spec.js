@@ -2343,3 +2343,24 @@ test('автозагрузка выключена: данные только п�
   await expect(page.locator('.no-data')).toHaveCount(0)
   expect(dataCalls.length).toBeGreaterThan(0)
 })
+
+test('collapsible: false — группы всегда раскрыты, кнопок и шевронов нет', async ({ page }) => {
+  await page.goto('/report.html?report=fixed-groups&from=2026-03-01&to=2026-03-10')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  // ни кнопок сворачивания, ни шевронов, ни пустой полосы над таблицей
+  await expect(page.getByRole('button', { name: /Свернуть всё|Развернуть всё/ })).toHaveCount(0)
+  await expect(page.locator('.rt-table .chev')).toHaveCount(0)
+  await expect(page.locator('.tv-bar')).toHaveCount(0)
+
+  // ячейки групп объединены, как и при обычной группировке
+  expect(await page.locator('.rt-table tbody td[rowspan]').count()).toBeGreaterThan(0)
+
+  // щелчок по подписи группы ничего не сворачивает
+  const meta = page.locator('.meta')
+  const before = await meta.innerText()
+  await page.locator('.rt-table tbody tr.detail td').first().click()
+  await page.waitForTimeout(400)
+  expect(await meta.innerText()).toBe(before)
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
+})

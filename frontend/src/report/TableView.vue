@@ -2,12 +2,15 @@
   <!-- Заголовок блока (ADR-55): без него таблица в шаблоне с двумя наборами
        выглядит безымянной, хотя название задано и видно у диаграмм. -->
   <h2 v-if="block.title" class="tv-title">{{ block.title }}</h2>
-  <div v-if="isGrouped" class="tv-bar">
-    <button type="button" @click="collapseAll">Свернуть всё</button>
-    <button type="button" :disabled="expandingAll" @click="expandAll">
-      {{ expandingAll ? 'разворачиваю…' : 'Развернуть всё' }}
-    </button>
-    <span class="tv-info">{{ collapsed.size }} свёрнуто</span>
+  <div v-if="isGrouped && (collapsible || pendingMore.length || loadedNote)" class="tv-bar">
+    <!-- collapsible: false — группы всегда раскрыты, кнопки и счётчик не нужны (ADR-90) -->
+    <template v-if="collapsible">
+      <button type="button" @click="collapseAll">Свернуть всё</button>
+      <button type="button" :disabled="expandingAll" @click="expandAll">
+        {{ expandingAll ? 'разворачиваю…' : 'Развернуть всё' }}
+      </button>
+      <span class="tv-info">{{ collapsed.size }} свёрнуто</span>
+    </template>
     <span v-if="loadedNote" class="tv-info">{{ loadedNote }}</span>
     <!-- детали приходят страницами: остаток добираем той же кнопкой (ADR-70) -->
     <button
@@ -38,6 +41,7 @@
     :group-count="view.groupCount"
     :height="height"
     :expanded="expandedIds"
+    :collapsible="collapsible"
     :cell-text="cellText"
     :rule-style="ruleStyleAt"
     :on-toggle="toggle"
@@ -54,6 +58,7 @@
     :group-count="view.groupCount"
     :height="height"
     :expanded="expandedIds"
+    :collapsible="collapsible"
     :cell-text="cellText"
     :rule-style="ruleStyleAt"
     :on-toggle="toggle"
@@ -292,6 +297,8 @@ function ruleStyleAt(rowIndex, columnKey, zone) {
 }
 
 const isGrouped = computed(() => leafCols.value.some((c) => c.group))
+// Сворачивание групп разрешено по умолчанию; collapsible: false фиксирует их раскрытыми (ADR-90).
+const collapsible = computed(() => props.block?.collapsible !== false)
 
 // Все идентификаторы групп считаются по исходным строкам — не зависит от текущей свёрнутости.
 const allGroupIds = computed(() => {
@@ -332,6 +339,7 @@ watch([() => props.rows, serverAggregated], resetGroupState)
 onMounted(resetGroupState)
 
 function collapseAll() {
+  if (!collapsible.value) return
   collapsed.value = new Set(allGroupIds.value)
 }
 
@@ -356,6 +364,7 @@ async function loadAllPages(id, budget) {
 }
 
 async function expandAll() {
+  if (!collapsible.value) return
   if (serverAggregated.value && props.loadGroup) {
     expandingAll.value = true
     const budget = { left: EXPAND_ALL_LIMIT }
@@ -405,6 +414,7 @@ async function loadDetails(id, more = false) {
 }
 
 async function toggle(path) {
+  if (!collapsible.value) return
   const id = path.join('\u0001')
   const wasCollapsed = collapsed.value.has(id)
   // раскрываем группу серверной агрегации — сначала подгружаем её строки

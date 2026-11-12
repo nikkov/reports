@@ -146,6 +146,8 @@ const props = defineProps({
   // печать: рендерим весь отчёт, без окна виртуализации (ADR-28)
   virtual: { type: Boolean, default: true },
   expanded: { type: Set, default: () => new Set() },
+  // collapsible: false — группы не сворачиваются: ни шеврона, ни клика (ADR-90)
+  collapsible: { type: Boolean, default: true },
   cellText: { type: Function, required: true }, // (row, colField) => string
   // (rowIndex, columnKey|null, zone) => CSS-объект правила или null (ADR-25)
   ruleStyle: { type: Function, default: null },
@@ -436,6 +438,7 @@ function isStripe(index, row) {
 }
 
 function handleToggle(path) {
+  if (!props.collapsible) return
   if (!path) return
   if (props.onToggle) props.onToggle(path)
   else emit('toggle', path)
@@ -601,7 +604,7 @@ function cellsAt(index) {
         plain: row.kind === 'detail',
         inherit: row.kind === 'subtotal' && col < row.level,
         // строка итога: клик по её подписи разворачивает группу обратно
-        toggle: row.kind === 'subtotal' && col === row.level ? row.groupPath : null,
+        toggle: props.collapsible && row.kind === 'subtotal' && col === row.level ? row.groupPath : null,
         // переход доступен и с подытога, и с ячейки группы в детальной строке
         drillable:
           Boolean(props.drill) &&
@@ -656,7 +659,7 @@ function cellsAt(index) {
       text: props.cellText(headRow, props.columns[col].field),
       // у детальной строки сворачиваем группу этого уровня, у строки итога — саму группу
       toggle:
-        headRow.kind === 'detail' || headRow.kind === 'subtotal'
+        props.collapsible && (headRow.kind === 'detail' || headRow.kind === 'subtotal')
           ? (headRow.groupPath || []).slice(0, col + 1)
           : null,
       drillable: Boolean(props.drill) && row.kind === 'detail',

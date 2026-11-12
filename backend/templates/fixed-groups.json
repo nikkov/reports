@@ -1,0 +1,168 @@
+{
+  "version": 2,
+  "id": "fixed-groups",
+  "title": "Группы без сворачивания",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, amount, profit, order_date FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id",
+      "connection": "main"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Таблица с группировкой по региону, но collapsible: false — группы раскрыты всегда. Шевронов и кнопок «Свернуть всё»/«Развернуть всё» нет; щелчок по подписи группы ничего не меняет. Период: {{from}} — {{to}}."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "collapsible": false,
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "title": "Финансы",
+          "children": [
+            {
+              "field": "amount",
+              "title": "Сумма",
+              "type": "int",
+              "aggregate": "sum",
+              "format": "number"
+            },
+            {
+              "field": "profit",
+              "title": "Прибыль",
+              "type": "int",
+              "aggregate": "sum",
+              "format": "number"
+            }
+          ]
+        },
+        {
+          "title": "Рентабельность",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent"
+        }
+      ],
+      "drill": {
+        "report": "sales-drill",
+        "label": "Детали по группе",
+        "params": {
+          "region": "group.region",
+          "category": "group.category",
+          "from": "param.from",
+          "to": "param.to"
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "line",
+      "xField": "region",
+      "yField": "amount",
+      "aggregate": "sum"
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "pie",
+      "title": "Доля категорий в сумме продаж",
+      "xField": "category",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "half",
+      "drill": {
+        "report": "sales-drill",
+        "label": "Детали по категории",
+        "params": {
+          "category": "x",
+          "from": "param.from",
+          "to": "param.to"
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "bar",
+      "title": "Сумма по категориям в разрезе регионов",
+      "xField": "category",
+      "seriesField": "region",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "full",
+      "drill": {
+        "report": "sales-drill",
+        "label": "Детали по региону и категории",
+        "params": {
+          "category": "x",
+          "region": "series",
+          "from": "param.from",
+          "to": "param.to"
+        }
+      }
+    }
+  ],
+  "folder": "Примеры",
+  "tags": [
+    "группировка",
+    "collapsible"
+  ],
+  "description": "collapsible: false — группы всегда раскрыты, кнопок «Свернуть всё»/«Развернуть всё» нет"
+}
