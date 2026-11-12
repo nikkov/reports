@@ -71,6 +71,7 @@
         v-for="(chunk, ci) in printChunks"
         :key="ci"
         class="rt-table"
+        :class="{ 'no-break': printChunks.length > 1 }"
         :style="{ tableLayout: layout.tableLayout }"
       >
         <colgroup>
@@ -549,6 +550,10 @@ watch(
 
 const printChunks = computed(() => {
   const total = props.rows.length
+  // Плоская таблица (без группировок) печатается одним куском: браузер сам разрывает её
+  // по страницам и повторяет шапку только сверху. Резать её на чанки нельзя — при разрыве
+  // куска шапка оказывалась в середине страницы (ADR-99).
+  if (!props.groupCount) return total > 0 ? [{ start: 0, end: total }] : []
   const per = rowsPerChunk.value
   // Первая порция короче ровно на занятое сверху место. Если таблица стоит ниже первой
   // страницы (второй блок отчёта), считаем, что она начнётся с новой страницы.
@@ -859,6 +864,11 @@ function cellsAt(index) {
     display: table-header-group;
   }
   .rt-print .rt-table tr {
+    break-inside: avoid;
+  }
+  /* Куски сгруппированной таблицы не разрываются: шапка куска иначе встанет в середине
+     страницы. Расчёт строк (ADR-98) гарантирует, что кусок влезает в печатную полосу. */
+  .rt-print .rt-table.no-break {
     break-inside: avoid;
   }
 }

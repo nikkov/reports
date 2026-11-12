@@ -2655,3 +2655,38 @@ test('печать: таблица начинается на первой стр
   // перенёс бы таблицу на следующую страницу и первая осталась бы пустой
   expect(chunks[0].bottom).toBeLessThanOrEqual(660)
 })
+
+test('печать: шапка таблицы только вверху страницы, а не в середине (ADR-99)', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.print = () => {}
+  })
+
+  // плоская таблица печатается одним куском: браузер сам рвёт её по страницам,
+  // повторяя thead только сверху
+  await page.goto('/report.html?report=sales-detail')
+  await expect(page.locator('.meta')).toContainText('строк')
+  await page.locator('button.tool', { hasText: 'Печать' }).first().click()
+  await expect(page.locator('.rt-print')).toHaveCount(1)
+  const flat = await page.evaluate(() => {
+    const pr = document.querySelector('.rt-print')
+    return { tables: pr.querySelectorAll('table.rt-table').length, heads: pr.querySelectorAll('thead').length }
+  })
+  expect(flat.tables).toBe(1)
+  expect(flat.heads).toBe(1)
+
+  // сгруппированная режется на куски, но кусок нельзя разорвать: иначе его шапка
+  // окажется в середине страницы
+  await page.goto('/report.html?report=finance-print')
+  await expect(page.locator('.meta')).toContainText('строк')
+  await page.locator('button.tool', { hasText: 'Печать' }).first().click()
+  await expect(page.locator('.rt-print')).toHaveCount(1)
+  const grouped = await page.evaluate(() => {
+    const pr = document.querySelector('.rt-print')
+    return {
+      tables: pr.querySelectorAll('table.rt-table').length,
+      noBreak: pr.querySelectorAll('table.no-break').length
+    }
+  })
+  expect(grouped.tables).toBeGreaterThan(1)
+  expect(grouped.noBreak).toBe(grouped.tables)
+})
