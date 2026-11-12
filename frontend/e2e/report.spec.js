@@ -2560,3 +2560,45 @@ test('Excel: плоская таблица выгружается целиком
   const { sheet: xml2 } = await sheetOf(await dates.path())
   expect((xml2.match(/<row /g) || []).length).toBe(7) // шапка + 6 строк
 })
+
+test('раскладка блоков: span в 12-колоночной сетке, одна колонка на узком экране и в печати (ADR-96)', async ({ page }) => {
+  const boxes = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.block')].map((el) => {
+        const r = el.getBoundingClientRect()
+        return { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height) }
+      })
+    )
+
+  await page.setViewportSize({ width: 1400, height: 1000 })
+  await page.goto('/report.html?report=layout-horizontal')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const wide = await boxes()
+  expect(wide).toHaveLength(5)
+  // таблица (span 7) и диаграмма (span 5) стоят в одном ряду
+  expect(wide[1].top).toBe(wide[2].top)
+  expect(wide[1].left).toBeLessThan(wide[2].left)
+  expect(wide[1].width).toBeGreaterThan(wide[2].width)
+  // второй ряд — две половины одинаковой ширины
+  expect(wide[3].top).toBe(wide[4].top)
+  expect(Math.abs(wide[3].width - wide[4].width)).toBeLessThan(4)
+  expect(wide[3].width).toBeLessThan(wide[1].width)
+  // высота в ряду не выравнивается: у каждого блока своя
+  expect(wide[1].height).not.toBe(wide[2].height)
+
+  // узкий экран: одна колонка
+  await page.setViewportSize({ width: 860, height: 1000 })
+  await page.waitForTimeout(500)
+  const narrow = await boxes()
+  expect(new Set(narrow.map((b) => b.left)).size).toBe(1)
+  for (let i = 1; i < narrow.length; i++) expect(narrow[i].top).toBeGreaterThan(narrow[i - 1].top)
+
+  // печать: тоже одна колонка
+  await page.setViewportSize({ width: 1400, height: 1000 })
+  await page.emulateMedia({ media: 'print' })
+  await page.waitForTimeout(400)
+  const printed = await boxes()
+  expect(new Set(printed.map((b) => b.left)).size).toBe(1)
+  for (let i = 1; i < printed.length; i++) expect(printed[i].top).toBeGreaterThanOrEqual(printed[i - 1].top)
+})

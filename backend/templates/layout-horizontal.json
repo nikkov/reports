@@ -1,0 +1,160 @@
+{
+  "version": 2,
+  "id": "layout-horizontal",
+  "title": "Раскладка: блоки в ряд",
+  "description": "12-колоночная сетка: таблица и диаграмма рядом, ниже две таблицы по половине",
+  "folder": "Примеры",
+  "tags": [
+    "раскладка",
+    "сетка",
+    "span"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "year(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "*",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, s.category, sum(s.amount) AS amount, count(*) AS deals FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date BETWEEN :from::date AND :to::date GROUP BY r.name, s.category ORDER BY amount DESC"
+    },
+    "ops": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT service, sum(requests) AS requests, sum(failures) AS failures FROM reports_examples.ops WHERE day BETWEEN :from::date AND :to::date GROUP BY service ORDER BY requests DESC"
+    }
+  },
+  "styles": {
+    "preset": "default"
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Блоки лежат в 12-колоночной сетке: span задаёт ширину в колонках, ряды собираются сами. Здесь таблица (span 7) и диаграмма (span 5) стоят в одном ряду, ниже — таблица сервисов и пояснение по половине (span 6). На экране уже 900 px и в печати всё выстраивается в одну колонку."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 7,
+      "title": "Продажи по регионам и категориям",
+      "height": 320,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "aggregate": "sum",
+          "format": {
+            "style": "number",
+            "decimals": 0,
+            "group": " "
+          },
+          "align": "right"
+        },
+        {
+          "field": "deals",
+          "title": "Заказов",
+          "aggregate": "sum",
+          "format": {
+            "style": "integer"
+          },
+          "align": "right"
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "span": 5,
+      "chartType": "bar",
+      "title": "Сумма по категориям",
+      "xField": "category",
+      "yField": "amount",
+      "aggregate": "sum",
+      "height": 320
+    },
+    {
+      "type": "table",
+      "dataKey": "ops",
+      "span": 6,
+      "title": "Сервисы",
+      "height": 260,
+      "columns": [
+        {
+          "field": "service",
+          "title": "Сервис"
+        },
+        {
+          "field": "requests",
+          "title": "Запросов",
+          "aggregate": "sum",
+          "format": {
+            "style": "integer"
+          },
+          "align": "right"
+        },
+        {
+          "field": "failures",
+          "title": "Ошибок",
+          "aggregate": "sum",
+          "format": {
+            "style": "integer"
+          },
+          "align": "right"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "span": 6,
+      "text": "Пояснение к раскладке (span 6): рядом с таблицей сервисов стоит текст. Высота блоков в ряду не выравнивается — каждый остаётся со своей (таблица 260 px, текст по содержимому), выравнивание по верхнему краю. Если экран уже 900 px, блоки встают друг под друга на всю ширину."
+    }
+  ]
+}

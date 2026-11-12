@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseBlockHeight, resolveBlockHeight } from './layout.js'
+import { parseBlockHeight, resolveBlockHeight, resolveBlockSpan } from './layout.js'
 
 describe('parseBlockHeight', () => {
   it('число — пиксели', () => {
@@ -45,5 +45,28 @@ describe('resolveBlockHeight', () => {
   it('процент без окна не даёт нулевой высоты', () => {
     expect(resolveBlockHeight('chart', '50%', 0)).toBe(160)
     expect(resolveBlockHeight('chart', '50%', NaN)).toBe(160)
+  })
+})
+
+describe('resolveBlockSpan (ADR-96)', () => {
+  it('span 1…12 берётся как есть', () => {
+    expect(resolveBlockSpan({ span: 7 })).toBe(7)
+    expect(resolveBlockSpan({ span: 1 })).toBe(1)
+    expect(resolveBlockSpan({ span: 12 })).toBe(12)
+  })
+
+  it('старый width: half — половина, full и отсутствие — вся строка', () => {
+    expect(resolveBlockSpan({ width: 'half' })).toBe(6)
+    expect(resolveBlockSpan({ width: 'full' })).toBe(12)
+    expect(resolveBlockSpan({})).toBe(12)
+    expect(resolveBlockSpan(null)).toBe(12)
+  })
+
+  it('span главнее width, некорректный span игнорируется', () => {
+    expect(resolveBlockSpan({ span: 4, width: 'half' })).toBe(4)
+    expect(resolveBlockSpan({ span: 13, width: 'half' })).toBe(6)
+    expect(resolveBlockSpan({ span: 0 })).toBe(12)
+    expect(resolveBlockSpan({ span: 3.5 })).toBe(12)
+    expect(resolveBlockSpan({ span: '5' })).toBe(5)
   })
 })

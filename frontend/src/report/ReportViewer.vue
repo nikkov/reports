@@ -49,11 +49,13 @@
     </p>
 
     <template v-if="template">
+      <!-- Блоки встают в 12-колоночную сетку: span задаёт ширину, ряды собираются сами (ADR-96) -->
+      <div class="blocks">
       <template v-for="(block, index) in template.blocks" :key="index">
       <section
         v-if="block.type === 'text' || loadedOnce"
         class="block"
-        :class="block.width === 'half' ? 'half' : 'full'"
+        :style="{ gridColumn: `span ${spanOf(block)}` }"
       >
         <p v-if="block.type === 'text'" class="text">{{ renderText(block.text) }}</p>
 
@@ -79,6 +81,7 @@
         />
       </section>
       </template>
+      </div>
     </template>
   </div>
 </template>
@@ -86,7 +89,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, API_BASE } from '../api/client.js'
-import { resolveBlockHeight } from '../engine/layout.js'
+import { resolveBlockHeight, resolveBlockSpan } from '../engine/layout.js'
 import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
 import ChartBlock from './ChartBlock.vue'
@@ -332,6 +335,8 @@ onBeforeUnmount(() => {
 
 // Первый табличный блок — источник экспорта и печати (в шаблонах он один).
 const tableBlock = computed(() => (template.value?.blocks || []).find((b) => b.type === 'table'))
+// ширина блока: span 1…12, старый width: 'half' — половина (ADR-96)
+const spanOf = (block) => resolveBlockSpan(block)
 const printMode = ref(false)
 
 // Высота блоков «в процентах» считается от окна (ADR-85): при изменении размера
@@ -563,11 +568,6 @@ function tableColumns(block) {
     padding: 0;
     max-width: none;
   }
-  .block.full,
-  .block.half {
-    width: 100% !important;
-    break-inside: auto;
-  }
   .rt {
     height: auto !important;
     overflow: visible !important;
@@ -623,11 +623,17 @@ body {
   border-radius: 8px;
   font-size: 13px;
 }
-.block {
-  margin-bottom: 16px;
+/* Сетка блоков: 12 колонок, ряды собираются автоматически.
+   minmax(0, 1fr) не даёт широкой таблице распирать свою колонку. */
+.blocks {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start; /* блоки в ряду каждый своей высоты, по верху */
 }
-.block.half {
-  max-width: 680px;
+.block {
+  margin-bottom: 0;
+  min-width: 0;
 }
 .text {
   font-size: 14px;
@@ -646,5 +652,24 @@ body {
 }
 .chart {
   height: 300px;
+}
+
+/* Порядок важен: эти правила идут после сетки, иначе grid перебивает их по каскаду */
+@media (max-width: 899px) {
+  .blocks {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .block {
+    grid-column: 1 / -1 !important;
+  }
+}
+@media print {
+  .blocks {
+    display: block;
+  }
+  .block {
+    width: auto !important;
+    margin-bottom: 16px;
+  }
 }
 </style>

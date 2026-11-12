@@ -1027,6 +1027,14 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 continue;
             }
 
+            // Ширина в 12-колоночной сетке (ADR-96): span 1…12, старый width — совместимость
+            if (block.isMember("span") && !block["span"].isNull()) {
+                const Json::Value &span = block["span"];
+                if (!span.isInt() || span.asInt() < 1 || span.asInt() > 12) {
+                    addError(r, base + ".span", "span — целое число от 1 до 12");
+                }
+            }
+
             if (type == "text") {
                 if (block.isMember("height") && !block["height"].isNull()) {
                     addError(r, base + ".height", "height допустим только у таблицы и диаграммы");

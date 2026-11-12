@@ -3496,6 +3496,62 @@
       "errors": [
         "params.0.default"
       ]
+    },
+    {
+      "name": "раскладка: span в диапазоне 1…12",
+      "template": {
+        "version": 2,
+        "id": "parity-span",
+        "title": "Сетка блоков",
+        "datasets": {
+          "a": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "a",
+            "span": 7,
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "раскладка: span больше 12",
+      "template": {
+        "version": 2,
+        "id": "parity-span",
+        "title": "Сетка блоков",
+        "datasets": {
+          "a": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "a",
+            "span": 13,
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.span"
+      ]
     }
   ]
 }

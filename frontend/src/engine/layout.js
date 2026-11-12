@@ -45,3 +45,10 @@ export function resolveBlockHeight(type, raw, viewportHeight) {
   const view = Number.isFinite(viewportHeight) && viewportHeight > 0 ? viewportHeight : 0
   return Math.max(min, Math.round((view * pct) / 100))
 }
+
+// Ширина блока в 12-колоночной сетке (ADR-96): span 1…12, старый width — half = 6, full = 12.
+export function resolveBlockSpan(block) {
+  const raw = Number(block?.span)
+  if (Number.isInteger(raw) && raw >= 1 && raw <= 12) return raw
+  return block?.width === 'half' ? 6 : 12
+}

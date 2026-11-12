@@ -445,7 +445,14 @@ export default {
           "enum": [
             "full",
             "half"
-          ]
+          ],
+          "description": "устаревшая пара ширин: full = 12, half = 6; новая раскладка — span (ADR-96)"
+        },
+        "span": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "ширина блока в 12-колоночной сетке: 12 — вся строка, 6 — половина, 4 — треть (ADR-96)"
         }
       }
     },
@@ -556,7 +563,14 @@ export default {
           "enum": [
             "full",
             "half"
-          ]
+          ],
+          "description": "устаревшая пара ширин: full = 12, half = 6; новая раскладка — span (ADR-96)"
+        },
+        "span": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "ширина блока в 12-колоночной сетке: 12 — вся строка, 6 — половина, 4 — треть (ADR-96)"
         },
         "columns": {
           "type": "array",
@@ -717,7 +731,14 @@ export default {
           "enum": [
             "full",
             "half"
-          ]
+          ],
+          "description": "устаревшая пара ширин: full = 12, half = 6; новая раскладка — span (ADR-96)"
+        },
+        "span": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "ширина блока в 12-колоночной сетке: 12 — вся строка, 6 — половина, 4 — треть (ADR-96)"
         }
       }
     },
