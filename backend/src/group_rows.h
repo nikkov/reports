@@ -18,6 +18,8 @@ struct GroupLayout {
     std::vector<int> subtotalLevels;         // уровни, где нужна строка «Итого <ключ>»
     std::vector<std::size_t> measureColumns; // что суммировать в итогах
     bool grandTotal = false;
+    // collapsible: false — группы всегда раскрыты и в книге: без outline-уровней (ADR-94)
+    bool collapsible = true;
     std::string grandLabel = "ИТОГО";
     std::string nullLabel = "(пусто)";
 };

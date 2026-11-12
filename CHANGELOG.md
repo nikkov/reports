@@ -1,5 +1,32 @@
 # История версий
 
+## v1.69.0 — 2026-11-12
+
+`collapsible: false` действует и на выгрузку в Excel (ADR-94).
+
+### Что было не так
+
+На экране `collapsible: false` запрещал сворачивание (ADR-90), но Excel-выгрузка строила
+outline-структуру всегда: и клиентский экспорт через ExcelJS, и серверный `export.xlsx` выставляли
+`outlineLevel`/`summaryBelow`. В книге появлялись кнопки «+/-» и группировка строк, которых шаблон
+не разрешал.
+
+### Что сделано
+- `GroupLayout::collapsible` берётся из `blocks[].collapsible` в `buildSheet`;
+- `rebuildMergesAndLevels` разделяет внутренний уровень строки (объединения, подытоги) и уровень
+  структуры книги: при `collapsible: false` в `rowLevels` нули — `outlineLevel` не пишется;
+- клиентский `report/export/xlsx.js` при `collapsible: false` не задаёт `outlineProperties` и
+  `outlineLevel`;
+- подытоги, ИТОГО и объединения групповых колонок сохраняются в обоих путях.
+
+### Проверки
+Фактические файлы: `fixed-groups` — 0 строк с `outlineLevel` (клиент и сервер), при этом «ИТОГО» и
+6 строк «Итого …», 32 объединения; `sales-summary` — 24 723 строки с уровнями, максимум 2.
+vitest: 4 новых теста (по умолчанию/`true`/`false`/сохранение подытогов). Catch2: 2 новых теста в
+`group_rows_test.cc` (уровни и объединения при `false`). e2e: скачивание книги для обоих отчётов и
+проверка `outlineLevel` в `sheet1.xml` через JSZip. Полный `REP_E2E=1 ./scripts/check.sh` —
+`ALL CHECKS PASSED`.
+
 ## v1.68.0 — 2026-11-12
 
 Доменные учётные записи в администрировании пользователей (ADR-93).

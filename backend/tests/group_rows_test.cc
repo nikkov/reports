@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -141,4 +142,39 @@ TEST_CASE("dropSummaryRows: CSV остаётся детальным") {
     REQUIRE(sheet.rows.size() == 2);
     REQUIRE(sheet.rowKind.empty());
     REQUIRE(sheet.merges.empty());
+}
+
+TEST_CASE("buildGroupedSheet: collapsible: false оставляет строки без outline-уровней (ADR-94)") {
+    auto sheet = sheetWithRows({
+        {"Восток", "Одежда", "10", "1"},
+        {"Восток", "Обувь", "15", "2"},
+        {"Юг", "Одежда", "30", "3"},
+    });
+    auto layout = twoLevels();
+    layout.collapsible = false;
+
+    rep::buildGroupedSheet(sheet, layout);
+
+    // подытоги и ИТОГО на месте
+    const auto kindsAfter = kinds(sheet);
+    REQUIRE(std::find(kindsAfter.begin(), kindsAfter.end(), "subtotal") != kindsAfter.end());
+    REQUIRE(kindsAfter.back() == "grand");
+    REQUIRE(sheet.merges.size() > 0);
+    // но структуры в книге нет: все строки нулевого уровня
+    REQUIRE(sheet.rowLevels.size() == sheet.rows.size());
+    for (int level : sheet.rowLevels) REQUIRE(level == 0);
+}
+
+TEST_CASE("buildGroupedSheet: collapsible по умолчанию даёт outline-уровни") {
+    auto sheet = sheetWithRows({
+        {"Восток", "Одежда", "10", "1"},
+        {"Восток", "Обувь", "15", "2"},
+    });
+    auto layout = twoLevels();
+    rep::buildGroupedSheet(sheet, layout);
+    bool hasLevel = false;
+    for (int level : sheet.rowLevels) {
+        if (level > 0) hasLevel = true;
+    }
+    REQUIRE(hasLevel);
 }

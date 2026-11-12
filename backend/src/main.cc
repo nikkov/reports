@@ -2142,11 +2142,13 @@ int main() {
         const std::string sheetTitle = tpl.get("title", "").asString();
         // на экране общий итог включён по умолчанию (ADR-1); в книге — так же
         const bool grandTotal = block.isNull() || block.get("grandTotal", true).asBool();
+        // collapsible: false — группы в книге не сворачиваются (ADR-94)
+        const bool collapsible = block.isNull() || block.get("collapsible", true).asBool();
         static const std::map<std::string, std::string> noDeclared;
         runQuery(
             sheetClient, finalSql, query.values,
             [done, leaves, bag, sheetTitle, groupColumns, subtotalLevels,
-             grandTotal](const orm::Result &res) {
+             grandTotal, collapsible](const orm::Result &res) {
                 const auto ncols = static_cast<size_t>(res.columns());
                 std::vector<std::string> names;
                 std::vector<std::string> types;
@@ -2189,6 +2191,7 @@ int main() {
                 layout.groupColumns = groupColumns;
                 layout.subtotalLevels = subtotalLevels;
                 layout.grandTotal = grandTotal;
+                layout.collapsible = collapsible;
                 for (std::size_t c = 0; c < leaves.size(); ++c) {
                     if (leaves[c].aggregated) layout.measureColumns.push_back(c);
                 }

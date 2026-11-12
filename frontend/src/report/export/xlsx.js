@@ -229,33 +229,36 @@ export async function buildWorkbook({ block, rows, styles, params = {}, labels =
     }
   }
 
-  // outline: детальные строки — внутри групп, подытог группы уровня L — на уровень L.
-  // Глубину берём по фактическим подытогам: если подытоги только у верхней группы,
-  // детали идут уровнем 1 (а не «висящим» вторым уровнем без родителя).
-  ws.properties.outlineProperties = { summaryBelow: true, summaryRight: false }
-  const groupDepth = model.rows.reduce(
-    (max, row) => Math.max(max, Array.isArray(row.groupPath) ? row.groupPath.length : 0),
-    0
-  )
-  // Вложенность Excel строится по строкам, а не по объединениям: чтобы категория сворачивалась
-  // отдельно от региона, первая строка каждой категории остаётся видимой опорой (уровень на 1 меньше),
-  // а её детали уходят на уровень глубже. Иначе все детали лежат одним уровнем и Excel даёт
-  // сворачивание только по границам подытогов, то есть только по региону.
-  let prevGroup = null
-  model.rows.forEach((row, ri) => {
-    let level = 0
-    if (row.kind === 'detail') {
-      const key = Array.isArray(row.groupPath) ? row.groupPath.join('\u0001') : ''
-      const anchor = key !== prevGroup
-      prevGroup = key
-      level = groupDepth >= 2 ? groupDepth - (anchor ? 1 : 0) : Math.max(1, groupDepth)
-    } else {
-      prevGroup = null
-      level = Math.max(0, Number(row.level || 0))
-    }
-    const clamp = Math.min(7, Math.max(0, level)) // Excel поддерживает 7 уровней структуры
-    if (clamp > 0) ws.getRow(depth + ri + 1).outlineLevel = clamp
-  })
+  // collapsible: false — группы всегда раскрыты и в книге: без структуры и кнопок +/- (ADR-94)
+  if (block?.collapsible !== false) {
+    // outline: детальные строки — внутри групп, подытог группы уровня L — на уровень L.
+    // Глубину берём по фактическим подытогам: если подытоги только у верхней группы,
+    // детали идут уровнем 1 (а не «висящим» вторым уровнем без родителя).
+    ws.properties.outlineProperties = { summaryBelow: true, summaryRight: false }
+    const groupDepth = model.rows.reduce(
+      (max, row) => Math.max(max, Array.isArray(row.groupPath) ? row.groupPath.length : 0),
+      0
+    )
+    // Вложенность Excel строится по строкам, а не по объединениям: чтобы категория сворачивалась
+    // отдельно от региона, первая строка каждой категории остаётся видимой опорой (уровень на 1 меньше),
+    // а её детали уходят на уровень глубже. Иначе все детали лежат одним уровнем и Excel даёт
+    // сворачивание только по границам подытогов, то есть только по региону.
+    let prevGroup = null
+    model.rows.forEach((row, ri) => {
+      let level = 0
+      if (row.kind === 'detail') {
+        const key = Array.isArray(row.groupPath) ? row.groupPath.join('\u0001') : ''
+        const anchor = key !== prevGroup
+        prevGroup = key
+        level = groupDepth >= 2 ? groupDepth - (anchor ? 1 : 0) : Math.max(1, groupDepth)
+      } else {
+        prevGroup = null
+        level = Math.max(0, Number(row.level || 0))
+      }
+      const clamp = Math.min(7, Math.max(0, level)) // Excel поддерживает 7 уровней структуры
+      if (clamp > 0) ws.getRow(depth + ri + 1).outlineLevel = clamp
+    })
+  }
 
   ws.autoFilter = { from: { row: depth, column: 1 }, to: { row: depth, column: columns.length } }
 

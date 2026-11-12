@@ -1,4 +1,6 @@
 import { expect, request as apiRequest, test } from '@playwright/test'
+import JSZip from 'jszip'
+import { readFileSync } from 'node:fs'
 
 const BASE = '/report.html?report=sales-summary'
 
@@ -2490,4 +2492,37 @@ test('мультивыбор: value — число, label — текст; фил
   await expect(page.locator('.meta')).toContainText('строк: 3')
   await expect(summary).toHaveText('Север, Запад +1')
   await expect(page).toHaveURL(/regions=1%2C3%2C5/)
+})
+
+
+test('Excel: collapsible: false убирает структуру групп, но не подытоги (ADR-94)', async ({ page }) => {
+  const levelsOf = async (file) => {
+    const zip = await JSZip.loadAsync(readFileSync(file))
+    const xml = await zip.file('xl/worksheets/sheet1.xml').async('string')
+    return [...xml.matchAll(/outlineLevel="(\d+)"/g)].map((m) => Number(m[1]))
+  }
+
+  // группы со сворачиванием: строки получают outline-уровни
+  await page.goto('/report.html?report=sales-summary')
+  await expect(page.locator('.meta')).toContainText('строк')
+  const [grouped] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('button.tool', { hasText: 'Excel' }).first().click()
+  ])
+  const groupedFile = await grouped.path()
+  expect((await levelsOf(groupedFile)).length).toBeGreaterThan(0)
+
+  // collapsible: false: структуры нет, подытоги и ИТОГО остаются
+  await page.goto('/report.html?report=fixed-groups&from=2026-01-01&to=2026-11-12')
+  await expect(page.locator('.meta')).toContainText('строк')
+  const [flat] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('button.tool', { hasText: 'Excel' }).first().click()
+  ])
+  const flatFile = await flat.path()
+  const levels = await levelsOf(flatFile)
+  expect(levels.length).toBe(0)
+  // и на экране у этого отчёта тоже нет ни кнопок сворачивания, ни шевронов
+  await expect(page.getByRole('button', { name: /Свернуть всё|Развернуть всё/ })).toHaveCount(0)
+  await expect(page.locator('.rt-table .chev')).toHaveCount(0)
 })

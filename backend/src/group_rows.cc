@@ -95,19 +95,21 @@ void rebuildMergesAndLevels(ExportSheet &sheet, const GroupLayout &layout) {
     if (layout.groupColumns.empty()) return;
 
     const int depth = static_cast<int>(layout.groupColumns.size());
+    // Уровень строки нужен дважды: для структуры книги (outline) и для объединений групп.
+    // collapsible: false убирает только структуру — объединения и подытоги остаются (ADR-94).
+    std::vector<int> levels(sheet.rows.size(), 0);
     for (std::size_t r = 0; r < sheet.rows.size(); ++r) {
         const unsigned char kind = kindAt(sheet, r);
-        if (kind == static_cast<unsigned char>(RowKind::Grand)) {
-            sheet.rowLevels[r] = 0;
-            continue;
-        }
+        int level = 0;
         if (kind == static_cast<unsigned char>(RowKind::Detail)) {
-            sheet.rowLevels[r] = depth;
-            continue;
+            level = depth;
+        } else if (kind != static_cast<unsigned char>(RowKind::Grand)) {
+            // подытог: уровень самой группы; в объединениях участвует только как предок
+            const int own = r < sheet.rowSubtotalLevel.size() ? sheet.rowSubtotalLevel[r] : -1;
+            level = own < 0 ? 0 : own;
         }
-        // подытог: уровень самой группы; в объединениях участвует только как предок
-        const int level = r < sheet.rowSubtotalLevel.size() ? sheet.rowSubtotalLevel[r] : -1;
-        sheet.rowLevels[r] = level < 0 ? 0 : level;
+        levels[r] = level;
+        sheet.rowLevels[r] = layout.collapsible ? level : 0;
     }
 
     for (std::size_t g = 0; g < layout.groupColumns.size(); ++g) {
@@ -121,8 +123,7 @@ void rebuildMergesAndLevels(ExportSheet &sheet, const GroupLayout &layout) {
             if (r < sheet.rows.size()) {
                 const unsigned char kind = kindAt(sheet, r);
                 if (kind == static_cast<unsigned char>(RowKind::Detail) ||
-                    (kind == static_cast<unsigned char>(RowKind::Subtotal) &&
-                     sheet.rowLevels[r] > static_cast<int>(g))) {
+                    (kind == static_cast<unsigned char>(RowKind::Subtotal) && levels[r] > static_cast<int>(g))) {
                     member = true;
                     key = groupKey(sheet.rows[r], layout, static_cast<int>(g), layout.nullLabel);
                 }
