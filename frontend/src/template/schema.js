@@ -260,6 +260,10 @@ export default {
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "styles": {
+          "$ref": "#/$defs/styles",
+          "description": "стили таблиц этого набора (ADR-91); блок может переопределить"
         }
       }
     },

@@ -114,7 +114,9 @@ function zoneStyle(zone, partial) {
 export function resolveStyles(template, block) {
   const own = template?.styles || {}
   const presetName = own.preset && PRESETS[own.preset] ? own.preset : 'default'
-  const layers = [PRESETS[presetName], own, block?.styles || {}]
+  // Стили набора (ADR-91): блок берёт их по dataKey, затем перекрывает своими.
+  const dsStyles = block?.dataKey ? template?.datasets?.[block.dataKey]?.styles : null
+  const layers = [PRESETS[presetName], own, dsStyles || {}, block?.styles || {}]
 
   let font = DEFAULTS.font
   let colors = DEFAULTS.colors

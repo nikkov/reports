@@ -2364,3 +2364,44 @@ test('collapsible: false — группы всегда раскрыты, кно�
   expect(await meta.innerText()).toBe(before)
   await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
 })
+
+test('два набора — два стиля: datasets.<ключ>.styles задаёт вид каждой таблицы', async ({ page }) => {
+  await page.goto('/report.html?report=two-sets-styles')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const looks = await page.evaluate(() =>
+    [...document.querySelectorAll('.rt-table')].map((t) => {
+      const cs = getComputedStyle(t)
+      const th = t.querySelector('th')
+      const stripe = t.querySelector('tbody tr.stripe td')
+      const total = t.querySelector('tbody tr.grandtotal td')
+      return {
+        font: cs.fontFamily.split(',')[0].replace(/"/g, ''),
+        size: cs.fontSize,
+        headerBg: getComputedStyle(th).backgroundColor,
+        headerColor: getComputedStyle(th).color,
+        stripe: stripe ? getComputedStyle(stripe).backgroundColor : null,
+        totalBg: total ? getComputedStyle(total).backgroundColor : null
+      }
+    })
+  )
+
+  // продажи — светлая тема с зеброй и синей шапкой
+  expect(looks[0]).toEqual({
+    font: 'Inter',
+    size: '13px',
+    headerBg: 'rgb(230, 239, 255)',
+    headerColor: 'rgb(18, 50, 79)',
+    stripe: 'rgb(242, 246, 255)',
+    totalBg: 'rgb(219, 231, 255)'
+  })
+  // сервисы — тёмная тема, моноширинный шрифт, без зебры, свой итог
+  expect(looks[1]).toEqual({
+    font: 'monospace',
+    size: '12px',
+    headerBg: 'rgb(29, 39, 51)',
+    headerColor: 'rgb(159, 196, 255)',
+    stripe: null,
+    totalBg: 'rgb(29, 39, 51)'
+  })
+})

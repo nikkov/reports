@@ -920,6 +920,16 @@ function checkGaugeZones(block, base, errors) {
   }
   checkStyles(template?.styles, 'styles', allFields, errors, warnings, template?.styles?.palette || {})
 
+  // Стили набора (ADR-91): действуют на блоки этого набора, блок может переопределить.
+  // Поля для styles.columns берём из блоков набора; палитра — общая, из styles шаблона.
+  for (const [key, ds] of Object.entries(template.datasets || {})) {
+    if (!ds?.styles) continue
+    const fields = new Set(
+      (columnsByDataKey[key] || []).map(({ col }) => col.field).filter(Boolean)
+    )
+    checkStyles(ds.styles, `datasets.${key}.styles`, fields, errors, warnings, template?.styles?.palette || {})
+  }
+
   // Автозагрузка (ADR-89): с выключенной автозагрузкой фоновые обновления не запустятся
   if (template.autoLoad === false) {
     if (Number(template.refreshSeconds) > 0) {

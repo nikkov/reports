@@ -975,6 +975,29 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                     }
                 }
             }
+
+            // Стили набора (ADR-91): блоки этого набора наследуют их, block.styles перекрывает.
+            // Поля колонок набора статически неизвестны, поэтому проверяем формат даты и цвета.
+            const Json::Value &dsStyles = ds["styles"];
+            if (dsStyles.isObject() && dsStyles["columns"].isObject()) {
+                std::set<std::string> palette;
+                for (const auto &name : root["styles"]["palette"].getMemberNames()) palette.insert(name);
+                for (const auto &field : dsStyles["columns"].getMemberNames()) {
+                    const std::string spath = path + ".styles.columns." + field;
+                    const Json::Value &style = dsStyles["columns"][field];
+                    checkDateFormat(r, style["format"], spath + ".format");
+                    for (const char *zone : {"text", "background"}) {
+                        const std::string value = asString(style["colors"][zone]);
+                        if (value.empty() || value == "transparent") continue;
+                        const bool hex = value.size() == 4 || value.size() == 7;
+                        if (hex && value[0] == '#') continue;
+                        if (!palette.count(value)) {
+                            addError(r, spath + ".colors." + zone,
+                                     "цвет «" + value + "» не hex и не объявлен в styles.palette");
+                        }
+                    }
+                }
+            }
         }
     }
 

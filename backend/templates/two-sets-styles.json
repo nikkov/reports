@@ -1,0 +1,251 @@
+{
+  "version": 2,
+  "id": "two-sets-styles",
+  "title": "Два набора — два стиля",
+  "description": "Один отчёт, два набора: стили заданы в datasets.<ключ>.styles — светлая таблица продаж и тёмная таблица сервисов",
+  "folder": "Примеры",
+  "tags": [
+    "стили",
+    "мультинаборность"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-03-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, sum(amount) AS amount, count(*) AS deals FROM reports_examples.sales WHERE order_date BETWEEN :from::date AND :to::date GROUP BY region ORDER BY amount DESC",
+      "styles": {
+        "font": {
+          "family": "Inter",
+          "size": 13
+        },
+        "layout": {
+          "rowHeight": 32,
+          "headerHeight": 36,
+          "zebra": true,
+          "stripeColor": "#f2f6ff",
+          "borders": "grid",
+          "cellPadding": "4px 10px"
+        },
+        "header": {
+          "font": {
+            "weight": 700,
+            "size": 13
+          },
+          "colors": {
+            "background": "#e6efff",
+            "text": "#12324f"
+          }
+        },
+        "body": {
+          "colors": {
+            "text": "#1c2a3a",
+            "background": "#ffffff"
+          }
+        },
+        "grandtotal": {
+          "font": {
+            "weight": 700
+          },
+          "colors": {
+            "background": "#dbe7ff",
+            "text": "#12324f"
+          }
+        },
+        "columns": {
+          "amount": {
+            "format": {
+              "style": "number",
+              "decimals": 0,
+              "group": " "
+            },
+            "align": "right",
+            "headerAlign": "right"
+          },
+          "deals": {
+            "format": {
+              "style": "integer"
+            },
+            "align": "right",
+            "headerAlign": "right"
+          }
+        }
+      }
+    },
+    "ops": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT service, sum(requests) AS requests, sum(failures) AS failures, round(avg(avg_ms)) AS avg_ms FROM reports_examples.ops WHERE day BETWEEN :from::date AND :to::date GROUP BY service ORDER BY requests DESC",
+      "styles": {
+        "font": {
+          "family": "monospace",
+          "size": 12
+        },
+        "colors": {
+          "text": "#e6edf3",
+          "background": "#111820",
+          "border": "#2b3644"
+        },
+        "layout": {
+          "rowHeight": 30,
+          "headerHeight": 34,
+          "borders": "horizontal",
+          "zebra": false,
+          "cellPadding": "4px 10px"
+        },
+        "header": {
+          "font": {
+            "weight": 700,
+            "family": "monospace"
+          },
+          "colors": {
+            "background": "#1d2733",
+            "text": "#9fc4ff"
+          }
+        },
+        "body": {
+          "colors": {
+            "text": "#e6edf3",
+            "background": "#111820"
+          }
+        },
+        "grandtotal": {
+          "font": {
+            "weight": 700
+          },
+          "colors": {
+            "background": "#1d2733",
+            "text": "#ffffff"
+          }
+        },
+        "columns": {
+          "requests": {
+            "format": {
+              "style": "integer"
+            },
+            "align": "right",
+            "headerAlign": "right"
+          },
+          "failures": {
+            "format": {
+              "style": "integer"
+            },
+            "align": "right",
+            "headerAlign": "right"
+          },
+          "avg_ms": {
+            "format": {
+              "style": "integer"
+            },
+            "align": "right",
+            "headerAlign": "right"
+          }
+        }
+      }
+    }
+  },
+  "styles": {
+    "preset": "default",
+    "font": {
+      "family": "Inter",
+      "size": 13,
+      "weight": 400,
+      "lineHeight": 1.35
+    },
+    "layout": {
+      "rowHeight": 30,
+      "headerHeight": 34,
+      "cellPadding": "4px 10px",
+      "borders": "grid"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Два набора данных в одном шаблоне, у каждого свой стиль — в datasets.<ключ>.styles. Продажи: светлая тема, Inter 13, синяя шапка, зебра, суммы с пробелами. Сервисы: тёмная тема, моноширинный 12, горизонтальные границы, свой итог. Блок может переопределить любой слой своими styles — здесь блоки общие стили не задают. Период: {{from}} — {{to}}."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "title": "Продажи по регионам — светлая тема",
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма"
+        },
+        {
+          "field": "deals",
+          "title": "Заказов"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "ops",
+      "title": "Сервисы — тёмная тема",
+      "columns": [
+        {
+          "field": "service",
+          "title": "Сервис"
+        },
+        {
+          "field": "requests",
+          "title": "Запросов"
+        },
+        {
+          "field": "failures",
+          "title": "Ошибок"
+        },
+        {
+          "field": "avg_ms",
+          "title": "Среднее, мс"
+        }
+      ]
+    }
+  ]
+}

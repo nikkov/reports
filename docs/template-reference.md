@@ -681,7 +681,7 @@ Drill из `sankey` подставляет источник в `x`, приёмн
 ## styles — оформление таблицы
 
 Необязательная секция (ADR-23). Порядок применения: умолчания версии 1.0 → `styles.preset` →
-`styles` → `styles.<зона>` → `blocks[].styles` → `styles.columns.<поле>`.
+`styles` → `styles.<зона>` → `datasets.<ключ>.styles` → `blocks[].styles` → `styles.columns.<поле>`.
 
 | Поле | Смысл |
 |---|---|
@@ -693,6 +693,38 @@ Drill из `sankey` подставляет источник в `x`, приёмн
 | `columns.<field>` | `width` (px или `"20%"`), `minWidth`, `maxWidth`, `align`, `headerAlign`, `font`, `colors`, `padding`, `format` |
 | `layout.numericAlign` | выравнивание числовых колонок по умолчанию: `right` (по умолчанию), `left`, `center`, `inherit` |
 | `blocks[].styles` | те же ключи, но только для этого блока таблицы |
+| `datasets.<ключ>.styles` | те же ключи для всех блоков этого набора; блок перекрывает своими `styles` (ADR-91) |
+
+### Разные стили для разных наборов данных
+
+В отчёте с несколькими наборами вид задаётся у самого набора — `datasets.<ключ>.styles`; блок берёт
+стили своего `dataKey`. Это избавляет от копирования одного и того же `styles` в каждый блок:
+
+```json
+"datasets": {
+  "sales": { "sql": "...", "styles": {
+    "font": { "family": "Inter", "size": 13 },
+    "header": { "colors": { "background": "#e6efff", "text": "#12324f" } },
+    "layout": { "zebra": true, "stripeColor": "#f2f6ff" }
+  } },
+  "ops": { "sql": "...", "styles": {
+    "font": { "family": "monospace", "size": 12 },
+    "colors": { "text": "#e6edf3", "background": "#111820" },
+    "header": { "colors": { "background": "#1d2733", "text": "#9fc4ff" } },
+    "layout": { "borders": "horizontal" }
+  } }
+},
+"blocks": [
+  { "type": "table", "dataKey": "sales", "columns": [...] },
+  { "type": "table", "dataKey": "ops", "columns": [...] }
+]
+```
+
+Приоритет: глобальные `styles` → стили набора → `blocks[].styles` (блок сильнее набора, недостающие
+ключи наследуются) → `styles.columns.<поле>`. Стиль набора проверяется так же, как блочный: цвета —
+hex или из `styles.palette`, `columns.<поле>.format` — только для полей, объявленных в блоках набора
+(иначе предупреждение). Готовый пример: `two-sets-styles` («Два набора — два стиля») — продажи
+светлой темой и сервисы тёмной в одном отчёте.
 
 ### Насыщенность шрифта (weight)
 

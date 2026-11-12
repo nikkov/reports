@@ -3345,6 +3345,87 @@
       "errors": [
         "styles.columns.order_date.format.pattern"
       ]
+    },
+    {
+      "name": "стили набора: формат даты в columns.<поле> — валидно",
+      "template": {
+        "version": 2,
+        "id": "parity-ds-styles",
+        "title": "Стили набора",
+        "datasets": {
+          "a": {
+            "sql": "SELECT day, amount FROM reports_examples.sales",
+            "styles": {
+              "columns": {
+                "day": {
+                  "format": {
+                    "style": "date",
+                    "pattern": "DD.MM.YYYY"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "a",
+            "columns": [
+              {
+                "field": "day",
+                "title": "День"
+              },
+              {
+                "field": "amount",
+                "title": "Сумма"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "стили набора: цвет не hex и не из палитры",
+      "template": {
+        "version": 2,
+        "id": "parity-ds-styles",
+        "title": "Стили набора",
+        "datasets": {
+          "a": {
+            "sql": "SELECT day, amount FROM reports_examples.sales",
+            "styles": {
+              "columns": {
+                "amount": {
+                  "colors": {
+                    "text": "#12"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "a",
+            "columns": [
+              {
+                "field": "day",
+                "title": "День"
+              },
+              {
+                "field": "amount",
+                "title": "Сумма"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.a.styles.columns.amount.colors.text"
+      ]
     }
   ]
 }

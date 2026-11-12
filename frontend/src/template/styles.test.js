@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, test } from 'vitest'
 import { DEFAULTS, PRESETS, resolveStyles, rowHeightFor, zoneVars } from './styles.js'
 
 const tpl = (styles) => ({ version: 1, id: 't', title: 'T', styles })
@@ -63,4 +63,30 @@ describe('resolveStyles: порядок применения', () => {
       expect(s.font.family).toBeTruthy()
     }
   })
+})
+
+test('стили набора: применяются по dataKey, блок перекрывает (ADR-91)', () => {
+  const template = {
+    styles: { font: { size: 14 } },
+    datasets: {
+      a: { sql: 'select 1', styles: { font: { size: 12, family: 'monospace' }, layout: { rowHeight: 40 } } },
+      b: { sql: 'select 1' }
+    }
+  }
+
+  // блок набора a получает стили набора
+  const fromSet = resolveStyles(template, { dataKey: 'a' })
+  expect(fromSet.font.size).toBe(12)
+  expect(fromSet.font.family).toBe('monospace')
+  expect(fromSet.layout.rowHeight).toBe(40)
+
+  // собственные styles блока сильнее стилей набора, остальное от набора сохраняется
+  const ownBlock = resolveStyles(template, { dataKey: 'a', styles: { font: { size: 10 } } })
+  expect(ownBlock.font.size).toBe(10)
+  expect(ownBlock.font.family).toBe('monospace')
+  expect(ownBlock.layout.rowHeight).toBe(40)
+
+  // набор без styles и блок без dataKey видят только глобальные стили
+  expect(resolveStyles(template, { dataKey: 'b' }).font.size).toBe(14)
+  expect(resolveStyles(template, {}).font.size).toBe(14)
 })
