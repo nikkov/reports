@@ -1,0 +1,126 @@
+{
+  "version": 2,
+  "id": "multi-int",
+  "title": "Мультивыбор: value — число, label — текст",
+  "description": "Параметр multiple с числовыми значениями (id региона) и текстовыми подписями (название)",
+  "folder": "Примеры",
+  "tags": [
+    "параметры",
+    "мультивыбор",
+    "lookup"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "year(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "*",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "regions",
+      "type": "select",
+      "label": "Регионы",
+      "multiple": true,
+      "default": "1,3",
+      "source": {
+        "kind": "lookup",
+        "dataset": "region_lookup"
+      }
+    }
+  ],
+  "datasets": {
+    "region_lookup": {
+      "connection": "main",
+      "sql": "SELECT id AS value, name AS label FROM reports_examples.regions ORDER BY id"
+    },
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "regions": "$regions"
+      },
+      "sql": "SELECT r.name AS region, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS deals FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date BETWEEN :from::date AND :to::date AND s.region_id = ANY(string_to_array(:regions, ',')::int[]) GROUP BY r.name ORDER BY amount DESC"
+    }
+  },
+  "styles": {
+    "preset": "default"
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Параметр «Регионы» — множественный выбор из справочника. В справочнике value — число (id региона: 1…5), label — название; наружу значение уходит строкой через запятую («1,3»), а в тексте печатаются подписи: {{regions}}. В SQL числовой список приводится к массиву: region_id = ANY(string_to_array(:regions, ',')::int[])."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "title": "Продажи по выбранным регионам",
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": {
+            "style": "number",
+            "decimals": 0,
+            "group": " "
+          },
+          "align": "right",
+          "aggregate": "sum"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "format": {
+            "style": "number",
+            "decimals": 0,
+            "group": " "
+          },
+          "align": "right",
+          "aggregate": "sum"
+        },
+        {
+          "field": "deals",
+          "title": "Заказов",
+          "format": {
+            "style": "integer"
+          },
+          "align": "right",
+          "aggregate": "sum"
+        }
+      ],
+      "grandTotal": true
+    }
+  ]
+}

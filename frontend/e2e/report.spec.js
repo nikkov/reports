@@ -2434,3 +2434,26 @@ test('арифметика дат в default: считается от текущ
   await expect(inputs.nth(1)).toHaveValue('2026-03-15')
   await expect(inputs.nth(2)).toHaveValue('2026-05-18T05:00')
 })
+
+test('мультивыбор: value — число, label — текст; фильтр по int-списку (multi-int)', async ({ page }) => {
+  await page.goto('/report.html?report=multi-int')
+  await expect(page.locator('.meta')).toContainText('строк: 2')
+
+  // в тексте печатаются подписи выбранных значений, а не числовые value
+  await expect(page.locator('.block p').first()).toContainText('Север, Запад')
+  const summary = page.locator('[data-testid=ms-trigger] .ms-summary')
+  await expect(summary).toHaveText('Север, Запад')
+
+  // справочник отдаёт id как value (число в SQL, строка в форме) и название как label
+  await page.locator('[data-testid=ms-trigger]').click()
+  const boxes = page.locator('.ms-item input')
+  await expect(boxes).toHaveCount(5)
+  expect(await boxes.nth(0).getAttribute('value')).toBe('1')
+  expect(await page.locator('.ms-item').nth(0).innerText()).toBe('Север')
+
+  // добавляем Центр (id 5) — SQL фильтрует по int-списку через ANY(string_to_array(...)::int[])
+  await page.locator('.ms-item input[value="5"]').check()
+  await expect(page.locator('.meta')).toContainText('строк: 3')
+  await expect(summary).toHaveText('Север, Запад +1')
+  await expect(page).toHaveURL(/regions=1%2C3%2C5/)
+})
