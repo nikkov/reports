@@ -199,7 +199,11 @@ function addSheet(wb, block, rows, styles, name) {
   })
 
   // --- строки модели: данные, подытоги, итог ---
-  const zoneOf = (kind) => (kind === 'subtotal' ? 'subtotal' : kind === 'grandtotal' ? 'grandtotal' : 'body')
+  // Зона стилей и зона правил называются по-разному: в шаблоне правила адресуют 'detail',
+  // а стили зон — 'body'. Раньше в правила уходило 'body', и условия для 'detail' не
+  // срабатывали — в книге не было ни цвета шрифта, ни фона (ADR-100).
+  const styleZoneOf = (kind) => (kind === 'subtotal' ? 'subtotal' : kind === 'grandtotal' ? 'grandtotal' : 'body')
+  const ruleZoneOf = (kind) => (kind === 'subtotal' ? 'subtotal' : kind === 'grandtotal' ? 'grandtotal' : 'detail')
   const getValueFor = (row, columnKey) => {
     const index = leaves.findIndex((l) => l.col.field === columnKey || l.col.title === columnKey)
     return index < 0 ? undefined : row.values?.[index]
@@ -211,8 +215,9 @@ function addSheet(wb, block, rows, styles, name) {
       const col = leaf.col
       const raw = row.values?.[c]
       const cell = excelRow.getCell(c + 1)
-      const zone = zoneOf(row.kind)
-      const base = zoneStyle(styles, zone)
+      const styleZone = styleZoneOf(row.kind)
+      const ruleZone = ruleZoneOf(row.kind)
+      const base = zoneStyle(styles, styleZone)
       let numFmt = null // задаём после cell.style: присвоение style затирает числовой формат
 
       if (col.group && row.kind !== 'detail') {
@@ -248,7 +253,7 @@ function addSheet(wb, block, rows, styles, name) {
       if (block.rules?.length) {
         const rule = ruleStyleFor(
           block.rules,
-          zone,
+          ruleZone,
           col.field || col.title,
           (name) => getValueFor(row, name),
           styles.palette

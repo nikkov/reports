@@ -2690,3 +2690,49 @@ test('печать: шапка таблицы только вверху стра
   expect(grouped.tables).toBeGreaterThan(1)
   expect(grouped.noBreak).toBe(grouped.tables)
 })
+
+test('условное форматирование: цвета есть в печати и в Excel (ADR-100)', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.print = () => {}
+  })
+  await page.goto('/report.html?report=sales-rules')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  // --- печать: правила красят фон и шрифт, браузер просим печатать фоны как есть
+  await page.locator('button.tool', { hasText: 'Печать' }).first().click()
+  await expect(page.locator('.rt-print')).toHaveCount(1)
+  // печатная медиа: цвета и print-color-adjust считаются именно в ней
+  await page.emulateMedia({ media: 'print' })
+  const printed = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll('.rt-print tbody td')]
+    const count = (pred) => cells.filter(pred).length
+    const probe = cells[0] ? getComputedStyle(cells[0]) : null
+    return {
+      total: cells.length,
+      red: count((td) => getComputedStyle(td).color === 'rgb(180, 35, 24)'),
+      warnBg: count((td) => getComputedStyle(td).backgroundColor === 'rgb(255, 244, 214)'),
+      rowBg: count((td) => getComputedStyle(td).backgroundColor === 'rgb(255, 247, 230)'),
+      colorAdjust: probe ? probe.printColorAdjust || probe.webkitPrintColorAdjust : null
+    }
+  })
+  expect(printed.total).toBeGreaterThan(100)
+  expect(printed.red).toBeGreaterThan(0)
+  expect(printed.warnBg).toBeGreaterThan(0)
+  expect(printed.rowBg).toBeGreaterThan(0)
+  expect(printed.colorAdjust).toBe('exact')
+  await page.emulateMedia({ media: 'screen' })
+
+  // --- Excel: те же цвета в стилях книги, а не только в правилах на экране
+  await page.goto('/report.html?report=sales-rules')
+  await expect(page.locator('.meta')).toContainText('строк')
+  const [dl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('button.tool', { hasText: 'Excel' }).first().click()
+  ])
+  const zip = await JSZip.loadAsync(readFileSync(await dl.path()))
+  const styles = await zip.file('xl/styles.xml').async('string')
+  // #fff7e6 (вся строка), #fff4d6 (маржа), #b42318 (отрицательная прибыль)
+  expect(styles).toContain('FFFFF7E6')
+  expect(styles).toContain('FFFFF4D6')
+  expect(styles).toContain('FFB42318')
+})

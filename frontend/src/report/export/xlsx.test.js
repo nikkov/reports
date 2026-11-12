@@ -130,3 +130,67 @@ describe('Excel: несколько таблиц — каждая на своё�
     expect(wb.worksheets.map((ws) => ws.name)).toEqual(['Мой отчёт', 'Параметры'])
   })
 })
+
+describe('Excel: правила условного форматирования (ADR-100)', () => {
+  const rulesBlock = {
+    type: 'table',
+    title: 'Правила',
+    grandTotal: true,
+    rules: [
+      { when: { column: 'profit', op: '<', value: 0 }, apply: { colors: { text: 'danger' } }, zones: ['detail'] },
+      {
+        when: { column: 'amount', op: '>=', value: 50000 },
+        apply: { colors: { background: 'rowHighlight' } },
+        scope: 'row',
+        zones: ['detail']
+      }
+    ],
+    columns: [
+      { field: 'region', title: 'Регион' },
+      { field: 'amount', title: 'Сумма', type: 'int', format: 'number' },
+      { field: 'profit', title: 'Прибыль', type: 'int', format: 'number' }
+    ]
+  }
+  const rulesRows = [
+    { region: 'Север', amount: 60000, profit: -100 },
+    { region: 'Юг', amount: 1000, profit: 50 }
+  ]
+
+  async function rulesSheet() {
+    const styles = resolveStyles(
+      { styles: { preset: 'default', palette: { danger: '#b42318', rowHighlight: '#fff7e6' } } },
+      rulesBlock
+    )
+    const blob = await buildWorkbook({ block: rulesBlock, rows: rulesRows, styles })
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(Buffer.from(await blob.arrayBuffer()))
+    return wb.worksheets[0]
+  }
+
+  it('фон всей строки и цвет шрифта приходят из правил зоны detail', async () => {
+    const ws = await rulesSheet()
+    let rowIndex = 0
+    ws.eachRow((row, n) => {
+      if (row.getCell(1).value === 'Север') rowIndex = n
+    })
+    expect(rowIndex).toBeGreaterThan(1)
+    const row = ws.getRow(rowIndex)
+    // фон правила rowHighlight — у всех ячеек строки
+    expect(row.getCell(1).fill?.fgColor?.argb).toBe('FFFFF7E6')
+    expect(row.getCell(3).fill?.fgColor?.argb).toBe('FFFFF7E6')
+    // цвет шрифта danger — только у ячейки целевой колонки profit
+    expect(row.getCell(3).font?.color?.argb).toBe('FFB42318')
+    expect(row.getCell(1).font?.color?.argb).not.toBe('FFB42318')
+  })
+
+  it('строка без сработавших правил остаётся в обычной зоне', async () => {
+    const ws = await rulesSheet()
+    let rowIndex = 0
+    ws.eachRow((row, n) => {
+      if (row.getCell(1).value === 'Юг') rowIndex = n
+    })
+    const cell = ws.getRow(rowIndex).getCell(1)
+    expect(cell.fill?.fgColor?.argb).not.toBe('FFFFF7E6')
+    expect(cell.font?.color?.argb).not.toBe('FFB42318')
+  })
+})

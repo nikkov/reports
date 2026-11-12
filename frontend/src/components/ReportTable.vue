@@ -850,6 +850,15 @@ function cellsAt(index) {
   .rt-screen {
     display: none !important;
   }
+  /* Браузер по умолчанию не печатает фоны. Условное форматирование задаёт именно фон,
+     поэтому просим печатать цвета как есть (ADR-100). */
+  .rt-print,
+  .rt-print table,
+  .rt-print th,
+  .rt-print td {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
   .rt-print {
     display: block !important;
     overflow: visible !important;
