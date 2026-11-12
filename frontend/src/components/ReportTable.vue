@@ -518,17 +518,50 @@ const allRuns = computed(() => {
 
 // Высота A4 landscape за вычетом полей и повторяемой шапки — по ней режем страницы.
 const PRINT_PAGE_PX = 660
-const rowsPerChunk = computed(() => {
-  const head = headerRows.value.length * layout.value.headerHeight
+// Сколько места на первой печатной странице уже занято заголовком отчёта и текстовыми блоками.
+// Без этого первый кусок таблицы не влезал в остаток страницы, и браузер переносил всю
+// таблицу на вторую страницу, оставляя первую пустой (ADR-98).
+const printTop = ref(0)
+const printHeadPx = computed(() => headerRows.value.length * layout.value.headerHeight)
+const fitRows = (available) => {
+  const head = printHeadPx.value
   const row = layout.value.rowHeight || 24
-  return Math.max(6, Math.floor((PRINT_PAGE_PX - head) / row))
-})
+  return Math.max(4, Math.floor((Math.max(0, available) - head) / row))
+}
+const rowsPerChunk = computed(() => fitRows(PRINT_PAGE_PX))
+
+// Позицию таблицы на печатной странице измеряем в момент включения печати: экранный слой
+// ещё виден (он скрывается только в @media print) и стоит там же, где будет печатный.
+watch(
+  () => props.printMode,
+  async (on) => {
+    if (!on) {
+      printTop.value = 0
+      return
+    }
+    await nextTick()
+    const el = scroller.value
+    if (!el) return
+    const page = el.closest('.page') || document.documentElement
+    printTop.value = Math.max(0, Math.round(el.getBoundingClientRect().top - page.getBoundingClientRect().top))
+  }
+)
 
 const printChunks = computed(() => {
   const total = props.rows.length
   const per = rowsPerChunk.value
+  // Первая порция короче ровно на занятое сверху место. Если таблица стоит ниже первой
+  // страницы (второй блок отчёта), считаем, что она начнётся с новой страницы.
+  const top = printTop.value
+  const first = top <= 0 || top >= PRINT_PAGE_PX ? per : fitRows(PRINT_PAGE_PX - top)
   const chunks = []
-  for (let s = 0; s < total; s += per) chunks.push({ start: s, end: Math.min(total, s + per) })
+  let s = 0
+  if (total > 0) {
+    const end = Math.min(total, first)
+    chunks.push({ start: 0, end })
+    s = end
+  }
+  for (; s < total; s += per) chunks.push({ start: s, end: Math.min(total, s + per) })
   return chunks
 })
 

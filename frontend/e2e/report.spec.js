@@ -2626,3 +2626,32 @@ test('Excel: в отчёте с двумя таблицами каждая ид�
   const tables = await page.evaluate(() => document.querySelectorAll('.rt-table').length)
   expect(tables).toBe(2)
 })
+
+test('печать: таблица начинается на первой странице, а не со второй (ADR-98)', async ({ page }) => {
+  // печать не должна закрываться: window.print — пустышка, печатный слой остаётся в DOM
+  await page.addInitScript(() => {
+    window.print = () => {}
+  })
+  await page.goto('/report.html?report=finance-print')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  await page.locator('button.tool', { hasText: 'Печать' }).first().click()
+  await expect(page.locator('.rt-print')).toHaveCount(1)
+
+  const chunks = await page.evaluate(() => {
+    const pageEl = document.querySelector('.page')
+    const top = pageEl ? pageEl.getBoundingClientRect().top : 0
+    return [...document.querySelectorAll('.rt-print table.rt-table')].map((t) => {
+      const r = t.getBoundingClientRect()
+      return { rows: t.querySelectorAll('tbody tr').length, bottom: Math.round(r.bottom - top) }
+    })
+  })
+
+  expect(chunks.length).toBeGreaterThan(3)
+  // первый кусок короче остальных — сверху заголовок и текст отчёта
+  expect(chunks[0].rows).toBeLessThan(chunks[1].rows)
+  expect(chunks[0].rows).toBeGreaterThanOrEqual(8)
+  // и вместе с заголовком он укладывается в печатную полосу 660 px — иначе браузер
+  // перенёс бы таблицу на следующую страницу и первая осталась бы пустой
+  expect(chunks[0].bottom).toBeLessThanOrEqual(660)
+})
