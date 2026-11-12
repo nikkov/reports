@@ -63,3 +63,70 @@ describe('Excel: сворачивание групп зависит от collaps
     expect(texts.some((t) => t === 'ИТОГО')).toBe(true)
   })
 })
+
+describe('Excel: несколько таблиц — каждая на своём листе (ADR-97)', () => {
+  const blockA = { ...block, title: 'Продажи по регионам' }
+  const blockB = {
+    type: 'table',
+    title: 'Сервисы',
+    grandTotal: true,
+    columns: [
+      { field: 'service', title: 'Сервис' },
+      { field: 'requests', title: 'Запросов', type: 'int', aggregate: 'sum', format: 'number' }
+    ]
+  }
+
+  const stylesOf = (b) => resolveStyles({ styles: { preset: 'default' } }, b)
+
+  async function book(sheets, params = {}, labels = {}) {
+    const blob = await buildWorkbook({ sheets, params, labels, meta: { id: 'two', title: 'Две таблицы' } })
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(Buffer.from(await blob.arrayBuffer()))
+    return wb
+  }
+
+  it('две таблицы дают два листа данных и общий лист «Параметры»', async () => {
+    const wb = await book(
+      [
+        { block: blockA, rows, styles: stylesOf(blockA) },
+        { block: blockB, rows: [{ service: 'api', requests: 5 }], styles: stylesOf(blockB) }
+      ],
+      { from: '2026-03-01' },
+      { from: 'Период с' }
+    )
+    expect(wb.worksheets.map((ws) => ws.name)).toEqual(['Продажи по регионам', 'Сервисы', 'Параметры'])
+
+    // данные каждого листа — из своего набора, а не общие
+    const texts = (ws) => {
+      const out = []
+      ws.eachRow((row) => row.eachCell((cell) => out.push(String(cell.value ?? ''))))
+      return out
+    }
+    const salesSheet = texts(wb.getWorksheet('Продажи по регионам'))
+    expect(salesSheet).toContain('Север')
+    expect(salesSheet).toContain('30') // суммарная мера по группе
+    const opsSheet = texts(wb.getWorksheet('Сервисы'))
+    expect(opsSheet).toContain('api')
+    expect(opsSheet).not.toContain('Север')
+    // параметры один раз, на своём листе
+    expect(wb.getWorksheet('Параметры').getRow(2).getCell(3).value).toBe('2026-03-01')
+  })
+
+  it('таблицы без title получают «Таблица N», повторы — суффикс', async () => {
+    const noTitle = { ...block, title: undefined }
+    const wb = await book([
+      { block: noTitle, rows, styles: stylesOf(noTitle) },
+      { block: { ...noTitle }, rows, styles: stylesOf(noTitle) },
+      { block: { ...block, title: 'Параметры' }, rows, styles: stylesOf(block) }
+    ])
+    const names = wb.worksheets.map((ws) => ws.name)
+    expect(names).toEqual(['Таблица 1', 'Таблица 2', 'Параметры (2)', 'Параметры'])
+  })
+
+  it('одна таблица сохраняет прежнее поведение: один лист с названием отчёта', async () => {
+    const blob = await buildWorkbook({ block: { ...block, title: undefined }, rows, styles: stylesOf(block), meta: { title: 'Мой отчёт' } })
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(Buffer.from(await blob.arrayBuffer()))
+    expect(wb.worksheets.map((ws) => ws.name)).toEqual(['Мой отчёт', 'Параметры'])
+  })
+})

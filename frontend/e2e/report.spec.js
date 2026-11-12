@@ -2602,3 +2602,27 @@ test('раскладка блоков: span в 12-колоночной сетк�
   expect(new Set(printed.map((b) => b.left)).size).toBe(1)
   for (let i = 1; i < printed.length; i++) expect(printed[i].top).toBeGreaterThanOrEqual(printed[i - 1].top)
 })
+
+test('Excel: в отчёте с двумя таблицами каждая идёт на свой лист (ADR-97)', async ({ page }) => {
+  await page.goto('/report.html?report=two-sets-styles')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const [dl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('button.tool', { hasText: 'Excel' }).first().click()
+  ])
+  const zip = await JSZip.loadAsync(readFileSync(await dl.path()))
+  const book = await zip.file('xl/workbook.xml').async('string')
+  const names = [...book.matchAll(/<sheet [^>]*name="([^"]+)"/g)].map((m) => m[1])
+  // имя листа в Excel ограничено 31 символом — длинное сокращается с «…»
+  expect(names).toEqual(['Продажи по регионам — светлая…', 'Сервисы — тёмная тема', 'Параметры'])
+
+  // оба листа данных заполнены, а не пустые
+  const rowsOf = async (file) => ((await zip.file(file).async('string')).match(/<row /g) || []).length
+  expect(await rowsOf('xl/worksheets/sheet1.xml')).toBeGreaterThan(1)
+  expect(await rowsOf('xl/worksheets/sheet2.xml')).toBeGreaterThan(1)
+
+  // список таблиц в отчёте совпадает с числом листов данных
+  const tables = await page.evaluate(() => document.querySelectorAll('.rt-table').length)
+  expect(tables).toBe(2)
+})

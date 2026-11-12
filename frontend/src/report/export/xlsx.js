@@ -101,7 +101,60 @@ function borderFor(mode, color) {
  * @param {{block: object, rows: object[], styles: object, params?: object, labels?: object, meta?: object}} input
  * @returns {Promise<Blob>}
  */
-export async function buildWorkbook({ block, rows, styles, params = {}, labels = {}, meta = {} }) {
+/**
+ * Собрать книгу: по листу на каждый табличный блок + лист «Параметры».
+ * Если таблица одна — один лист отчёта (прежнее поведение).
+ * @param {{sheets?: {block: object, rows: object[], styles: object}[], block?: object, rows?: object[],
+ *          styles?: object, params?: object, labels?: object, meta?: object}} input
+ * @returns {Promise<Blob>}
+ */
+export async function buildWorkbook({ sheets, block, rows, styles, params = {}, labels = {}, meta = {} }) {
+  const list = Array.isArray(sheets) && sheets.length ? sheets : [{ block, rows, styles }]
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'Сервер отчётов'
+  wb.created = new Date()
+  wb.properties = { ...(wb.properties || {}) }
+
+  // имя листа: заголовок таблицы, иначе «Таблица N»; повторы и запрещённые символы — Excel не примет
+  const used = new Set(['параметры']) // сравнение без учёта регистра, как в Excel
+  list.forEach((entry, index) => {
+    const title = entry.block?.title || (list.length > 1 ? `Таблица ${index + 1}` : meta.title || 'Отчёт')
+    addSheet(wb, entry.block, entry.rows || [], entry.styles, uniqueSheetName(title, used))
+  })
+
+  // --- лист «Параметры» ---
+  const ps = wb.addWorksheet('Параметры')
+  ps.columns = [
+    { header: 'Параметр', key: 'name', width: 24 },
+    { header: 'Подпись', key: 'label', width: 34 },
+    { header: 'Значение', key: 'value', width: 40 }
+  ]
+  ps.getRow(1).font = { bold: true }
+  for (const [name, value] of Object.entries(params)) {
+    ps.addRow({ name, label: labels[name] || '', value: String(value ?? '') })
+  }
+  ps.addRow({})
+  ps.addRow({ name: 'Отчёт', label: meta.title || '', value: meta.id || '' })
+  ps.addRow({ name: 'Выгружен', label: '', value: new Date().toLocaleString('ru-RU') })
+
+  const buffer = await wb.xlsx.writeBuffer()
+  return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+}
+
+// Уникальное имя листа: Excel не различает регистр и не принимает длиннее 31 символа.
+function uniqueSheetName(title, used) {
+  const base = sheetName(title)
+  let name = base
+  let n = 2
+  while (used.has(name.toLowerCase())) {
+    const suffix = ` (${n++})`
+    name = base.slice(0, 31 - suffix.length) + suffix
+  }
+  used.add(name.toLowerCase())
+  return name
+}
+
+function addSheet(wb, block, rows, styles, name) {
   const leaves = leafColumns(block)
   const columns = leaves.map((l) => l.col)
   const model = buildTableModel(rows, columns, {
@@ -109,12 +162,7 @@ export async function buildWorkbook({ block, rows, styles, params = {}, labels =
     nullLabel: block.nullText || '(пусто)'
   })
 
-  const wb = new ExcelJS.Workbook()
-  wb.creator = 'Сервер отчётов'
-  wb.created = new Date()
-  // Excel-структура: уровни группировки дают те же сворачивания, что и на экране
-  wb.properties = { ...(wb.properties || {}) }
-  const ws = wb.addWorksheet(sheetName(block.title || meta.title || 'Отчёт'), {
+  const ws = wb.addWorksheet(name, {
     views: [{ state: 'frozen', ySplit: Math.max(1, Math.max(...leaves.map((l) => l.headerPath.length)) + 1) }]
   })
 
@@ -262,29 +310,17 @@ export async function buildWorkbook({ block, rows, styles, params = {}, labels =
 
   ws.autoFilter = { from: { row: depth, column: 1 }, to: { row: depth, column: columns.length } }
 
-  // --- лист «Параметры» ---
-  const ps = wb.addWorksheet('Параметры')
-  ps.columns = [
-    { header: 'Параметр', key: 'name', width: 24 },
-    { header: 'Подпись', key: 'label', width: 34 },
-    { header: 'Значение', key: 'value', width: 40 }
-  ]
-  ps.getRow(1).font = { bold: true }
-  for (const [name, value] of Object.entries(params)) {
-    ps.addRow({ name, label: labels[name] || '', value: String(value ?? '') })
-  }
-  ps.addRow({})
-  ps.addRow({ name: 'Отчёт', label: meta.title || '', value: meta.id || '' })
-  ps.addRow({ name: 'Выгружен', label: '', value: new Date().toLocaleString('ru-RU') })
-
-  const buffer = await wb.xlsx.writeBuffer()
-  return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
 }
 
-/** Excel запрещает в имени листа: * ? : \\ / [ ] — и ограничивает 31 символом. */
+/**
+ * Excel запрещает в имени листа: * ? : \ / [ ] — и ограничивает 31 символом.
+ * Длинное название обрезаем и помечаем «…», чтобы было видно, что оно сокращено.
+ */
 export function sheetName(title) {
   const clean = String(title).replace(/[*?:\\/[\]]/g, '·').replace(/\s+/g, ' ').trim()
-  return (clean || 'Отчёт').slice(0, 31)
+  const short = clean || 'Отчёт'
+  if (short.length <= 31) return short
+  return short.slice(0, 30).trimEnd() + '…'
 }
 
 /** Имя файла: <id>-<YYYY-MM-DD>.xlsx */

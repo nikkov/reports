@@ -398,16 +398,20 @@ watch(() => template.value?.refreshSeconds, () => startRefresh(), { immediate: t
 const PRINT_LIMIT = 5000
 
 async function exportExcel() {
-  const block = tableBlock.value
-  if (!block || !template.value) return
+  if (!template.value) return
+  // В отчёте может быть несколько таблиц: каждая идёт на свой лист (ADR-97)
+  const tables = (template.value.blocks || []).filter((b) => b.type === 'table')
+  if (!tables.length) return
   exporting.value = true
   try {
     // ExcelJS грузится лениво: в бандл отчёта он не попадает
     const { buildWorkbook, exportFileName } = await import('./export/xlsx.js')
     const blob = await buildWorkbook({
-      block,
-      rows: rows.value,
-      styles: stylesFor(block),
+      sheets: tables.map((block) => ({
+        block,
+        rows: rowsFor(block),
+        styles: stylesFor(block)
+      })),
       params: { ...paramValues },
       labels: paramLabels.value,
       meta: { id: reportId, title: template.value.title }
