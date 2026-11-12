@@ -920,6 +920,22 @@ function checkGaugeZones(block, base, errors) {
   }
   checkStyles(template?.styles, 'styles', allFields, errors, warnings, template?.styles?.palette || {})
 
+  // Автозагрузка (ADR-89): с выключенной автозагрузкой фоновые обновления не запустятся
+  if (template.autoLoad === false) {
+    if (Number(template.refreshSeconds) > 0) {
+      warnings.push({
+        path: 'autoLoad',
+        message: 'refreshSeconds не сработает: данные загружаются только по кнопке (autoLoad: false)'
+      })
+    }
+    if (template.live === true) {
+      warnings.push({
+        path: 'autoLoad',
+        message: 'live не сработает: данные загружаются только по кнопке (autoLoad: false)'
+      })
+    }
+  }
+
   // Высота блоков (ADR-85): у таблицы и диаграммы — пиксели или процент от окна
   ;(template.blocks || []).forEach((block, i) => {
     if (block.type !== 'table' && block.type !== 'chart') {

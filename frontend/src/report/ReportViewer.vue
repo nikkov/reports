@@ -3,6 +3,7 @@
     <header class="head">
       <h1>{{ template?.title || reportId }}</h1>
       <div class="head-right">
+        <span class="loader" v-if="loading">загрузка…</span>
         <span class="meta" v-if="status">
           строк: <b>{{ rowCount }}</b> · запрос: <b>{{ elapsedMs }} мс</b> · шаблон v{{ template?.version }}
         </span>
@@ -43,10 +44,14 @@
       @submit="load"
     />
 
+    <p v-if="template && !autoLoad && !loadedOnce && !loading" class="hint no-data">
+      Данные не загружены — нажмите «Обновить».
+    </p>
+
     <template v-if="template">
+      <template v-for="(block, index) in template.blocks" :key="index">
       <section
-        v-for="(block, index) in template.blocks"
-        :key="index"
+        v-if="block.type === 'text' || loadedOnce"
         class="block"
         :class="block.width === 'half' ? 'half' : 'full'"
       >
@@ -73,6 +78,7 @@
           @drill="onChartDrill"
         />
       </section>
+      </template>
     </template>
   </div>
 </template>
@@ -99,6 +105,9 @@ const rows = ref([])
 const paramValues = reactive({})
 const paramLabels = ref({})
 const loading = ref(false)
+// Автозагрузка (ADR-89): шаблон может требовать явного нажатия «Обновить»
+const autoLoad = computed(() => template.value?.autoLoad !== false)
+const loadedOnce = ref(false)
 const error = ref(null)
 const elapsedMs = ref(0)
 const status = ref('')
@@ -127,7 +136,8 @@ function stopRefresh() {
 
 function startRefresh() {
   stopRefresh()
-  if (!refreshSeconds.value) return
+  // при autoLoad: false обновление только по кнопке (ADR-89)
+  if (!refreshSeconds.value || !autoLoad.value) return
   refreshTimer.value = setInterval(() => {
     // фон и уже идущий запрос не трогаем: иначе очередь запросов на медленных отчётах
     if (document.hidden || refreshPaused.value || loading.value) return
@@ -206,6 +216,7 @@ async function load() {
     await nextTick()
     // бюджет рендера: только построение модели и отрисовка окна, без времени запроса
     window.__renderMs = Math.round(performance.now() - renderStart)
+    loadedOnce.value = true
     lastLoadedKey = JSON.stringify(paramValues)
     lastLoadedAt.value = new Date()
     elapsedMs.value = Math.round(performance.now() - started)
@@ -252,13 +263,14 @@ onMounted(async () => {
     template.value = draft || (await api.template(reportId))
     stylesCache = new WeakMap()
     Object.assign(paramValues, defaultParams(template.value))
-    if (!needsLookups(template.value)) await load()
+    if (!needsLookups(template.value) && autoLoad.value) await load()
   } catch (e) {
     error.value = { code: e.code || 'ERROR', message: e.message }
   }
 })
 
 function onParamsReady() {
+  if (!autoLoad.value) return // только по кнопке «Обновить»
   if (!loading.value && !lastLoadedKey) load()
 }
 
@@ -269,6 +281,8 @@ watch(
   () => ({ ...paramValues }),
   () => {
     if (!template.value) return
+    // автозагрузка выключена — данные обновляет только кнопка «Обновить»
+    if (!autoLoad.value) return
     // пропускаем перезагрузку, если значения не изменились с последней загрузки
     const key = JSON.stringify(paramValues)
     if (key === lastLoadedKey) return
@@ -318,7 +332,7 @@ const lastLoadedLabel = computed(() =>
 
 // Обновление по событию (ADR-44): одно SSE-соединение на страницу, сервер сам
 // присылает событие после публикации шаблона; переподключение — штатное у EventSource.
-const liveMode = computed(() => template.value?.live === true)
+const liveMode = computed(() => template.value?.live === true && autoLoad.value)
 let liveSource = null
 
 function startLive() {
@@ -567,6 +581,12 @@ body {
 .meta {
   color: #5b6472;
   font-size: 12px;
+}
+/* индикатор идущей загрузки: отдельный класс, чтобы .meta оставался метриками */
+.loader {
+  color: #8a5a00;
+  font-size: 12px;
+  font-style: italic;
 }
 .error {
   background: #fdecec;

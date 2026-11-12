@@ -573,6 +573,10 @@ test('все шаблоны из списка открываются и отда
   for (const r of list) {
     await page.goto(`/report.html?report=${r.id}`)
     await expect(page.locator('h1')).toHaveText(r.title)
+    // отчёт с autoLoad: false ждёт нажатия «Обновить» — тест нажимает
+    if (await page.locator('.no-data').count()) {
+      await page.locator('.params button[type=submit]').click()
+    }
     await expect(page.locator('.error')).toHaveCount(0)
     await expect(page.locator('.meta')).toContainText('строк')
     // Отчёт считается живым, если показал либо строки таблицы, либо диаграмму:
@@ -2312,4 +2316,30 @@ test('форматы дат в колонках: pattern из шаблона и 
   // DD/MM/YYYY — задан в styles.columns, а не в колонке
   expect(cells[3]).toBe('01/03/2026')
   expect(cells[4]).toBe('search')
+})
+
+test('автозагрузка выключена: данные только по кнопке, во время загрузки — «Загрузка…»', async ({ page }) => {
+  const dataCalls = []
+  page.on('request', (r) => {
+    if (r.url().includes('/api/report/data')) dataCalls.push(r.url())
+  })
+
+  await page.goto('/report.html?report=manual-load')
+  await expect(page.locator('.no-data')).toContainText('нажмите «Обновить»')
+  // блоки данных скрыты, пока данных нет; текстовый блок описания виден
+  await expect(page.locator('.rt-table').first()).toBeHidden()
+  expect(dataCalls.length).toBe(0)
+
+  const btn = page.locator('.params button[type=submit]')
+  await expect(btn).toHaveText('Обновить')
+  await btn.click()
+  // длительная загрузка видна и на кнопке, и в шапке
+  await expect(btn).toHaveText('Загрузка…')
+  await expect(btn).toBeDisabled()
+  await expect(page.locator('.loader')).toBeVisible()
+
+  await expect(page.locator('.meta').first()).toContainText('строк: 50000', { timeout: 20000 })
+  await expect(page.locator('.rt-table').first()).toBeVisible()
+  await expect(page.locator('.no-data')).toHaveCount(0)
+  expect(dataCalls.length).toBeGreaterThan(0)
 })

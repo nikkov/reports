@@ -61,6 +61,10 @@ export default {
     "styles": {
       "$ref": "#/$defs/styles"
     },
+    "autoLoad": {
+      "type": "boolean",
+      "description": "загружать данные при открытии отчёта; false — только по кнопке «Обновить» (ADR-89)"
+    },
     "folder": {
       "type": "string",
       "description": "папка в каталоге отчётов"

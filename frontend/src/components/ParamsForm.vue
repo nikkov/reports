@@ -70,7 +70,10 @@
       <span v-if="errors[p.name]" class="err">{{ errors[p.name] }}</span>
     </label>
 
-    <button type="submit" :disabled="loading">{{ loading ? 'загрузка…' : 'Обновить' }}</button>
+    <!-- длительная загрузка видна и на самой кнопке, а не только по пустому экрану (ADR-89) -->
+    <button type="submit" :disabled="loading" :aria-busy="loading">
+      {{ loading ? 'Загрузка…' : 'Обновить' }}
+    </button>
   </form>
 </template>
 

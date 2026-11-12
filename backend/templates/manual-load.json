@@ -1,0 +1,135 @@
+{
+  "version": 2,
+  "id": "manual-load",
+  "title": "Ручная загрузка: данные по кнопке",
+  "description": "autoLoad: false — при открытии данные не запрашиваются, только по кнопке «Обновить»",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2025-10-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, amount, profit, order_date FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id",
+      "connection": "main"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "autoLoad: false — при открытии отчёт не запрашивает данные. Нажмите «Обновить»: кнопка покажет «Загрузка…», а после ответа появятся строки за {{from}} — {{to}}."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "grandTotal": true,
+      "nullText": "—",
+      "columns": [
+        {
+          "field": "order_date",
+          "title": "Дата",
+          "type": "date",
+          "width": 110
+        },
+        {
+          "field": "region",
+          "title": "Регион",
+          "width": 110
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "width": 150
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "width": 130
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "width": 130
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "decimals": 2,
+          "width": 100
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "pie",
+      "title": "Доли категорий в сумме",
+      "xField": "category",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "half"
+    },
+    {
+      "type": "chart",
+      "dataKey": "sales",
+      "chartType": "line",
+      "title": "Сумма по дням",
+      "xField": "order_date",
+      "yField": "amount",
+      "aggregate": "sum",
+      "width": "half"
+    }
+  ],
+  "folder": "Примеры",
+  "tags": [
+    "загрузка",
+    "autoLoad"
+  ],
+  "autoLoad": false
+}
