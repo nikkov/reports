@@ -54,8 +54,12 @@ std::vector<std::string> summaryRow(const ExportSheet &sheet, const GroupLayout 
                                     const std::vector<std::string> &anchor, const std::string &label) {
     std::vector<std::string> out(sheet.columns.size());
     if (level < 0) {
-        // общий итог: подпись в первой групповой колонке
-        if (!layout.groupColumns.empty() && layout.groupColumns[0] < out.size()) out[layout.groupColumns[0]] = label;
+        // общий итог: подпись в первой групповой колонке, а в плоской таблице — в первой (ADR-95)
+        if (layout.groupColumns.empty()) {
+            if (!out.empty()) out[0] = label;
+        } else if (layout.groupColumns[0] < out.size()) {
+            out[layout.groupColumns[0]] = label;
+        }
     } else {
         // предки сохраняют свои значения — строка итога «висит» в своей группе, а не без неё
         for (int i = 0; i < level; ++i) {

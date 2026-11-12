@@ -2526,3 +2526,37 @@ test('Excel: collapsible: false убирает структуру групп, н
   await expect(page.getByRole('button', { name: /Свернуть всё|Развернуть всё/ })).toHaveCount(0)
   await expect(page.locator('.rt-table .chev')).toHaveCount(0)
 })
+
+test('Excel: плоская таблица выгружается целиком, не только шапка и ИТОГО (ADR-95)', async ({ page }) => {
+  const sheetOf = async (file) => {
+    const zip = await JSZip.loadAsync(readFileSync(file))
+    const sheet = await zip.file('xl/worksheets/sheet1.xml').async('string')
+    const sharedFile = zip.file('xl/sharedStrings.xml')
+    const shared = sharedFile ? await sharedFile.async('string') : ''
+    return { sheet, shared }
+  }
+
+  // sales-drill: таблица без группировки, 2746 строк данных
+  await page.goto('/report.html?report=sales-drill')
+  await expect(page.locator('.meta')).toContainText('строк: 2746')
+  const [drill] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('button.tool', { hasText: 'Excel' }).first().click()
+  ])
+  const { sheet: xml, shared } = await sheetOf(await drill.path())
+  const rowCount = (xml.match(/<row /g) || []).length
+  expect(rowCount).toBe(2748) // шапка + 2746 данных + ИТОГО
+  expect(shared).toContain('ИТОГО')
+  // строки данных действительно заполнены: в книге есть регионы и даты периода
+  expect(shared).toMatch(/Запад|Восток|Север|Юг|Центр/)
+
+  // плоская таблица без grandTotal: только шапка и строки данных
+  await page.goto('/report.html?report=date-formats')
+  await expect(page.locator('.meta')).toContainText('строк: 6')
+  const [dates] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('button.tool', { hasText: 'Excel' }).first().click()
+  ])
+  const { sheet: xml2 } = await sheetOf(await dates.path())
+  expect((xml2.match(/<row /g) || []).length).toBe(7) // шапка + 6 строк
+})

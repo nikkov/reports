@@ -214,11 +214,19 @@ export function buildTableModel(rows, columns, opts = {}) {
     if (subtotalLevels.has(node.level)) pushSubtotal(node)
   }
 
-  for (const child of root.children.values()) walk(child, true)
+  // Плоская таблица (нет групповых колонок): все строки — детальные, в порядке набора.
+  // Раньше обход шёл по root.children, а при пустом списке групповых полей там ничего нет —
+  // и в книгу попадали только шапка и ИТОГО (ADR-95).
+  if (!groupFields.length) {
+    for (const r of rows) flat.push(makeRow('detail', 0, null, null, r, null))
+  } else {
+    for (const child of root.children.values()) walk(child, true)
+  }
 
   if (grandTotal) {
     const row = makeRow('grandtotal', -1, { key: '', path: [] }, rootAcc, null, -1)
-    row.values[0] = groupCols.length ? 'ИТОГО' : row.values[0]
+    // «ИТОГО» в первой колонке — и в группированной, и в плоской таблице (как на экране)
+    row.values[0] = 'ИТОГО'
     flat.push(row)
   }
 

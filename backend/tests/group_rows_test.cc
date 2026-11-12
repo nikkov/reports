@@ -178,3 +178,27 @@ TEST_CASE("buildGroupedSheet: collapsible по умолчанию даёт outli
     }
     REQUIRE(hasLevel);
 }
+
+TEST_CASE("buildGroupedSheet: плоская таблица без группировки — ИТОГО с подписью (ADR-95)") {
+    auto sheet = sheetWithRows({
+        {"Восток", "Одежда", "10", "1"},
+        {"Юг", "Обувь", "30", "3"},
+    });
+    rep::GroupLayout layout;
+    layout.measureColumns = {2, 3};
+    layout.grandTotal = true;
+
+    rep::buildGroupedSheet(sheet, layout);
+
+    REQUIRE(sheet.rows.size() == 3);
+    // детали не переставлены и не потеряны
+    REQUIRE(sheet.rows[0][2] == "10");
+    REQUIRE(sheet.rows[1][2] == "30");
+    // итог: подпись в первой колонке, суммы по мерам
+    REQUIRE(sheet.rowKind.back() == static_cast<unsigned char>(rep::RowKind::Grand));
+    REQUIRE(sheet.rows.back()[0] == "ИТОГО");
+    REQUIRE(sheet.rows.back()[2] == "40");
+    REQUIRE(sheet.rows.back()[3] == "4");
+    // структуры нет: групп не объявляли
+    for (int level : sheet.rowLevels) REQUIRE(level == 0);
+}

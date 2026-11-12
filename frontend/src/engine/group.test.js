@@ -232,3 +232,45 @@ describe('вычисляемые колонки в детальных строк
     expect(subtotal.values[5]).toBeCloseTo(1)
   })
 })
+
+describe('buildTableModel: плоская таблица без группировки (ADR-95)', () => {
+  const flatColumns = [
+    { field: 'product', title: 'Продукт' },
+    { field: 'amount', title: 'Сумма', aggregate: 'sum' },
+    { field: 'profit', title: 'Прибыль', aggregate: 'sum' },
+    { title: 'Маржа', expression: 'sum(profit) / sum(amount)' }
+  ]
+  const flatRows = [
+    { product: 'p1', amount: 100, profit: 10 },
+    { product: 'p2', amount: 300, profit: 30 }
+  ]
+
+  it('каждая строка набора становится детальной, порядок сохраняется', () => {
+    const model = buildTableModel(flatRows, flatColumns, {})
+    const details = model.rows.filter((r) => r.kind === 'detail')
+    expect(details).toHaveLength(2)
+    expect(details.map((r) => r.values[0])).toEqual(['p1', 'p2'])
+    // вычисляемая колонка считается по строке, а не по всей таблице
+    expect(details[1].values[3]).toBeCloseTo(30 / 300)
+  })
+
+  it('ИТОГО считает суммы и стоит в первой колонке', () => {
+    const model = buildTableModel(flatRows, flatColumns, {})
+    const total = model.rows.at(-1)
+    expect(total.kind).toBe('grandtotal')
+    expect(total.values[0]).toBe('ИТОГО')
+    expect(total.values[1]).toBe(400)
+    expect(total.values[2]).toBe(40)
+  })
+
+  it('без grandTotal остаются только детали', () => {
+    const model = buildTableModel(flatRows, flatColumns, { grandTotal: false })
+    expect(model.rows).toHaveLength(2)
+    expect(model.rows.every((r) => r.kind === 'detail')).toBe(true)
+  })
+
+  it('пустой набор даёт только ИТОГО (или ничего без grandTotal)', () => {
+    expect(buildTableModel([], flatColumns, {}).rows).toHaveLength(1)
+    expect(buildTableModel([], flatColumns, { grandTotal: false }).rows).toHaveLength(0)
+  })
+})
