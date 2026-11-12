@@ -2405,3 +2405,32 @@ test('два набора — два стиля: datasets.<ключ>.styles за
     totalBg: 'rgb(29, 39, 51)'
   })
 })
+
+test('арифметика дат в default: считается от текущего момента, * пересчитывается (ADR-92)', async ({ page }) => {
+  // часы браузера ставятся до навигации: воскресенье, 17 мая 2026, 14:37
+  await page.clock.install({ time: new Date('2026-05-17T14:37:00') })
+  await page.goto('/report.html?report=period-defaults')
+  await page.clock.runFor(3000)
+
+  const inputs = page.locator('.params input')
+  await expect(inputs.nth(0)).toHaveValue('2026-01-01') // year(*)
+  await expect(inputs.nth(1)).toHaveValue('2026-05-17') // *
+  await expect(inputs.nth(2)).toHaveValue('2026-05-17T09:37') // *-5h
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  // время ушло на три часа: при обновлении * и смещения пересчитываются
+  await page.clock.setFixedTime(new Date('2026-05-17T17:37:00'))
+  await page.locator('.params button[type=submit]').click()
+  await page.clock.runFor(2000)
+  await expect(inputs.nth(2)).toHaveValue('2026-05-17T12:37')
+  await expect(inputs.nth(1)).toHaveValue('2026-05-17')
+
+  // выбранное вручную значение выражение не перезаписывает
+  await inputs.nth(1).fill('2026-03-15')
+  await page.clock.runFor(1500)
+  await page.clock.setFixedTime(new Date('2026-05-18T10:00:00'))
+  await page.locator('.params button[type=submit]').click()
+  await page.clock.runFor(2000)
+  await expect(inputs.nth(1)).toHaveValue('2026-03-15')
+  await expect(inputs.nth(2)).toHaveValue('2026-05-18T05:00')
+})

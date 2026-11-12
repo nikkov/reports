@@ -3426,6 +3426,76 @@
       "errors": [
         "datasets.a.styles.columns.amount.colors.text"
       ]
+    },
+    {
+      "name": "арифметика дат: корректное выражение в default",
+      "template": {
+        "version": 2,
+        "id": "parity-dates",
+        "title": "Арифметика дат",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с",
+            "default": "month(*)-1m+2d"
+          }
+        ],
+        "datasets": {
+          "a": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "a",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "арифметика дат: неизвестная функция в default",
+      "template": {
+        "version": 2,
+        "id": "parity-dates",
+        "title": "Арифметика дат",
+        "params": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "с",
+            "default": "month2(*)"
+          }
+        ],
+        "datasets": {
+          "a": {
+            "sql": "SELECT 1 AS x"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "a",
+            "columns": [
+              {
+                "field": "x",
+                "title": "X"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "params.0.default"
+      ]
     }
   ]
 }

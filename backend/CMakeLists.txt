@@ -34,6 +34,7 @@ add_library(rep_core STATIC
   src/subscriptions.cc
   src/template_migrate.cc
   src/validate.cc
+  src/dates_expr.cc
   src/env.cc
   src/net.cc
   src/params.cc
@@ -78,6 +79,7 @@ add_executable(rep_tests
   tests/connections_test.cc
   tests/static_web_test.cc
   tests/dataset_test.cc
+  tests/dates_expr_test.cc
   tests/queries_test.cc
   tests/params_test.cc
   tests/validate_test.cc

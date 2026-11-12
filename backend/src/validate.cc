@@ -1,5 +1,6 @@
 #include "validate.h"
 
+#include "dates_expr.h"
 #include "template_migrate.h"
 
 #include <algorithm>
@@ -795,6 +796,15 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             const std::string type = asString(param["type"]);
             if (!type.empty() && !isOneOf(type, paramTypes)) {
                 addError(r, path + ".type", "неизвестный тип параметра «" + type + "»");
+            }
+            // Арифметика дат в default (ADR-92): выражения допустимы у date и datetime.
+            // Разбор тот же, что у клиента (frontend/src/template/dates.js), — см. фикстуры parity.
+            if ((type == "date" || type == "datetime") && param["default"].isString()) {
+                const std::string def = param["default"].asString();
+                std::string derr;
+                if (LooksLikeDateExpr(def) && !CheckDateExprSyntax(def, derr)) {
+                    addError(r, path + ".default", "default: " + derr);
+                }
             }
             ++index;
         }

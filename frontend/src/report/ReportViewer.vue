@@ -91,6 +91,7 @@ import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
 import ChartBlock from './ChartBlock.vue'
 import { resolveStyles } from '../template/styles.js'
+import { looksLikeDateExpr, resolveDefaultValue } from '../template/dates.js'
 import { drillAllowed, resolveDrill } from '../engine/drill.js'
 
 const params = new URLSearchParams(location.search)
@@ -116,15 +117,39 @@ let controller = null
 const rowCount = computed(() => rows.value.length)
 const nf = new Intl.NumberFormat('ru-RU')
 
+// Арифметика дат (ADR-92): последние вычисленные значения выражений по имени параметра.
+// Нужны, чтобы отличить «пользователь не трогал» от «выбрал своё» и пересчитать * при обновлении.
+const dateDefaults = {}
+
+function isDateExprParam(p) {
+  return (p?.type === 'date' || p?.type === 'datetime') && p.default !== undefined &&
+    looksLikeDateExpr(p.default)
+}
+
 function defaultParams(tpl) {
   const out = {}
   for (const p of tpl.params || []) {
     const fromUrl = params.get(p.name)
     if (fromUrl !== null) out[p.name] = fromUrl
-    else if (p.default !== undefined) out[p.name] = String(p.default)
-    else out[p.name] = p.type === 'date' ? '' : ''
+    else if (p.default !== undefined) {
+      out[p.name] = resolveDefaultValue(p)
+      if (isDateExprParam(p)) dateDefaults[p.name] = out[p.name]
+    } else out[p.name] = ''
   }
   return out
+}
+
+// Пересчёт перед каждой загрузкой: значения, которых не касался пользователь, снова
+// считаются от текущего момента («*-5h» не застывает на моменте открытия).
+function refreshDateDefaults() {
+  for (const p of template.value?.params || []) {
+    if (!isDateExprParam(p)) continue
+    const fresh = resolveDefaultValue(p)
+    const cur = paramValues[p.name]
+    const untouched = cur === undefined || cur === '' || cur === dateDefaults[p.name]
+    if (untouched && fresh !== cur) paramValues[p.name] = fresh
+    dateDefaults[p.name] = fresh
+  }
 }
 
 function stopRefresh() {
@@ -187,6 +212,8 @@ function rowsFor(block) {
 }
 
 async function load() {
+  // * и смещения пересчитываются от момента загрузки, а не от момента открытия отчёта
+  refreshDateDefaults()
   if (template.value && missingRequired().length) return // ждём автовыбор справочника
   if (controller) controller.abort()
   controller = new AbortController()

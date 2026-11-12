@@ -1,0 +1,105 @@
+{
+  "version": 2,
+  "id": "period-defaults",
+  "title": "Период по умолчанию: арифметика дат",
+  "description": "Значения по умолчанию считаются от текущего момента: year(*), *, *-5h",
+  "folder": "Примеры",
+  "tags": [
+    "параметры",
+    "даты",
+    "default"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "year(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "*",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "at",
+      "type": "datetime",
+      "label": "Данные на момент",
+      "default": "*-5h",
+      "source": {
+        "kind": "datetime"
+      }
+    }
+  ],
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, sum(amount) AS amount, count(*) AS deals FROM reports_examples.sales WHERE order_date BETWEEN :from::date AND :to::date GROUP BY region ORDER BY amount DESC"
+    }
+  },
+  "styles": {
+    "preset": "default"
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Значения по умолчанию считаются в момент загрузки и в локальном поясе браузера: «Период с» — начало текущего года (year(*)), «по» — сегодня (*), «Данные на момент» — пять часов назад (*-5h). При нажатии «Обновить» выражения пересчитываются; выбранное вручную значение не перезаписывается. В демонстрационных данных записи есть только до 31.03.2026."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "title": "Продажи за период по умолчанию",
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": {
+            "style": "number",
+            "decimals": 0,
+            "group": " "
+          },
+          "align": "right"
+        },
+        {
+          "field": "deals",
+          "title": "Заказов",
+          "format": {
+            "style": "integer"
+          },
+          "align": "right"
+        }
+      ]
+    }
+  ]
+}

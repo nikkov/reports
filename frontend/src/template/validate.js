@@ -4,6 +4,7 @@
 import Ajv2020 from 'ajv/dist/2020.js'
 import schema from './schema.js'
 import { analyzeExpression } from '../engine/expr.js'
+import { looksLikeDateExpr, parseDateExpr } from './dates.js'
 
 // Шаблон даты (ADR-88): только известные токены и разделители, и только для формата даты.
 const DATE_PATTERN_RE = /YYYY|YY|MM|M|DD|D|HH|H|mm|ss/g
@@ -347,6 +348,15 @@ export function validateTemplate(template) {
     const path = `params.${index}`
     const src = p.source
     const kind = src?.kind
+
+    // Арифметика дат в default (ADR-92): выражения допустимы у date и datetime,
+    // опечатка в шаблоне — ошибка, а не пустое значение.
+    if ((p.type === 'date' || p.type === 'datetime') && p.default !== undefined && looksLikeDateExpr(p.default)) {
+      const parsed = parseDateExpr(p.default)
+      if (!parsed.ok) {
+        errors.push({ path: `${path}.default`, message: `default: ${parsed.error}` })
+      }
+    }
 
     // Пустой элемент списка задаётся шаблоном явно (ADR-84): интерфейс больше не
     // подставляет «—» сам. Значения value/label проверяет схема, здесь — область действия.
