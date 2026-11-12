@@ -71,10 +71,18 @@ TEST_CASE("данные пользователя из админки прове�
     REQUIRE_FALSE(rep::validateUserInput("analyst_1", "owner", "s3cret-pass", true, err));
     REQUIRE(err.find("роль") != std::string::npos);
 
-    // пароль: обязателен при создании, не короче 8 при смене
-    REQUIRE_FALSE(rep::validateUserInput("analyst_1", "viewer", "", true, err));
+    // пароль: не короче 8 при смене; пустой допустим и при создании (ADR-93)
+    REQUIRE(rep::validateUserInput("analyst_1", "viewer", "", true, err)); // учётная запись без пароля
     REQUIRE_FALSE(rep::validateUserInput("analyst_1", "viewer", "short", false, err));
     REQUIRE(rep::validateUserInput("analyst_1", "viewer", "", false, err)); // «не менять»
+
+    // доменные учётные записи (ADR-93): заглавные буквы и «\\» разрешены
+    REQUIRE(rep::validateUserInput("CORP\\ivanov", "viewer", "", true, err));
+    REQUIRE(rep::validateUserInput("Ivanov@Corp.Example", "author", "", true, err));
+    REQUIRE(rep::validateUserInput("Analyst_1", "viewer", "", true, err));
+    REQUIRE_FALSE(rep::validateUserInput("CORP/ivanov", "viewer", "", true, err));
+    REQUIRE_FALSE(rep::validateUserInput("домен\\иванов", "viewer", "", true, err));
+    REQUIRE_FALSE(rep::validateUserInput(std::string(129, 'a'), "viewer", "", true, err));
 }
 
 

@@ -54,8 +54,11 @@
       <h2>Новый пользователь</h2>
       <label>
         Логин
-        <input v-model="form.login" placeholder="analyst_1" required />
-        <span class="hint">строчные латинские буквы, цифры, «_», «.», «-»; от 3 до 32 символов</span>
+        <input v-model="form.login" placeholder="analyst_1 или CORP\ivanov" required />
+        <span class="hint">
+          латинские буквы в любом регистре, цифры, «_», «.», «-», «\», «@»; от 3 до 128 символов.
+          Доменная учётная запись — в виде CORP\ivanov или ivanov@corp.example
+        </span>
       </label>
       <label>
         Роль
@@ -67,8 +70,11 @@
       </label>
       <label>
         Пароль
-        <input v-model="form.password" type="password" autocomplete="new-password" required />
-        <span class="hint">не короче 8 символов</span>
+        <input v-model="form.password" type="password" autocomplete="new-password" />
+        <span class="hint">
+          не короче 8 символов; пусто — учётная запись без пароля, вход только через доверенный
+          прокси-сервер (доменная аутентификация)
+        </span>
       </label>
       <div class="buttons">
         <button type="submit" class="tool primary" :disabled="saving">Создать</button>

@@ -100,6 +100,29 @@ esac
 psql -qtAc "delete from users where login='$LOGIN'" >/dev/null
 stop
 
+echo "доменные имена: CORP\\ivanov, регистр не важен (ADR-93)"
+DOM="CORP\\dom_proxy_$$"
+DOM_OTHER="corp\\DOM_PROXY_$$"
+start "REP_AUTH_PROXY_AUTOCREATE=1 REP_AUTH_PROXY_ROLE=viewer"
+check "доменный логин — каталог" 200 -H "X-Remote-User: $DOM" "$BASE/api/reports"
+check "тот же логин в другом регистре" 200 -H "X-Remote-User: $DOM_OTHER" "$BASE/api/reports"
+COUNT=$(psql -tAc "select count(*) from users where lower(login) = lower('$DOM')" 2>/dev/null)
+if [ "${COUNT:-0}" = "1" ]; then
+  printf '  ✓ %-46s %s\n' "учётная запись ровно одна" "1"
+else
+  printf '  ✗ %-46s %s\n' "учётная запись ровно одна" "${COUNT:-нет}"
+  FAILS=$((FAILS + 1))
+fi
+DOM_PWD=$(psql -tAc "select password_hash = '' from users where lower(login) = lower('$DOM')" 2>/dev/null)
+if [ "${DOM_PWD:-f}" = "t" ]; then
+  printf '  ✓ %-46s %s\n' "пароль пустой (вход только через прокси)" "ok"
+else
+  printf '  ✗ %-46s %s\n' "пароль пустой (вход только через прокси)" "${DOM_PWD:-нет}"
+  FAILS=$((FAILS + 1))
+fi
+psql -qtAc "delete from users where lower(login) = lower('$DOM')" >/dev/null
+stop
+
 echo
 if [ "$FAILS" -eq 0 ]; then
   echo "PROXY-AUTH: все проверки пройдены"

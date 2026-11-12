@@ -1853,6 +1853,40 @@ test('пользователи: создание, вход, отключение
   expect((await request.delete(`/api/admin/users/${id}`)).ok()).toBeTruthy()
 })
 
+test('доменные учётные записи: заглавные и «\\», пустой пароль (ADR-93)', async ({ page, request, baseURL }) => {
+  const login = 'CORP\\e2e_domain'
+  const other = 'corp\\E2E_DOMAIN' // тот же логин в другом регистре
+
+  const users = await (await request.get('/api/admin/users')).json()
+  for (const u of users.items.filter((x) => x.login.toLowerCase() === login.toLowerCase())) {
+    await request.delete(`/api/admin/users/${u.id}`)
+  }
+
+  // создание с заглавными буквами и «\» без пароля — учётная запись для прокси
+  const created = await request.post('/api/admin/users', { data: { login, role: 'viewer', password: '' } })
+  expect(created.ok()).toBeTruthy()
+  const { id, login: stored } = await created.json()
+  expect(stored).toBe(login)
+
+  // дубликат в другом регистре отклоняется: уникальность по lower(login)
+  const dup = await request.post('/api/admin/users', { data: { login: other, role: 'viewer', password: '' } })
+  expect(dup.status()).toBe(409)
+  expect((await dup.json()).error.code).toBe('LOGIN_TAKEN')
+
+  // вход по паролю для учётной записи без пароля невозможен (а не 500)
+  const ctx = await apiRequest.newContext({ baseURL })
+  expect((await ctx.post('/api/auth/login', { data: { login, password: 'whatever-123' } })).status()).toBe(401)
+  expect((await ctx.post('/api/auth/login', { data: { login, password: '' } })).status()).toBe(422)
+  await ctx.dispose()
+
+  // страница пользователей показывает доменный логин как есть
+  await page.goto('/users.html')
+  // CSS-селектор с «\\» пришлось бы экранировать — ищем строку по тексту
+  await expect(page.locator('tr', { hasText: login })).toContainText(login)
+
+  expect((await request.delete(`/api/admin/users/${id}`)).ok()).toBeTruthy()
+})
+
 test('рассылка: подписки CRUD, cron и адреса проверяются на сервере', async ({ page, request }) => {
   const invalidCron = await request.post('/api/admin/subscriptions', {
     data: { reportId: 'sales-aggregate', cron: '99 * * * *', recipients: ['po@example.test'], params: {} }

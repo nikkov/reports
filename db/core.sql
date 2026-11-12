@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS reports.users (
 
 CREATE INDEX IF NOT EXISTS users_login_idx ON reports.users (login);
 
+-- Доменные учётные записи (ADR-93): логин сравнивается без учёта регистра, поэтому
+-- CORP\ivanov и corp\Ivanov — одна и та же учётная запись, дубликат не создаётся.
+CREATE UNIQUE INDEX IF NOT EXISTS users_login_lower_key ON reports.users (lower(login));
+
 CREATE TABLE IF NOT EXISTS reports.sessions (
     token      text        PRIMARY KEY,
     user_id    integer     NOT NULL REFERENCES reports.users(id) ON DELETE CASCADE,

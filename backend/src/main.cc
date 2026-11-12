@@ -1279,21 +1279,24 @@ int main() {
     auto resolveProxyUser = [db, proxyAutocreate, proxyDefaultRole, proxyRoles, proxyRolesMutex, proxyCacheSeconds](
                                 const std::string &login,
                                 std::function<void(const std::string &role, const std::string &err)> done) {
-        auto remember = [proxyRoles, proxyRolesMutex, proxyCacheSeconds, login](const std::string &role) {
+        // Доменные имена приходят в произвольном регистре (CORP\ivanov, corp\Ivanov) — ADR-93.
+        std::string cacheKey = login;
+        for (char &ch : cacheKey) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        auto remember = [proxyRoles, proxyRolesMutex, proxyCacheSeconds, cacheKey](const std::string &role) {
             if (proxyCacheSeconds <= 0) return;
             std::lock_guard<std::mutex> lock(*proxyRolesMutex);
-            (*proxyRoles)[login] = {role, std::chrono::steady_clock::now() + std::chrono::seconds(proxyCacheSeconds)};
+            (*proxyRoles)[cacheKey] = {role, std::chrono::steady_clock::now() + std::chrono::seconds(proxyCacheSeconds)};
         };
         if (proxyCacheSeconds > 0) {
             std::lock_guard<std::mutex> lock(*proxyRolesMutex);
-            const auto it = proxyRoles->find(login);
+            const auto it = proxyRoles->find(cacheKey);
             if (it != proxyRoles->end() && it->second.until > std::chrono::steady_clock::now()) {
                 done(it->second.role, "");
                 return;
             }
         }
         runQuery(
-            db, "SELECT role FROM users WHERE login = $1 AND enabled", {login},
+            db, "SELECT role FROM users WHERE lower(login) = lower($1) AND enabled", {login},
             [db, login, done, remember, proxyAutocreate, proxyDefaultRole](const orm::Result &res) {
                 if (!res.empty()) {
                     const std::string role = res[0]["role"].as<std::string>();
@@ -1306,21 +1309,31 @@ int main() {
                     return;
                 }
                 // Автосоздание: пароль пустой, поэтому по паролю такой пользователь войти не может.
+                // ON CONFLICT DO NOTHING — уникальность по lower(login) (ADR-93): если учётная запись
+                // уже есть, в том числе записанная в другом регистре, берём существующую.
                 runQuery(
                     db,
                     "INSERT INTO users (login, password_salt, password_hash, role) VALUES ($1, '', '', $2) "
-                    "ON CONFLICT (login) DO UPDATE SET login = EXCLUDED.login RETURNING role, enabled",
+                    "ON CONFLICT DO NOTHING RETURNING role, enabled",
                     {login, proxyDefaultRole},
-                    [login, done, remember](const orm::Result &created) {
-                        if (created.empty() || !created[0]["enabled"].as<bool>()) {
-                            done("", "пользователь прокси отключён администратором");
+                    [db, login, done, remember](const orm::Result &created) {
+                        const auto finish = [login, done, remember](const orm::Result &res) {
+                            if (res.empty() || !res[0]["enabled"].as<bool>()) {
+                                done("", "пользователь прокси отключён администратором");
+                                return;
+                            }
+                            const std::string role = res[0]["role"].as<std::string>();
+                            auditEvent("system", "user.autocreate", "user", login,
+                                       "{\"role\":\"" + role + "\",\"source\":\"proxy\"}", "");
+                            remember(role);
+                            done(role, "");
+                        };
+                        if (!created.empty()) {
+                            finish(created);
                             return;
                         }
-                        const std::string role = created[0]["role"].as<std::string>();
-                        auditEvent("system", "user.autocreate", "user", login,
-                                   "{\"role\":\"" + role + "\",\"source\":\"proxy\"}", "");
-                        remember(role);
-                        done(role, "");
+                        runQuery(db, "SELECT role, enabled FROM users WHERE lower(login) = lower($1)", {login},
+                                 finish, [done](const std::exception_ptr &e) { done("", describeError(e)); });
                     },
                     [done](const std::exception_ptr &e) { done("", describeError(e)); });
             },
@@ -1452,7 +1465,7 @@ int main() {
                 return;
             }
             runQuery(
-                db, "SELECT id, login, password_salt, password_hash, role, enabled FROM users WHERE login = $1",
+                db, "SELECT id, login, password_salt, password_hash, role, enabled FROM users WHERE lower(login) = lower($1)",
                 {login},
                 [db, cb, login, password, sessionTtlHours, req](const orm::Result &res) {
                     if (res.empty() ||
@@ -1545,7 +1558,7 @@ int main() {
                     return;
                 }
                 runQuery(
-                    db, "SELECT role FROM users WHERE login = $1 AND enabled", {login},
+                    db, "SELECT role FROM users WHERE lower(login) = lower($1) AND enabled", {login},
                     [cb, login](const orm::Result &res) {
                         if (res.empty()) {
                             sendError(cb, k403Forbidden, "PROXY_USER_UNKNOWN",
@@ -2382,8 +2395,10 @@ int main() {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
                 return;
             }
-            const std::string salt = rep::randomHex(16);
-            const std::string hash = rep::hashPassword(password, salt);
+            // Пустой пароль — осознанный выбор (ADR-93): учётная запись для прокси-аутентификации.
+            // Тогда salt/hash пустые, и вход по паролю для неё невозможен (verifyPassword вернёт false).
+            const std::string salt = password.empty() ? "" : rep::randomHex(16);
+            const std::string hash = password.empty() ? "" : rep::hashPassword(password, salt);
             const std::string enabled = (*body).get("enabled", true).asBool() ? "true" : "false";
             const char *values[] = {login.c_str(), salt.c_str(), hash.c_str(), role.c_str(), enabled.c_str()};
             PGresult *res = PQexecParams(
@@ -2395,7 +2410,8 @@ int main() {
                 const std::string msg = PQerrorMessage(conn);
                 PQclear(res);
                 PQfinish(conn);
-                const bool duplicate = msg.find("users_login_key") != std::string::npos;
+                const bool duplicate = msg.find("users_login_key") != std::string::npos ||
+                                       msg.find("users_login_lower_key") != std::string::npos;
                 sendError(cb, duplicate ? k409Conflict : k422UnprocessableEntity,
                           duplicate ? "LOGIN_TAKEN" : "INVALID_PARAMS",
                           duplicate ? "логин «" + login + "» уже занят" : msg);
@@ -2408,6 +2424,10 @@ int main() {
                        requestIp(req));
             Json::Value out;
             out["id"] = static_cast<Json::Int64>(std::stoll(newId));
+            // логин возвращаем как сохранён (доменные имена — с регистром и «\\»)
+            out["login"] = login;
+            out["role"] = role;
+            out["enabled"] = enabled == "true";
             PQclear(res);
             PQfinish(conn);
             cb(jsonResponse(out));
@@ -2521,7 +2541,15 @@ int main() {
                     return;
                 }
             }
-            if (!actor.empty() && login == actor && (!enabled || role != oldRole)) {
+            const auto sameLogin = [](const std::string &a, const std::string &b) {
+                if (a.size() != b.size()) return false;
+                for (size_t i = 0; i < a.size(); ++i) {
+                    if (std::tolower(static_cast<unsigned char>(a[i])) !=
+                        std::tolower(static_cast<unsigned char>(b[i]))) return false;
+                }
+                return true;
+            };
+            if (!actor.empty() && sameLogin(login, actor) && (!enabled || role != oldRole)) {
                 finish(k409Conflict, "SELF_PROTECTED", "нельзя отключить себя или сменить себе роль");
                 return;
             }

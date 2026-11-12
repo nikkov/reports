@@ -112,14 +112,17 @@ Role requiredRole(const std::string &method, const std::string &path) {
 
 bool validateUserInput(const std::string &login, const std::string &role, const std::string &password,
                        bool creating, std::string &err) {
-    if (login.size() < 3 || login.size() > 32) {
-        err = "логин: нужно от 3 до 32 символов";
+    // Доменные учётные записи (ADR-93): CORP\ivanov, ivanov@corp.example. Поэтому в логине
+    // разрешены заглавные буквы, «\» и «@», а длина выросла до 128 символов.
+    if (login.size() < 3 || login.size() > 128) {
+        err = "логин: нужно от 3 до 128 символов";
         return false;
     }
     for (char ch : login) {
-        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' || ch == '-';
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
+                        ch == '_' || ch == '.' || ch == '-' || ch == '\\' || ch == '@';
         if (!ok) {
-            err = "логин: допустимы строчные латинские буквы, цифры, '_', '.', '-'";
+            err = "логин: допустимы латинские буквы в любом регистре, цифры, '_', '.', '-', '\\', '@'";
             return false;
         }
     }
@@ -127,10 +130,9 @@ bool validateUserInput(const std::string &login, const std::string &role, const 
         err = "роль должна быть admin, author или viewer";
         return false;
     }
-    if (creating && password.empty()) {
-        err = "пароль обязателен при создании";
-        return false;
-    }
+    // Пароль при создании может быть пустым (ADR-93): такая учётная запись входит только через
+    // доверенный прокси, вход по паролю для неё отклоняется, пока пароль не зададут.
+    (void)creating;
     if (!password.empty() && password.size() < 8) {
         err = "пароль: не короче 8 символов";
         return false;

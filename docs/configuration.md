@@ -117,7 +117,7 @@
 | `REP_ADMIN` | `0` | `1` включает маршруты `/api/admin/**` и запись шаблонов; `0` — 404 |
 | `REP_AUTH` | `0` | режим входа: `0` — выключен, `1` — сессии в cookie (ADR-34), `proxy` — личность от прокси (ADR-54) |
 | `REP_SESSION_TTL_HOURS` | `12` | время жизни сессии, часы (только режим `session`) |
-| `REP_AUTH_PROXY_HEADER` | `X-Remote-User` | заголовок с именем пользователя (режим `proxy`) |
+| `REP_AUTH_PROXY_HEADER` | `X-Remote-User` | заголовок с именем пользователя (режим `proxy`); допускаются доменные имена вида `CORP\\ivanov` или `ivanov@corp.example`, регистр не важен (ADR-93) |
 | `REP_AUTH_PROXY_TRUSTED` | `127.0.0.1,::1` | адреса, с которых принимается заголовок; остальным — 403 |
 | `REP_AUTH_PROXY_AUTOCREATE` | `0` | `1` — заводить неизвестных пользователей прокси |
 | `REP_AUTH_PROXY_ROLE` | `viewer` | роль для таких пользователей |
