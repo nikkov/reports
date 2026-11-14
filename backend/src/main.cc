@@ -186,6 +186,14 @@ void auditEvent(const std::string &actor, const std::string &action, const std::
 // --- Аудит действий (ADR-52) ---------------------------------------------
 // Пишем отдельным коротким соединением: событий немного (админские действия),
 // а блокирующая вставка не требует ни цикла событий, ни захвата колбэков.
+// Логин текущего пользователя (пусто — системное/анонимное событие).
+std::string actorOf(const HttpRequestPtr &req) {
+    if (req && req->attributes()->find("session_login")) {
+        return req->attributes()->get<std::string>("session_login");
+    }
+    return std::string();
+}
+
 // Непосредственная запись строки журнала — используется приёмником логов (ADR-109).
 void writeAuditRow(const std::string &actor, const std::string &action, const std::string &objectType,
                    const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
@@ -4737,6 +4745,7 @@ int main() {
                 cacheKey += '=';
                 cacheKey += kv.second;
             }
+            const std::string actor = actorOf(req);
             const std::string etag =
                 "\"" + std::to_string(std::hash<std::string>{}(cacheKey)) + "\"";
 
@@ -4762,12 +4771,9 @@ int main() {
 
             fetchDatasetRows(
                 *snapshot, datasetKey, bag, dataDb, connRegistry, restCache, maxRows,
-                [cb, &resultCache, cacheKey, etag, req, reportId, datasetKey](const rep::DatasetRows &rows) {
+                [cb, &resultCache, cacheKey, etag, actor, reportId, datasetKey](const rep::DatasetRows &rows) {
                     // действие пользователя: отчёт открыт (ADR-109)
-                    std::string user;
-                    if (req->attributes()->find("session_login")) {
-                        user = req->attributes()->get<std::string>("session_login");
-                    }
+                    const std::string &user = actor;
                     Json::Value ctx(Json::objectValue);
                     ctx["reportId"] = reportId;
                     ctx["dataset"] = datasetKey;
