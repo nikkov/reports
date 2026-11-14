@@ -2970,3 +2970,19 @@ test('публичный отчёт с REST: справочник, шаблон 
   await page.context().close()
   await ctx.dispose()
 })
+
+test('постраничный REST: набор собирает страницы до неполной (ADR-106)', async ({ page, request }) => {
+  const res = await request.post('/api/report/data', {
+    data: { reportId: 'crm-paged', dataset: 'rows', params: {} }
+  })
+  expect(res.ok()).toBeTruthy()
+  const body = await res.json()
+  // 2500 записей при size=1000: страницы 1000 + 1000 + 500
+  expect(body.rowCount).toBe(2500)
+  expect(body.rows[0].id).toBe(1)
+  expect(body.rows.at(-1).id).toBe(2500)
+
+  await page.goto('/report.html?report=crm-paged')
+  await expect(page.locator('.meta')).toContainText('строк: 2500')
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
+})

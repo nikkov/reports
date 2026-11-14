@@ -1040,6 +1040,28 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                     addError(r, path + ".connection",
                              "источник «" + dsConn + "» не помечен kind: \"rest\"");
                 }
+                const Json::Value &page = ds["rest"]["page"];
+                if (page.isObject()) {
+                    if (asString(page["param"]).empty()) {
+                        addError(r, path + ".rest.page.param",
+                                 "rest.page.param обязателен: имя query-параметра страницы");
+                    }
+                    if (page.isMember("size")) {
+                        const int size = page["size"].asInt();
+                        if (size < 1 || size > 50000) {
+                            addError(r, path + ".rest.page.size", "rest.page.size: 1…50000");
+                        }
+                    }
+                    if (page.isMember("maxPages")) {
+                        const int pages = page["maxPages"].asInt();
+                        if (pages < 1 || pages > 1000) {
+                            addError(r, path + ".rest.page.maxPages", "rest.page.maxPages: 1…1000");
+                        }
+                    }
+                    if (page.isMember("start") && page["start"].asInt() < 0) {
+                        addError(r, path + ".rest.page.start", "rest.page.start: не меньше 0");
+                    }
+                }
                 const Json::Value &cols = ds["rest"]["columns"];
                 if (!cols.isArray() || cols.empty()) {
                     addError(r, path + ".rest.columns", "rest.columns: нужен непустой массив колонок");

@@ -3711,6 +3711,149 @@
       "errors": [
         "accessRoles.1"
       ]
+    },
+    {
+      "name": "пагинация REST: корректные параметры",
+      "template": {
+        "version": 2,
+        "id": "parity-page",
+        "title": "Пагинация REST",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "rows": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/rows",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "id",
+                  "type": "int"
+                }
+              ],
+              "page": {
+                "param": "page",
+                "size": 1000,
+                "maxPages": 5
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "rows",
+            "columns": [
+              {
+                "field": "id",
+                "title": "#"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "пагинация REST: size = 0",
+      "template": {
+        "version": 2,
+        "id": "parity-page",
+        "title": "Пагинация REST",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "rows": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/rows",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "id",
+                  "type": "int"
+                }
+              ],
+              "page": {
+                "param": "page",
+                "size": 0
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "rows",
+            "columns": [
+              {
+                "field": "id",
+                "title": "#"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.rows.rest.page.size"
+      ]
+    },
+    {
+      "name": "пагинация REST: maxPages больше 1000",
+      "template": {
+        "version": 2,
+        "id": "parity-page",
+        "title": "Пагинация REST",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "rows": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/rows",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "id",
+                  "type": "int"
+                }
+              ],
+              "page": {
+                "param": "page",
+                "maxPages": 2000
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "rows",
+            "columns": [
+              {
+                "field": "id",
+                "title": "#"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.rows.rest.page.maxPages"
+      ]
     }
   ]
 }
