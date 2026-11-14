@@ -166,6 +166,9 @@ rep::log::Action legacyAction(const std::string &action) {
 void auditEvent(const std::string &actor, const std::string &action, const std::string &objectType,
                 const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
     Json::Value ctx(Json::objectValue);
+    // в журнале остаётся прежняя строка действия (template.update) — её видят админка
+    // и фильтры; enum используется в stdout JSON
+    ctx["legacy_action"] = action;
     ctx["object_type"] = objectType;
     ctx["object_id"] = objectId;
     if (!ip.empty()) ctx["ip"] = ip;
@@ -906,6 +909,13 @@ int main() {
         details["level"] = rep::log::levelName(e.level);
         details["message"] = e.message;
         details["ts"] = ts;
+        // поля исходного details остаются на верхнем уровне — их читают админка и тесты
+        if (e.context.isObject() && e.context.isMember("details") &&
+            e.context["details"].isObject()) {
+            for (const auto &key : e.context["details"].getMemberNames()) {
+                if (!details.isMember(key)) details[key] = e.context["details"][key];
+            }
+        }
         if (e.context.isObject()) details["context"] = e.context;
         Json::StreamWriterBuilder writer;
         writer["indentation"] = "";
@@ -919,8 +929,12 @@ int main() {
         if (e.context.isObject() && e.context.isMember("object_id")) {
             objectId = e.context["object_id"].asString();
         }
-        writeAuditRow(e.user.empty() ? "system" : e.user, rep::log::actionName(e.action), objectType,
-                      objectId, Json::writeString(writer, details), ip);
+        std::string auditAction = rep::log::actionName(e.action);
+        if (e.context.isObject() && e.context.isMember("legacy_action")) {
+            auditAction = e.context["legacy_action"].asString();
+        }
+        writeAuditRow(e.user.empty() ? "system" : e.user, auditAction, objectType, objectId,
+                      Json::writeString(writer, details), ip);
     });
 
     const std::string host = rep::envOr("REP_HOST", "0.0.0.0");
