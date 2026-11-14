@@ -47,6 +47,9 @@ async function request(path, options = {}) {
   return body
 }
 
+
+import { normalizeDataset } from './normalize.js'
+
 export const api = {
   health: () => request('/api/health'),
   reports: () => request('/api/reports'),
@@ -66,8 +69,8 @@ export const api = {
     )
   },
   // серверная агрегация (ADR-37): GROUP BY по groupBy, агрегаты по measures
-  aggregate: (reportId, params, spec, signal, dataset, draft = false) =>
-    request('/api/report/aggregate', {
+  aggregate: async (reportId, params, spec, signal, dataset, draft = false) =>
+    normalizeDataset(await request('/api/report/aggregate', {
       method: 'POST',
       body: JSON.stringify({
         reportId,
@@ -78,7 +81,7 @@ export const api = {
         measures: spec.measures || []
       }),
       signal
-    }),
+    })),
 
   // детали одной группы серверной агрегации (ADR-65): field — колонка groupBy, value — ключ
   group: (reportId, params, spec, signal) =>
@@ -99,6 +102,8 @@ export const api = {
     }),
 
   // dataset — ключ из datasets шаблона (ADR-36); без него сервер отдаёт первый набор
+  // Компактный ответ (ADR-114): rows — массивы значений, columns — имена. Приводим к
+  // прежнему виду (объект на строку), чтобы движок и шаблоны не знали о формате.
   // Строка для текстового блока (ADR-101): запрос обязан вернуть не более одной строки
   text: (reportId, params, dataset, draft = false, signal) =>
     request('/api/report/text', {
@@ -112,8 +117,8 @@ export const api = {
       signal
     }),
 
-  data: (reportId, params, signal, dataset, draft = false) =>
-    request('/api/report/data', {
+  data: async (reportId, params, signal, dataset, draft = false) =>
+    normalizeDataset(await request('/api/report/data', {
       method: 'POST',
       body: JSON.stringify({
         reportId,
@@ -122,7 +127,7 @@ export const api = {
         ...(draft ? { draft: true } : {})
       }),
       signal
-    }),
+    })),
 
   // --- администрирование шаблонов (ADR-26) ---
   // каталог с серверным поиском и пагинацией (ADR-41)

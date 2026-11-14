@@ -613,6 +613,108 @@ Json::Value datasetJson(const rep::DatasetRows &rows) {
     return out;
 }
 
+
+// Компактная сериализация набора (ADR-114): строки — массивы значений, а не объекты
+// с именами полей. На 50 000 строк × 8 колонок это втрое меньше байт и заметно
+// меньше времени на сборку: Json::Value на каждую строку дорог.
+namespace {
+
+void appendJsonString(std::string &out, const std::string &s) {
+    out += '"';
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+        }
+    }
+    out += '"';
+}
+
+bool isJsonNumber(const std::string &s, bool allowFloat) {
+    if (s.empty()) return false;
+    size_t i = (s[0] == '-') ? 1 : 0;
+    if (i >= s.size()) return false;
+    bool digit = false, dot = false;
+    for (; i < s.size(); ++i) {
+        const char c = s[i];
+        if (c >= '0' && c <= '9') {
+            digit = true;
+        } else if (allowFloat && c == '.' && !dot) {
+            dot = true;
+        } else {
+            return false;
+        }
+    }
+    return digit;
+}
+
+} // namespace
+
+// Ответ с готовым JSON-телом (компактный формат, ADR-114).
+drogon::HttpResponsePtr jsonTextResponse(const std::string &payload) {
+    auto resp = drogon::HttpResponse::newHttpResponse();
+    resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+    resp->setBody(payload);
+    return resp;
+}
+
+std::string datasetJsonFast(const rep::DatasetRows &rows) {
+    std::string out;
+    out.reserve(rows.rows.size() * (rows.columns.size() * 10 + 6) + 256);
+    out += "{\"columns\":[";
+    for (size_t i = 0; i < rows.columns.size(); ++i) {
+        if (i) out += ',';
+        out += "{\"name\":";
+        appendJsonString(out, rows.columns[i].name);
+        out += ",\"type\":";
+        appendJsonString(out, rows.columns[i].type);
+        if (!rows.columns[i].title.empty() && rows.columns[i].title != rows.columns[i].name) {
+            out += ",\"title\":";
+            appendJsonString(out, rows.columns[i].title);
+        }
+        out += '}';
+    }
+    out += "],\"rows\":[";
+    for (size_t r = 0; r < rows.rows.size(); ++r) {
+        if (r) out += ',';
+        out += '[';
+        const auto &row = rows.rows[r];
+        for (size_t i = 0; i < rows.columns.size(); ++i) {
+            if (i) out += ',';
+            const std::string value = i < row.size() ? row[i] : std::string();
+            if (value.empty()) {
+                out += "null";
+                continue;
+            }
+            const std::string &type = rows.columns[i].type;
+            if ((type == "int" && isJsonNumber(value, false)) ||
+                (type == "float" && isJsonNumber(value, true))) {
+                out += value;
+            } else if (type == "bool") {
+                out += (value == "true" || value == "1") ? "true" : "false";
+            } else {
+                appendJsonString(out, value);
+            }
+        }
+        out += ']';
+    }
+    out += "],\"rowCount\":";
+    out += std::to_string(rows.rows.size());
+    out += ",\"truncated\":false,\"layout\":\"compact\"}";
+    return out;
+}
+
 // Агрегация в памяти для наборов, у которых нет SQL (rest и join, ADR-104):
 // те же groupBy/меры, что у серверной агрегации SQL-наборов (ADR-37).
 bool aggregateRows(const rep::DatasetRows &in, const std::vector<std::string> &groupBy,
@@ -2918,7 +3020,7 @@ int main() {
                                           " строк: сузьте параметры");
                             return;
                         }
-                        cb(jsonResponse(datasetJson(agg)));
+                        cb(jsonTextResponse(datasetJsonFast(agg)));
                     },
                     [cb](int status, const std::string &code, const std::string &msg) {
                         sendError(cb, static_cast<HttpStatusCode>(status), code, msg);
@@ -4804,11 +4906,8 @@ const std::string from = req->getParameter("from");
                     ctx["rows"] = static_cast<Json::UInt64>(rows.rows.size());
                     rep::log::event(rep::log::Level::Info, rep::log::Action::OpenReport, user,
                                     "открыт отчёт " + reportId, ctx);
-                    Json::Value out = datasetJson(rows);
-
-                    Json::StreamWriterBuilder wb;
-                    wb["indentation"] = "";
-                    std::string payload = Json::writeString(wb, out);
+                    // компактный формат: строки-массивы, сборка строкой (ADR-114)
+                    std::string payload = datasetJsonFast(rows);
                     resultCache.put(cacheKey, payload, etag);
 
                     auto resp = HttpResponse::newHttpResponse();
