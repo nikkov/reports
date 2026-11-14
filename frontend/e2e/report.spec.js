@@ -2828,3 +2828,45 @@ test('доступ к отчётам по ролям: каталог скрыв�
   await ctx.dispose()
   expect((await request.delete(`/api/admin/users/${id}`)).ok()).toBeTruthy()
 })
+
+test('публичный отчёт открывается без входа, остальные — нет (ADR-103)', async ({ browser, baseURL }) => {
+  // анонимный контекст: намеренно пустое состояние (в проекте задан storageState admin)
+  const anonState = { cookies: [], origins: [] }
+  const anonCtx = await apiRequest.newContext({ baseURL, storageState: anonState })
+  const anon = await browser.newContext({ baseURL, storageState: anonState })
+
+  // шаблон публичного отчёта отдаётся без входа и помечен public
+  const tplRes = await anonCtx.get('/api/reports/public-demo')
+  expect(tplRes.ok()).toBeTruthy()
+  expect((await tplRes.json()).public).toBe(true)
+
+  // данные и экспорт — тоже
+  const data = await anonCtx.post('/api/report/data', {
+    data: { reportId: 'public-demo', params: { from: '2026-01-01', to: '2026-11-14' } }
+  })
+  expect(data.ok()).toBeTruthy()
+  expect((await data.json()).rowCount).toBeGreaterThan(0)
+  const xlsx = await anonCtx.post('/api/report/export.xlsx', {
+    data: { reportId: 'public-demo', params: { from: '2026-01-01', to: '2026-11-14' } }
+  })
+  expect(xlsx.ok()).toBeTruthy()
+
+  // закрытый отчёт и каталог без входа — 401
+  expect((await anonCtx.get('/api/reports/sales-drill')).status()).toBe(401)
+  expect((await anonCtx.get('/api/reports')).status()).toBe(401)
+
+  // страница публичного отчёта открывается без сессии и строит таблицу
+  const page = await anon.newPage()
+  await page.goto('/report.html?report=public-demo')
+  await expect(page.locator('h1')).toContainText('Открытый отчёт')
+  await expect(page.locator('.meta')).toContainText('строк: 5')
+  await expect(page.locator('.rt-table tbody tr.detail')).toHaveCount(5)
+  await expect(page.locator('.params')).toHaveCount(1)
+
+  // обычный отчёт без входа уводит на страницу входа
+  await page.goto('/report.html?report=sales-drill')
+  await page.waitForURL(/login\.html/)
+
+  await anon.close()
+  await anonCtx.dispose()
+})

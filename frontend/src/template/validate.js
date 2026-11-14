@@ -249,6 +249,14 @@ export function validateTemplate(template) {
     warnings.push({ path: 'version', message: `шаблон версии ${template.version}: при сохранении будет переведён в версию 2` })
   }
 
+  // Публичный отчёт (ADR-103) важнее ролей: роли в нём не нужны
+  if (template.public === true && Array.isArray(template.accessRoles) && template.accessRoles.length) {
+    warnings.push({
+      path: 'accessRoles',
+      message: 'отчёт публичный (public: true): роли доступа не нужны и игнорируются'
+    })
+  }
+
   // Роли доступа к отчёту (ADR-102): ключи в нижнем регистре, без повторов
   if (Array.isArray(template.accessRoles)) {
     const seen = new Set()

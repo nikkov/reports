@@ -647,6 +647,7 @@ int main() {
         PQclear(res);
     };
 
+
     // Ключи ролей, объявленные шаблоном отчёта (accessRoles).
     auto templateAccessRoles = [](const Json::Value &tpl) {
         std::vector<std::string> out;
@@ -721,6 +722,44 @@ int main() {
     const int sessionTtlHours = std::stoi(rep::envOr("REP_SESSION_TTL_HOURS", "12"));
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
     std::mutex templatesMutex;
+
+    // Публичный отчёт (ADR-103): открывается по прямой ссылке без входа. Флаг `public`
+    // в шаблоне важнее accessRoles. Ниже — определение отчёта по запросу и его публичности;
+    // имена наборов/параметров при этом не нужны.
+    auto reportIdOfRequest = [](const HttpRequestPtr &req) {
+        const std::string path = req->path();
+        static const std::set<std::string> dataPaths = {
+            "/api/report/data",       "/api/report/aggregate", "/api/report/group",
+            "/api/report/text",       "/api/report/export.xlsx", "/api/report/export.csv"};
+        if (dataPaths.count(path)) {
+            const auto body = req->getJsonObject();
+            return body ? body->get("reportId", "").asString() : std::string();
+        }
+        if (path.rfind("/api/reports/", 0) == 0) {
+            std::string rest = path.substr(std::string("/api/reports/").size());
+            const auto slash = rest.find('/');
+            if (slash != std::string::npos) rest = rest.substr(0, slash); // …/lookups/<param>
+            if (!rest.empty() && rest != "publish") return rest;
+        }
+        return std::string();
+    };
+    auto reportIsPublic = [&templatesRaw, &templatesMutex](const std::string &id) {
+        if (id.empty()) return false;
+        std::string raw;
+        {
+            std::lock_guard<std::mutex> lock(templatesMutex);
+            const auto it = templatesRaw.find(id);
+            if (it == templatesRaw.end()) return false;
+            raw = it->second;
+        }
+        Json::CharReaderBuilder builder;
+        Json::Value tpl;
+        std::string errs;
+        std::istringstream in(raw);
+        if (!Json::parseFromStream(builder, in, &tpl, &errs)) return false;
+        return tpl.get("public", false).asBool();
+    };
+
     // Версия шаблонов: входит в ключ кэша, поэтому публикация/удаление отчёта
     // автоматически «сбрасывают» устаревшие результаты.
     std::atomic<std::uint64_t> templatesVersion{1};
@@ -1507,10 +1546,16 @@ int main() {
     // Проверка сессии до маршрутизации: один раз на запрос, роль зависит от метода и пути.
     if (authEnabled) {
         app().registerPreRoutingAdvice(
-            [db, authMode, proxyAuth, proxyHeader, proxyTrusted, resolveProxyUser, &unauthorized, &forbidden](
-                const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
+            [db, authMode, proxyAuth, proxyHeader, proxyTrusted, resolveProxyUser, &unauthorized, &forbidden,
+             reportIsPublic, reportIdOfRequest](const HttpRequestPtr &req, AdviceCallback &&respond,
+                                                AdviceChainCallback &&next) {
                 const rep::Role need = rep::requiredRole(std::string(req->methodString()), req->path());
                 if (need == rep::Role::Public) {
+                    next();
+                    return;
+                }
+                // публичный отчёт открывается без входа (ADR-103)
+                if (reportIsPublic(reportIdOfRequest(req))) {
                     next();
                     return;
                 }
@@ -1585,9 +1630,13 @@ int main() {
                     // проверки сессии (роль и логин уже в attributes) и до маршрутизации.
                     if (authEnabled) {
                     app().registerPreRoutingAdvice(
-                    [allowedForReport, accessRolesOfRaw, &templatesRaw, &templatesMutex](
-                    const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
-                    const std::string path = req->path();
+                    [allowedForReport, accessRolesOfRaw, reportIsPublic, reportIdOfRequest, &templatesRaw,
+                     &templatesMutex](const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
+                        if (reportIsPublic(reportIdOfRequest(req))) {
+                            next();
+                            return;
+                        }
+                        const std::string path = req->path();
                     static const std::set<std::string> dataPaths = {
                         "/api/report/data",     "/api/report/aggregate", "/api/report/group",
                         "/api/report/text",     "/api/report/export.xlsx", "/api/report/export.csv"};

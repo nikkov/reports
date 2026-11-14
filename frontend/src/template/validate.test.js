@@ -438,3 +438,38 @@ describe('табличный блок: заголовок и агрегация 
     expect(paths(res)).toContain('blocks.1.aggregate.measures')
   })
 })
+
+describe('публичный отчёт (ADR-103)', () => {
+  const base = () => ({
+    version: 2,
+    id: 'pub',
+    title: 'Публичный',
+    datasets: { a: { sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 'a', columns: [{ field: 'x', title: 'X' }] }]
+  })
+
+  it('public: true без ролей — без ошибок и предупреждений', () => {
+    const tpl = base()
+    tpl.public = true
+    const res = validateTemplate(tpl)
+    expect(res.errors).toEqual([])
+    expect(res.warnings.filter((w) => w.path === 'accessRoles')).toEqual([])
+  })
+
+  it('public: true вместе с accessRoles — предупреждение: роли игнорируются', () => {
+    const tpl = base()
+    tpl.public = true
+    tpl.accessRoles = ['finance']
+    const res = validateTemplate(tpl)
+    expect(res.errors).toEqual([])
+    expect(res.warnings.map((w) => w.path)).toContain('accessRoles')
+    expect(res.warnings.find((w) => w.path === 'accessRoles').message).toContain('публичный')
+  })
+
+  it('accessRoles без public — обычные роли, без предупреждения', () => {
+    const tpl = base()
+    tpl.accessRoles = ['finance']
+    const res = validateTemplate(tpl)
+    expect(res.warnings.filter((w) => w.path === 'accessRoles')).toEqual([])
+  })
+})

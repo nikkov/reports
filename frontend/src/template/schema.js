@@ -61,6 +61,10 @@ export default {
     "styles": {
       "$ref": "#/$defs/styles"
     },
+    "public": {
+      "type": "boolean",
+      "description": "открывать отчёт по прямой ссылке без входа; важнее accessRoles (ADR-103)"
+    },
     "accessRoles": {
       "type": "array",
       "maxItems": 20,

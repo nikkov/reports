@@ -641,6 +641,12 @@ ValidationResult validateTemplateJson(const Json::Value &root,
         addError(r, "datasets", "datasets должен быть объектом");
     }
 
+    // Публичный отчёт (ADR-103) важнее ролей: роли в нём не нужны
+    if (root["public"].asBool() && root["accessRoles"].isArray() && !root["accessRoles"].empty()) {
+        addWarning(r, "accessRoles",
+                   "отчёт публичный (public: true): роли доступа не нужны и игнорируются");
+    }
+
     // Роли доступа к отчёту (ADR-102): ключи в нижнем регистре, без повторов
     if (root["accessRoles"].isArray()) {
         std::set<std::string> seen;
