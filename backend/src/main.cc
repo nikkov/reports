@@ -130,11 +130,62 @@ void notifyChange(const std::string &reportId) {
 }
 
 
+
+// Совместимость со старыми вызовами: админские действия пишутся через единую функцию
+// логирования (ADR-109), а не отдельным механизмом. Строка «template.create» превращается
+// в enum-действие, ip и объект уходят в контекст.
+namespace {
+
+rep::log::Level legacyLevel(const std::string &action) {
+    if (action == "auth.login_failed" || action == "subscription.given_up") {
+        return rep::log::Level::Warning;
+    }
+    return rep::log::Level::Info;
+}
+
+rep::log::Action legacyAction(const std::string &action) {
+    if (action.rfind("template.", 0) == 0) {
+        return action == "template.publish" ? rep::log::Action::PublishTemplate
+                                            : rep::log::Action::ChangeTemplate;
+    }
+    if (action == "auth.login" || action == "auth.login_failed") return rep::log::Action::Login;
+    if (action == "user.create" || action == "user.autocreate") return rep::log::Action::CreateUser;
+    if (action == "user.delete") return rep::log::Action::DeleteUser;
+    if (action == "user.update") return rep::log::Action::ChangeUser;
+    if (action.rfind("role.", 0) == 0) return rep::log::Action::ChangeRoles;
+    if (action.rfind("subscription.", 0) == 0) {
+        return action == "subscription.run" || action == "subscription.given_up"
+                   ? rep::log::Action::RunSubscription
+                   : rep::log::Action::ChangeSubscription;
+    }
+    return rep::log::Action::Other;
+}
+
+}  // namespace
+
+void auditEvent(const std::string &actor, const std::string &action, const std::string &objectType,
+                const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
+    Json::Value ctx(Json::objectValue);
+    ctx["object_type"] = objectType;
+    ctx["object_id"] = objectId;
+    if (!ip.empty()) ctx["ip"] = ip;
+    if (!detailsJson.empty() && detailsJson != "{}") {
+        Json::CharReaderBuilder builder;
+        Json::Value details;
+        std::string errs;
+        std::istringstream in(detailsJson);
+        if (Json::parseFromStream(builder, in, &details, &errs)) ctx["details"] = details;
+    }
+    rep::log::event(legacyLevel(action), legacyAction(action), actor == "system" ? "" : actor,
+                    action, ctx);
+}
+
 // --- Аудит действий (ADR-52) ---------------------------------------------
 // Пишем отдельным коротким соединением: событий немного (админские действия),
 // а блокирующая вставка не требует ни цикла событий, ни захвата колбэков.
-void auditEvent(const std::string &actor, const std::string &action, const std::string &objectType,
-                const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
+// Непосредственная запись строки журнала — используется приёмником логов (ADR-109).
+void writeAuditRow(const std::string &actor, const std::string &action, const std::string &objectType,
+                   const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
     PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
     if (PQstatus(conn) != CONNECTION_OK) {
         REP_LOG_WARN(AuditFailed, "") << "аудит: нет соединения с БД: " << PQerrorMessage(conn);
@@ -840,6 +891,9 @@ int main() {
     }
     rep::loadDotEnv(rep::envOr("REP_ENV_FILE", "backend/.env"));
 
+    // Минимальный уровень записи (REP_LOG_LEVEL, по умолчанию info)
+    rep::log::setMinLevel(rep::log::parseLevel(rep::envOr("REP_LOG_LEVEL", "info")));
+
     // Приёмник логов (ADR-109): каждое событие rep::log::event пишется в журнал аудита.
     // object_type = "log", object_id — из контекста (reportId/id), ip пока не передаётся.
     rep::log::setSink([](const rep::log::Event &e, const std::string &ts) {
@@ -856,8 +910,17 @@ int main() {
         Json::StreamWriterBuilder writer;
         writer["indentation"] = "";
         writer["emitUTF8"] = true;
-        auditEvent(e.user.empty() ? "system" : e.user, rep::log::actionName(e.action), "log",
-                   objectId, Json::writeString(writer, details), "");
+        std::string ip;
+        if (e.context.isObject() && e.context.isMember("ip")) ip = e.context["ip"].asString();
+        const std::string objectType =
+            e.context.isObject() && e.context.isMember("object_type")
+                ? e.context["object_type"].asString()
+                : "log";
+        if (e.context.isObject() && e.context.isMember("object_id")) {
+            objectId = e.context["object_id"].asString();
+        }
+        writeAuditRow(e.user.empty() ? "system" : e.user, rep::log::actionName(e.action), objectType,
+                      objectId, Json::writeString(writer, details), ip);
     });
 
     const std::string host = rep::envOr("REP_HOST", "0.0.0.0");

@@ -100,3 +100,20 @@ TEST_CASE("log: приёмник получает событие с той же 
     REQUIRE(!seenTs.empty());
     REQUIRE(seenAction == "login");
 }
+
+TEST_CASE("log: уровень из настройки и фильтр REP_LOG_LEVEL") {
+    REQUIRE(rep::log::parseLevel("trace") == Level::Trace);
+    REQUIRE(rep::log::parseLevel("warning") == Level::Warning);
+    REQUIRE(rep::log::parseLevel("warn") == Level::Warning);
+    REQUIRE(rep::log::parseLevel("error") == Level::Error);
+    REQUIRE(rep::log::parseLevel("чепуха") == Level::Info); // неизвестное — info
+
+    int seen = 0;
+    rep::log::setSink([&](const rep::log::Event &, const std::string &) { ++seen; });
+    rep::log::setMinLevel(Level::Error);
+    rep::log::event(Level::Info, Action::OpenReport, "admin", "не должно попасть");
+    rep::log::event(Level::Error, Action::SqlError, "", "должно попасть");
+    rep::log::setMinLevel(Level::Info);
+    rep::log::setSink(nullptr);
+    REQUIRE(seen == 1);
+}

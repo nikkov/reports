@@ -51,6 +51,7 @@ const char *actionName(Action action) {
         case Action::ChangeRoles: return "change_roles";
         case Action::ChangeTemplate: return "change_template";
         case Action::PublishTemplate: return "publish_template";
+        case Action::ChangeSubscription: return "change_subscription";
         case Action::RunSubscription: return "run_subscription";
         case Action::AccessDenied: return "access_denied";
         case Action::ServerStart: return "server_start";
@@ -63,6 +64,35 @@ const char *actionName(Action action) {
         case Action::Other: return "other";
     }
     return "unknown";
+}
+
+Level parseLevel(const std::string &name) {
+    if (name == "trace") return Level::Trace;
+    if (name == "debug") return Level::Debug;
+    if (name == "warning" || name == "warn") return Level::Warning;
+    if (name == "error") return Level::Error;
+    return Level::Info;
+}
+
+namespace {
+Level &minLevelRef() {
+    static Level level = Level::Info;
+    return level;
+}
+std::mutex &minLevelMutex() {
+    static std::mutex m;
+    return m;
+}
+} // namespace
+
+void setMinLevel(Level level) {
+    std::lock_guard<std::mutex> lock(minLevelMutex());
+    minLevelRef() = level;
+}
+
+Level minLevel() {
+    std::lock_guard<std::mutex> lock(minLevelMutex());
+    return minLevelRef();
 }
 
 std::string timestampNow() {
@@ -109,6 +139,7 @@ Sink sink() {
 
 void event(Level level, Action action, const std::string &user, const std::string &message,
            const Json::Value &context) {
+    if (static_cast<int>(level) < static_cast<int>(minLevel())) return; // фильтр REP_LOG_LEVEL
     Event e;
     e.level = level;
     e.action = action;

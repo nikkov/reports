@@ -34,6 +34,7 @@ enum class Action {
     ChangeRoles,
     ChangeTemplate,
     PublishTemplate,
+    ChangeSubscription,
     RunSubscription,
     AccessDenied,
     // технические события сервера
@@ -48,6 +49,12 @@ enum class Action {
 };
 
 const char *levelName(Level level);   // "trace" | "debug" | "info" | "warning" | "error"
+// Разбор уровня из настройки (REP_LOG_LEVEL); неизвестное значение — info.
+Level parseLevel(const std::string &name);
+
+// Минимальный уровень для записи (REP_LOG_LEVEL, по умолчанию info).
+void setMinLevel(Level level);
+Level minLevel();
 const char *actionName(Action action); // "open_report", "change_user", ...
 
 struct Event {
