@@ -24,11 +24,23 @@ struct RestColumn {
     std::string as; // имя в результате; пусто — field
 };
 
+// Пагинация REST (ADR-104): сервис отдаёт страницами — собираем до лимита строк.
+struct RestPage {
+    std::string param;      // имя query-параметра номера страницы, например page
+    std::string sizeParam;  // имя параметра размера, например limit; пусто — не передаём
+    int size = 1000;        // записей на страницу
+    int maxPages = 20;      // предохранитель от бесконечного цикла
+    int start = 1;          // с какой страницы начинать
+
+    bool enabled() const { return !param.empty(); }
+};
+
 struct RestSpec {
     std::string path;                     // /api/regions
     std::map<std::string, std::string> query;
     std::string rowsPath;                 // items | data.rows | пусто — корень
     std::vector<RestColumn> columns;
+    RestPage page;
 };
 
 // Разбор datasets.<key>.rest. false + текст ошибки (семантику дополнительно проверяет валидатор).

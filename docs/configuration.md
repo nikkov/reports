@@ -226,5 +226,7 @@ export REP_SMTP_HOST=smtp.corp.local REP_SMTP_PORT=587 REP_SMTP_TLS=1
 | `REP_REST_CACHE_ENTRIES` | `128` | размер LRU-кеша ответов REST |
 | `REP_REST_CACHE_TTL_SECONDS` | `0` | запасной TTL кеша, если в шаблоне не задан `cacheSeconds` |
 
+| `REP_JOIN_MAX_ROWS` | `200000` | предел строк каждой стороны объединения; больше — `ROW_LIMIT` |
+
 Таймаут запроса задаётся в шаблоне (`connections.<ключ>.timeoutMs`, 100…30000 мс), кеш — там же
 (`cacheSeconds`). Без `REP_REST_ALLOW_HOSTS` REST-наборы недоступны: это осознанная защита от SSRF.

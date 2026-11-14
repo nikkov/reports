@@ -314,6 +314,37 @@ export default {
           "items": {
             "$ref": "#/$defs/restColumn"
           }
+        },
+        "page": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "param"
+          ],
+          "description": "постраничный REST: сервис отдаёт страницами, набор собирает их до лимита (ADR-104)",
+          "properties": {
+            "param": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sizeParam": {
+              "type": "string"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50000
+            },
+            "maxPages": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     },

@@ -120,6 +120,22 @@ bool parseRestSpec(const Json::Value &rest, RestSpec &out, std::string &error) {
         for (auto it = q.begin(); it != q.end(); ++it) out.query[it.name()] = jsonScalar(*it);
     }
     out.rowsPath = rest.get("rowsPath", "").asString();
+    const Json::Value &page = rest["page"];
+    if (page.isObject()) {
+        out.page.param = page.get("param", "page").asString();
+        out.page.sizeParam = page.get("sizeParam", "limit").asString();
+        if (page.isMember("size")) out.page.size = page["size"].asInt();
+        if (page.isMember("maxPages")) out.page.maxPages = page["maxPages"].asInt();
+        if (page.isMember("start")) out.page.start = page["start"].asInt();
+        if (out.page.size <= 0 || out.page.size > 50000) {
+            error = "rest.page.size: 1…50000";
+            return false;
+        }
+        if (out.page.maxPages <= 0 || out.page.maxPages > 1000) {
+            error = "rest.page.maxPages: 1…1000";
+            return false;
+        }
+    }
     const Json::Value &cols = rest["columns"];
     if (!cols.isArray() || cols.empty()) {
         error = "rest.columns: нужен непустой массив колонок (типы из JSON неоднозначны)";
@@ -276,7 +292,6 @@ size_t RestCache::size() {
     std::lock_guard<std::mutex> lock(mutex_);
     return entries_.size();
 }
-
 void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
                std::function<void(const DatasetRows &)> onOk,
                std::function<void(const std::string &, const std::string &)> onErr) {
@@ -286,25 +301,14 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
         onErr("REST_ERROR", "источник " + conn.key + ": " + error);
         return;
     }
-    // allowlist хостов: без него REST выключен целиком (защита от SSRF)
     const std::vector<std::string> allowed = parseAllowHosts(envOr("REP_REST_ALLOW_HOSTS", ""));
     std::string host;
     if (!restHostAllowed(baseUrl, allowed, host, error)) {
         onErr("REST_FORBIDDEN", "источник " + conn.key + ": " + error);
         return;
     }
-
-    std::string pathWithQuery = spec.path;
-    bool first = spec.path.find('?') == std::string::npos;
-    for (const auto &kv : spec.query) {
-        pathWithQuery += first ? '?' : '&';
-        first = false;
-        pathWithQuery += urlEncode(kv.first) + "=" + urlEncode(kv.second);
-    }
-
-    // Ключ кеша: адрес+путь+query и хеш заголовков. Сами заголовки (токены) в ключ не попадают.
-    size_t headersHash = 0;
     std::map<std::string, std::string> headers;
+    size_t headersHash = 0;
     for (const auto &kv : conn.headers) {
         const std::string value = expandEnvValue(kv.second, conn.key, error);
         if (!error.empty()) {
@@ -314,77 +318,159 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
         headers[kv.first] = value;
         headersHash ^= std::hash<std::string>{}(kv.first + ":" + value) + 0x9e3779b97f4a7c15ULL;
     }
-    const std::string cacheKey = baseUrl + "|" + pathWithQuery + "|" + std::to_string(headersHash);
-
-    std::string cached;
-    if (cache.get(cacheKey, cached)) {
-        DatasetRows rows;
-        if (parseRestRows(cached, spec, rows, error)) {
-            // stderr без буферизации: логи видны сразу, даже если stdout перенаправлен в файл
-            std::fprintf(stderr, "rest: %s%s — кеш (hit), строк %zu\n", host.c_str(),
-                         pathWithQuery.c_str(), rows.rows.size());
-            onOk(rows);
-            return;
-        }
-        // битое в кеше — идём в сеть
-    }
-
-    auto client = drogon::HttpClient::newHttpClient(baseUrl);
-    auto req = drogon::HttpRequest::newHttpRequest();
-    req->setMethod(drogon::Get);
-    req->setPath(pathWithQuery);
-    for (const auto &kv : headers) req->addHeader(kv.first, kv.second);
-
-    const double timeoutSec = std::max(1, conn.timeoutMs) / 1000.0;
     const size_t maxBytes = static_cast<size_t>(std::stoul(envOr("REP_REST_MAX_BYTES", "5242880")));
-    const auto started = std::chrono::steady_clock::now();
-    std::fprintf(stderr, "rest: %s%s — запрос (miss)\n", host.c_str(), pathWithQuery.c_str());
-    client->sendRequest(
-        req,
-        [spec, cacheKey, &cache, maxBytes, onOk, onErr, conn, started, host,
-         pathWithQuery](drogon::ReqResult result, const drogon::HttpResponsePtr &resp) {
-            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::steady_clock::now() - started)
-                                .count();
-            const int statusForLog = resp ? static_cast<int>(resp->statusCode()) : 0;
-            std::fprintf(stderr, "rest: %s%s — ответ %d, %lld мс\n", host.c_str(), pathWithQuery.c_str(),
-                         statusForLog, static_cast<long long>(ms));
-            if (result != drogon::ReqResult::Ok || !resp) {
-                if (result == drogon::ReqResult::Timeout) {
-                    onErr("REST_TIMEOUT", "источник " + conn.key + ": превышен таймаут " +
-                                              std::to_string(conn.timeoutMs) + " мс");
-                } else {
-                    onErr("REST_ERROR", "источник " + conn.key + ": нет ответа от сервера");
+    const auto client = drogon::HttpClient::newHttpClient(baseUrl);
+
+    // Состояние пагинации: живёт в shared_ptr, потому что колбэки асинхронные.
+    struct Ctx {
+        std::string baseUrl, host, key;
+        std::map<std::string, std::string> headers;
+        size_t headersHash = 0;
+        size_t maxBytes = 0;
+        int timeoutMs = 5000;
+        int cacheSeconds = 0;
+        RestSpec spec;
+        RestCache *cache = nullptr;
+        DatasetRows acc;
+        int donePages = 0; // сколько страниц уже собрано (0 — первая)
+        std::function<void(int)> step;
+        std::function<void(const DatasetRows &)> onOk;
+        std::function<void(const std::string &, const std::string &)> onErr;
+    };
+    auto ctx = std::make_shared<Ctx>();
+    ctx->baseUrl = baseUrl;
+    ctx->host = host;
+    ctx->key = conn.key;
+    ctx->headers = headers;
+    ctx->headersHash = headersHash;
+    ctx->maxBytes = maxBytes;
+    ctx->timeoutMs = conn.timeoutMs;
+    ctx->cacheSeconds = conn.cacheSeconds;
+    ctx->spec = spec;
+    ctx->cache = &cache;
+    ctx->onOk = onOk;
+    ctx->onErr = onErr;
+
+    ctx->step = [ctx, client](int pageIndex) {
+        std::string pathWithQuery = ctx->spec.path;
+        bool first = pathWithQuery.find('?') == std::string::npos;
+        for (const auto &kv : ctx->spec.query) {
+            pathWithQuery += first ? '?' : '&';
+            first = false;
+            pathWithQuery += urlEncode(kv.first) + "=" + urlEncode(kv.second);
+        }
+        if (ctx->spec.page.enabled()) {
+            pathWithQuery += first ? '?' : '&';
+            first = false;
+            pathWithQuery += urlEncode(ctx->spec.page.param) + "=" +
+                             std::to_string(ctx->spec.page.start + pageIndex);
+            if (!ctx->spec.page.sizeParam.empty()) {
+                pathWithQuery += "&" + urlEncode(ctx->spec.page.sizeParam) + "=" +
+                                 std::to_string(ctx->spec.page.size);
+            }
+        }
+        const std::string cacheKey =
+            ctx->baseUrl + "|" + pathWithQuery + "|" + std::to_string(ctx->headersHash);
+
+        auto append = [ctx, pathWithQuery](const DatasetRows &rows, bool fromCache) {
+            if (ctx->acc.columns.empty()) {
+                ctx->acc.columns = rows.columns;
+            }
+            ctx->acc.rows.insert(ctx->acc.rows.end(), rows.rows.begin(), rows.rows.end());
+            std::fprintf(stderr, "rest: %s%s — %s, строк %zu\n", ctx->host.c_str(),
+                         pathWithQuery.c_str(), fromCache ? "кеш (hit)" : "ответ ok",
+                         rows.rows.size());
+            const bool lastPage =
+                !ctx->spec.page.enabled() || rows.rows.size() < static_cast<size_t>(ctx->spec.page.size);
+            if (lastPage) {
+                ctx->onOk(ctx->acc);
+                return;
+            }
+            // следующая страница
+            if (ctx->donePages + 1 >= ctx->spec.page.maxPages) {
+                ctx->onOk(ctx->acc);
+                return;
+            }
+            ctx->donePages += 1;
+            ctx->step(ctx->donePages);
+        };
+
+        std::string cached;
+        if (ctx->cache->get(cacheKey, cached)) {
+            DatasetRows rows;
+            std::string err;
+            if (parseRestRows(cached, ctx->spec, rows, err)) {
+                append(rows, true);
+                return;
+            }
+        }
+
+        auto req = drogon::HttpRequest::newHttpRequest();
+        req->setMethod(drogon::Get);
+        req->setPath(pathWithQuery);
+        for (const auto &kv : ctx->headers) req->addHeader(kv.first, kv.second);
+
+        const auto started = std::chrono::steady_clock::now();
+        std::fprintf(stderr, "rest: %s%s — запрос (miss)\n", ctx->host.c_str(), pathWithQuery.c_str());
+        const double timeoutSec = std::max(1, ctx->timeoutMs) / 1000.0;
+        client->sendRequest(
+            req,
+            [ctx, cacheKey, started](drogon::ReqResult result, const drogon::HttpResponsePtr &resp) {
+                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - started)
+                                    .count();
+                if (result != drogon::ReqResult::Ok || !resp) {
+                    if (result == drogon::ReqResult::Timeout) {
+                        ctx->onErr("REST_TIMEOUT", "источник " + ctx->key + ": превышен таймаут " +
+                                                       std::to_string(ctx->timeoutMs) + " мс");
+                    } else {
+                        ctx->onErr("REST_ERROR", "источник " + ctx->key + ": нет ответа от сервера");
+                    }
+                    return;
                 }
-                return;
-            }
-            const auto status = resp->statusCode();
-            if (status >= 300 && status < 400) {
-                onErr("REST_INVALID", "источник " + conn.key + ": редирект " + std::to_string(status) +
-                                          " запрещён");
-                return;
-            }
-            if (status < 200 || status >= 300) {
-                onErr("REST_ERROR", "источник " + conn.key + ": сервер ответил " +
-                                        std::to_string(status));
-                return;
-            }
-            const std::string body = std::string(resp->body());
-            if (body.size() > maxBytes) {
-                onErr("REST_TOO_LARGE", "источник " + conn.key + ": ответ " + std::to_string(body.size()) +
-                                            " байт больше лимита " + std::to_string(maxBytes));
-                return;
-            }
-            rep::DatasetRows rows;
-            std::string error;
-            if (!rep::parseRestRows(body, spec, rows, error)) {
-                onErr("REST_INVALID", "источник " + conn.key + ": " + error);
-                return;
-            }
-            cache.put(cacheKey, body, conn.cacheSeconds);
-            onOk(rows);
-        },
-        timeoutSec);
+                const auto status = resp->statusCode();
+                if (status >= 300 && status < 400) {
+                    ctx->onErr("REST_INVALID", "источник " + ctx->key + ": редирект " +
+                                                   std::to_string(status) + " запрещён");
+                    return;
+                }
+                if (status < 200 || status >= 300) {
+                    ctx->onErr("REST_ERROR", "источник " + ctx->key + ": сервер ответил " +
+                                                 std::to_string(status));
+                    return;
+                }
+                const std::string body = std::string(resp->body());
+                std::fprintf(stderr, "rest: %s — ответ %d, %lld мс, %zu байт\n", ctx->host.c_str(),
+                             static_cast<int>(status), static_cast<long long>(ms), body.size());
+                if (body.size() > ctx->maxBytes) {
+                    ctx->onErr("REST_TOO_LARGE", "источник " + ctx->key + ": ответ " +
+                                                     std::to_string(body.size()) + " байт больше лимита " +
+                                                     std::to_string(ctx->maxBytes));
+                    return;
+                }
+                DatasetRows rows;
+                std::string err;
+                if (!parseRestRows(body, ctx->spec, rows, err)) {
+                    ctx->onErr("REST_INVALID", "источник " + ctx->key + ": " + err);
+                    return;
+                }
+                ctx->cache->put(cacheKey, body, ctx->cacheSeconds);
+                const bool lastPage =
+                    !ctx->spec.page.enabled() || rows.rows.size() < static_cast<size_t>(ctx->spec.page.size);
+                if (ctx->acc.columns.empty()) ctx->acc.columns = rows.columns;
+                ctx->acc.rows.insert(ctx->acc.rows.end(), rows.rows.begin(), rows.rows.end());
+                std::fprintf(stderr, "rest: %s — строк %zu (страница %d)\n", ctx->host.c_str(),
+                             rows.rows.size(), ctx->donePages + 1);
+                if (lastPage || ctx->donePages + 1 >= ctx->spec.page.maxPages) {
+                    ctx->onOk(ctx->acc);
+                    return;
+                }
+                ctx->donePages += 1;
+                ctx->step(ctx->donePages);
+            },
+            timeoutSec);
+    };
+    ctx->step(0);
 }
 
 } // namespace rep

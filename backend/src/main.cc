@@ -667,6 +667,18 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
             if (isLeft) *left = rows;
             else *right = rows;
             if (++*done < 2) return;
+            // Предел на сторону объединения: два больших набора нельзя тянуть в память
+            // без ограничения (замер 50k × 50k — 84 мс, ~73 МБ; ADR-104).
+            const size_t joinMax =
+                static_cast<size_t>(std::stoul(rep::envOr("REP_JOIN_MAX_ROWS", "200000")));
+            const size_t biggest = std::max(left->rows.size(), right->rows.size());
+            if (biggest > joinMax) {
+                *failed = true;
+                onErr(422, "ROW_LIMIT",
+                      "сторона объединения " + std::to_string(biggest) + " строк > лимита " +
+                          std::to_string(joinMax) + " (REP_JOIN_MAX_ROWS): сузьте параметры");
+                return;
+            }
             rep::DatasetRows joined;
             std::string err;
             if (!rep::hashJoin(*left, *right, *joinSpec, joined, err)) {

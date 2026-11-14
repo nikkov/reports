@@ -34,6 +34,18 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ items, total: items.length }))
     return
   }
+  if (url.pathname === '/api/rows') {
+    requests += 1
+    // 2500 записей: проверка пагинации (page/limit) в шаблоне
+    const page = Number(url.searchParams.get('page') || 1)
+    const limit = Number(url.searchParams.get('limit') || 1000)
+    const all = Array.from({ length: 2500 }, (_, i) => ({ id: i + 1, name: 'Строка ' + (i + 1) }))
+    const from = (page - 1) * limit
+    const items = all.slice(from, from + limit)
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ items, total: all.length, page }))
+    return
+  }
   if (url.pathname === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: true }))
