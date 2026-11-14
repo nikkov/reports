@@ -52,6 +52,13 @@ else
   echo "skip (нет node или scripts/licenses.mjs)"
 fi
 
+step "Windows/MSVC: статические проверки"
+if [ -x "$ROOT/scripts/check-windows.sh" ]; then
+  "$ROOT/scripts/check-windows.sh" | tail -1
+else
+  echo "skip (нет scripts/check-windows.sh)"
+fi
+
 step "Скрипты: синтаксис bash"
 bad=0
 for s in scripts/*.sh db/*.sh db/examples/*.sh; do

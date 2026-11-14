@@ -131,3 +131,41 @@ drogon. Найдите процесс: `Get-NetTCPConnection -LocalPort 8080 | S
 **Длинные пути** — Conan любит глубокие каталоги. Включите поддержку длинных путей:
 `reg add HKLM\SYSTEM\CurrentControlSet\Control\FileSystem /v LongPathsEnabled /t REG_DWORD /d 1 /f`
 (нужен перезапуск).
+
+## Статическая проверка без Windows (ADR-116)
+
+Собрать под MSVC на Linux нельзя, но регрессии ловятся заранее — `scripts/check-windows.sh`
+(входит в `scripts/check.sh`):
+
+```bash
+./scripts/check-windows.sh
+```
+
+Что проверяется:
+
+| Проверка | Почему |
+|---|---|
+| POSIX-вызовы только в `net.{h,cc}`, `env.cc`, `logging.cc`, `main.cc` | `unistd.h`, `sys/socket.h`, `arpa/inet.h`, `timegm(`, `gmtime_r(`, `setenv(`, `popen(`, `dlopen(` — под MSVC их нет; каждый вызов обязан жить в обёртке с `#ifdef _WIN32` |
+| в каждом из этих файлов есть ветка `_WIN32` | иначе обёртка односторонняя |
+| `ws2_32`, `WIN32_LEAN_AND_MEAN`, `NOMINMAX` в `backend/CMakeLists.txt` | без Winsock не линкуются сокеты, без `NOMINMAX` ломаются `std::min/max` |
+| есть `backend/conan/profiles/windows-msvc2022`, `scripts/build.ps1`, `CMakePresets.json` | без них сборка не начинается |
+| `execinfo.h` в `main.cc` внутри `#if !defined(_WIN32)` | `backtrace` есть только в glibc |
+
+Негативный тест проверки: положите в `backend/src` файл с `#include <unistd.h>` — скрипт должен
+упасть и назвать файл.
+
+## Чек-лист приёмки на Windows
+
+1. `.\scriptsuild.ps1` — сборка и тесты; в конце строка `All tests passed`.
+2. `.ackenduild-windowsep.exe` поднимается на `:8080`; `curl http://127.0.0.1:8080/reports/api/health`
+   отвечает `"version"` из `VERSION` и `"db": true`.
+3. Шаблоны загружены: `psql -c "select count(*) from reports.report_templates"` — счётчик
+   совпадает с локальным.
+4. Отчёт открывается в браузере: `http://127.0.0.1:8080/reports/report.html?report=sales-summary`.
+5. Логи: JSON-строки в консоли читаются без кракозябр (`chcp 65001`), в `audit_log` появилась
+   запись `open_report`.
+6. Замер бюджета: `cd frontend; npm run bench` — `fullMs` ниже 2 000 мс (на Windows возможен
+   запас меньше, чем на Linux: цифру фиксируйте в отчёте, а не предполагайте).
+
+Если сборка падает — присылайте первую ошибку MSVC с путём и номером строки: правки платформенного
+слоя делаются по факту, вслепую менять `net.cc` нельзя.
