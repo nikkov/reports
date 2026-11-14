@@ -17,9 +17,16 @@ const regions = [
   { id: 5, name: 'Центр', manager: 'Смирнов Д.', active: true }
 ]
 
+let requests = 0 // счётчик обращений: по нему e2e проверяет кеш REST (ADR-104)
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`)
+  if (url.pathname === '/api/_stats') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ requests }))
+    return
+  }
   if (url.pathname === '/api/regions') {
+    requests += 1
     // фильтр active=1 поддерживает пример параметризованного REST-набора
     const active = url.searchParams.get('active')
     const items = active === '1' ? regions.filter((r) => r.active) : regions

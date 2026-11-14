@@ -344,6 +344,21 @@ struct TemplateInfo {
 };
 
 
+
+// Итог выбора шаблона и набора данных: один тип на все обработчики (data/aggregate/
+// group/text/экспорт), чтобы не держать пять копий одного и того же выбора (ADR-105).
+struct ResolvedDataset {
+    std::shared_ptr<TemplateInfo> tpl;
+    std::string key;
+    std::string kind = "sql";
+    std::string sql;
+    std::string connection;
+    std::map<std::string, std::string> params;
+    int status = 0;
+    std::string code;
+    std::string message;
+};
+
 // Текст ошибки из std::exception_ptr (для ответов админки).
 std::string describeError(const std::exception_ptr &e) {
     std::string msg = "ошибка выполнения";
@@ -1119,6 +1134,66 @@ int main() {
     const size_t restCacheEntries = std::stoul(rep::envOr("REP_REST_CACHE_ENTRIES", "128"));
     const int restCacheTtl = std::stoi(rep::envOr("REP_REST_CACHE_TTL_SECONDS", "0"));
     rep::RestCache restCache(restCacheEntries, restCacheTtl);
+
+    // Единый выбор шаблона (черновик или опубликованный) и набора данных. Пять обработчиков
+    // раньше держали по копии этого кода, из-за чего при правках один набор менялся, а другой
+    // оставался со старой проверкой (дефект /text в 2.0.0) — теперь выбор один на всех.
+    auto resolveDataset = [&templates, &draftsParsed, &templatesMutex](
+                              const Json::Value &body, bool wantDraft, ResolvedDataset &out) {
+        std::lock_guard<std::mutex> lock(templatesMutex);
+        const std::string reportId = body.get("reportId", "").asString();
+        const TemplateInfo *tpl = nullptr;
+        TemplateInfo draftCopy;
+        if (wantDraft) {
+            const auto dit = draftsParsed.find(reportId);
+            if (dit == draftsParsed.end()) {
+                out.status = 404;
+                out.code = "DRAFT_NOT_FOUND";
+                out.message = "у отчёта нет черновика";
+                return false;
+            }
+            draftCopy = dit->second;
+            tpl = &draftCopy;
+        } else {
+            const auto it = templates.find(reportId);
+            if (it == templates.end()) {
+                out.status = 404;
+                out.code = "REPORT_NOT_FOUND";
+                out.message = "отчёт '" + reportId + "' не найден";
+                return false;
+            }
+            tpl = &it->second;
+        }
+        out.tpl = std::make_shared<TemplateInfo>(*tpl);
+        const auto &all = tpl->datasets;
+        if (all.empty()) {
+            out.kind = "sql";
+            out.sql = tpl->datasetSql;
+            out.params = tpl->datasetParams;
+            out.connection = tpl->datasetConnection;
+            if (out.sql.empty()) {
+                out.status = 422;
+                out.code = "TEMPLATE_INVALID";
+                out.message = "в шаблоне не задан набор данных (datasets.<key>.sql|rest|join)";
+                return false;
+            }
+            return true;
+        }
+        const std::string requested = body.get("dataset", "").asString();
+        const auto ds = all.find(requested.empty() ? all.begin()->first : requested);
+        if (ds == all.end()) {
+            out.status = 422;
+            out.code = "DATASET_NOT_FOUND";
+            out.message = "в шаблоне нет набора '" + requested + "'";
+            return false;
+        }
+        out.key = ds->first;
+        out.kind = ds->second.kind;
+        out.sql = ds->second.sql;
+        out.params = ds->second.params;
+        out.connection = ds->second.connection;
+        return true;
+    };
 
     auto adminGuard = [adminEnabled](std::function<void(const HttpResponsePtr &)> &cb) {
         if (adminEnabled) return true;
@@ -2206,7 +2281,7 @@ int main() {
     app().registerHandler(
         "/api/report/group",
         [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed,
-         &restCache, maxRows](
+         &restCache, maxRows, &resolveDataset](
             const HttpRequestPtr &req,
                                               std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
@@ -2226,62 +2301,23 @@ int main() {
                 return;
             }
 
-            std::string datasetSql;
-            std::map<std::string, std::string> datasetParams;
-            std::string datasetConn;
-            std::string datasetKey;
-            std::string datasetKind = "sql";
-            std::shared_ptr<TemplateInfo> snapshot;
-            std::map<std::string, rep::ConnSpec> conns;
             const bool wantDraft = (*body).get("draft", false).asBool();
             if (wantDraft && !draftAllowed(req)) {
                 sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN", "черновик доступен автору и администратору");
                 return;
             }
-            {
-                std::lock_guard<std::mutex> lock(templatesMutex);
-                const TemplateInfo *tpl = nullptr;
-                TemplateInfo draftCopy;
-                if (wantDraft) {
-                    const auto dit = draftsParsed.find(reportId);
-                    if (dit == draftsParsed.end()) {
-                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "у отчёта нет черновика");
-                        return;
-                    }
-                    draftCopy = dit->second;
-                    tpl = &draftCopy;
-                } else {
-                    const auto it = templates.find(reportId);
-                    if (it == templates.end()) {
-                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
-                        return;
-                    }
-                    tpl = &it->second;
-                }
-                conns = tpl->connections;
-                snapshot = std::make_shared<TemplateInfo>(*tpl);
-                const auto &all = tpl->datasets;
-                if (all.empty()) {
-                    datasetSql = tpl->datasetSql;
-                    datasetParams = tpl->datasetParams;
-                    datasetConn = tpl->datasetConnection;
-                } else {
-                    const std::string key = (*body).get("dataset", "").asString();
-                    const auto ds = all.find(key.empty() ? all.begin()->first : key);
-                    if (ds == all.end()) {
-                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
-                                  "в шаблоне нет набора '" + key + "'");
-                        return;
-                    }
-                    datasetKey = ds->first;
-                    datasetKind = ds->second.kind;
-                    datasetKey = ds->first;
-                    datasetKind = ds->second.kind;
-                    datasetSql = ds->second.sql;
-                    datasetParams = ds->second.params;
-                    datasetConn = ds->second.connection;
-                }
+            ResolvedDataset rds;
+            if (!resolveDataset(*body, wantDraft, rds)) {
+                sendError(cb, static_cast<HttpStatusCode>(rds.status), rds.code, rds.message);
+                return;
             }
+            const auto snapshot = rds.tpl;
+            const std::string &datasetKey = rds.key;
+            const std::string &datasetKind = rds.kind;
+            const std::string &datasetSql = rds.sql;
+            const std::string &datasetConn = rds.connection;
+            const auto &datasetParams = rds.params;
+            const auto &conns = rds.tpl->connections;
             if (datasetKind == "sql" && datasetSql.empty()) {
                 sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
                           "в шаблоне не задан datasets.<key>.sql");
@@ -2508,7 +2544,7 @@ int main() {
     app().registerHandler(
         "/api/report/text",
         [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftAllowed, &restCache,
-         maxRows](
+         maxRows, &resolveDataset](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -2527,52 +2563,17 @@ int main() {
                 return;
             }
 
-            std::string datasetSql;
-            std::map<std::string, std::string> datasetParams;
-            std::string datasetConn;
-            std::string datasetKind = "sql";
-            std::shared_ptr<TemplateInfo> snapshot;
-            std::map<std::string, rep::ConnSpec> conns;
-            {
-                std::lock_guard<std::mutex> lock(templatesMutex);
-                const TemplateInfo *tpl = nullptr;
-                TemplateInfo draftCopy;
-                if (wantDraft) {
-                    const auto dit = draftsParsed.find(reportId);
-                    if (dit == draftsParsed.end()) {
-                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "у отчёта нет черновика");
-                        return;
-                    }
-                    draftCopy = dit->second;
-                    tpl = &draftCopy;
-                } else {
-                    const auto it = templates.find(reportId);
-                    if (it == templates.end()) {
-                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND",
-                                  "отчёт '" + reportId + "' не найден");
-                        return;
-                    }
-                    tpl = &it->second;
-                }
-                conns = tpl->connections;
-                snapshot = std::make_shared<TemplateInfo>(*tpl);
-                const auto ds = tpl->datasets.find(datasetKey.empty() && !tpl->datasets.empty()
-                                                       ? tpl->datasets.begin()->first
-                                                       : datasetKey);
-                if (ds == tpl->datasets.end()) {
-                    sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
-                              "в шаблоне нет набора '" + datasetKey + "'");
-                    return;
-                }
-                datasetKind = ds->second.kind;
-                datasetSql = ds->second.sql;
-                datasetParams = ds->second.params;
-                datasetConn = ds->second.connection;
-            }
-            if (datasetKind == "sql" && datasetSql.empty()) {
-                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", "в наборе нет sql");
+            ResolvedDataset rds;
+            if (!resolveDataset(*body, wantDraft, rds)) {
+                sendError(cb, static_cast<HttpStatusCode>(rds.status), rds.code, rds.message);
                 return;
             }
+            const auto snapshot = rds.tpl;
+            const std::string &datasetKind = rds.kind;
+            const std::string &datasetSql = rds.sql;
+            const std::string &datasetConn = rds.connection;
+            const auto &datasetParams = rds.params;
+            const auto &conns = rds.tpl->connections;
 
             rep::ParamBag bag;
             const Json::Value &rawParams = (*body)["params"];
@@ -2670,7 +2671,7 @@ int main() {
     app().registerHandler(
         "/api/report/aggregate",
         [dataDb, &templates, &templatesMutex, maxRows, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed,
-         &restCache](
+         &restCache, &resolveDataset](
             const HttpRequestPtr &req,
                                                        std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
@@ -2684,65 +2685,23 @@ int main() {
                 return;
             }
 
-            std::string datasetSql;
-            std::map<std::string, std::string> datasetParams;
-            std::string datasetConn;
-            std::string datasetKey;
-            std::string datasetKind = "sql";
-            std::shared_ptr<TemplateInfo> snapshot;
-            std::map<std::string, rep::ConnSpec> conns;
             const bool wantDraft = (*body).get("draft", false).asBool();
             if (wantDraft && !draftAllowed(req)) {
                 sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN", "черновик доступен автору и администратору");
                 return;
             }
-            {
-                std::lock_guard<std::mutex> lock(templatesMutex);
-                const TemplateInfo *tpl = nullptr;
-                TemplateInfo draftCopy;
-                if (wantDraft) {
-                    const auto dit = draftsParsed.find(reportId);
-                    if (dit == draftsParsed.end()) {
-                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "у отчёта нет черновика");
-                        return;
-                    }
-                    draftCopy = dit->second;
-                    tpl = &draftCopy;
-                } else {
-                    const auto it = templates.find(reportId);
-                    if (it == templates.end()) {
-                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
-                        return;
-                    }
-                    tpl = &it->second;
-                }
-                conns = tpl->connections;
-                snapshot = std::make_shared<TemplateInfo>(*tpl);
-                const auto &all = tpl->datasets;
-                if (all.empty()) {
-                    datasetSql = tpl->datasetSql;
-                    datasetParams = tpl->datasetParams;
-                    datasetConn = tpl->datasetConnection;
-                } else {
-                    const std::string key = (*body).get("dataset", "").asString();
-                    const auto ds = all.find(key.empty() ? all.begin()->first : key);
-                    if (ds == all.end()) {
-                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
-                                  "в шаблоне нет набора '" + key + "'");
-                        return;
-                    }
-                    datasetKey = ds->first;
-                    datasetKind = ds->second.kind;
-                    datasetSql = ds->second.sql;
-                    datasetParams = ds->second.params;
-                    datasetConn = ds->second.connection;
-                }
-                if (tpl->datasets.empty() && tpl->datasetSql.empty()) {
-                    sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
-                              "в шаблоне не задан набор данных");
-                    return;
-                }
+            ResolvedDataset rds;
+            if (!resolveDataset(*body, wantDraft, rds)) {
+                sendError(cb, static_cast<HttpStatusCode>(rds.status), rds.code, rds.message);
+                return;
             }
+            const auto snapshot = rds.tpl;
+            const std::string &datasetKey = rds.key;
+            const std::string &datasetKind = rds.kind;
+            const std::string &datasetSql = rds.sql;
+            const std::string &datasetConn = rds.connection;
+            const auto &datasetParams = rds.params;
+            const auto &conns = rds.tpl->connections;
 
             rep::ParamBag bag;
             const Json::Value &rawParams = (*body)["params"];
@@ -2900,60 +2859,26 @@ int main() {
     // Общая сборка листа отчёта: один расчёт для CSV, XLSX и рассылки (ADR-46, ADR-48).
     // status 200 — sheet заполнен; иначе message содержит причину, code — машинный код.
     auto buildSheet = [dataDb, &templates, &templatesRaw, &draftsParsed, &draftsRaw, &templatesMutex,
-                       &connRegistry](
+                       &connRegistry, &resolveDataset, &restCache, maxRows](
                           const std::string &reportId, const std::string &requestedDataset,
                           const Json::Value &rawParams, const bool wantDraft,
                           std::function<void(int status, const std::string &code,
                                              const rep::ExportSheet &sheet, const std::string &message)> done) {
-        std::string datasetSql;
-        std::map<std::string, std::string> datasetParams;
-        std::string datasetKey;
-        std::string datasetConn;
+        Json::Value body;
+        body["reportId"] = reportId;
+        body["dataset"] = requestedDataset;
+        ResolvedDataset rds;
+        if (!resolveDataset(body, wantDraft, rds)) {
+            done(rds.status, rds.code, rep::ExportSheet{}, rds.message);
+            return;
+        }
+        const std::string &datasetSql = rds.sql;
+        const auto &datasetParams = rds.params;
+        const std::string &datasetConn = rds.connection;
+        const std::string &datasetKey = rds.key; // какой блок брать из шаблона
         std::string raw;
         {
             std::lock_guard<std::mutex> lock(templatesMutex);
-            const TemplateInfo *tpl = nullptr;
-            TemplateInfo draftCopy;
-            if (wantDraft) {
-                const auto dit = draftsParsed.find(reportId);
-                if (dit == draftsParsed.end()) {
-                    done(404, "DRAFT_NOT_FOUND", rep::ExportSheet{}, "у отчёта нет черновика");
-                    return;
-                }
-                draftCopy = dit->second;
-                tpl = &draftCopy;
-            } else {
-                const auto it = templates.find(reportId);
-                if (it == templates.end()) {
-                    done(404, "REPORT_NOT_FOUND", rep::ExportSheet{}, "отчёт '" + reportId + "' не найден");
-                    return;
-                }
-                tpl = &it->second;
-            }
-            const auto &all = tpl->datasets;
-            if (all.empty()) {
-                datasetSql = tpl->datasetSql;
-                datasetParams = tpl->datasetParams;
-                datasetConn = tpl->datasetConnection;
-            } else {
-                const auto ds = all.find(requestedDataset.empty() ? all.begin()->first : requestedDataset);
-                if (ds == all.end()) {
-                    done(422, "DATASET_NOT_FOUND", rep::ExportSheet{}, "в шаблоне нет набора '" + requestedDataset + "'");
-                    return;
-                }
-                datasetKey = ds->first;
-                // ADR-104: серверный лист собирается из SQL-набора; объединённые и REST-наборы
-                // пока не поддерживаются — говорим об этом прямо, а не «нет sql».
-                if (ds->second.kind != "sql") {
-                    done(422, "EXPORT_UNSUPPORTED", rep::ExportSheet{},
-                         "серверный экспорт наборов rest/join не поддерживается: используйте Excel или "
-                         "печать из отчёта (данные уже загружены в браузере)");
-                    return;
-                }
-                datasetSql = ds->second.sql;
-                datasetParams = ds->second.params;
-                datasetConn = ds->second.connection;
-            }
             const auto &source = wantDraft ? draftsRaw : templatesRaw;
             const auto rawIt = source.find(reportId);
             if (rawIt != source.end()) raw = rawIt->second;
@@ -2966,6 +2891,16 @@ int main() {
                     bag.set(it.name(), it->asString());
                 }
             }
+        }
+
+        // ADR-104: серверный лист собирается из SQL-набора. Для rest/join экспорт пока не
+        // поддержан: сборка листа из DatasetRows приводила к зависанию обработчика — вернёмся
+        // к ней отдельной задачей, а не в релизе.
+        if (rds.kind != "sql") {
+            done(422, "EXPORT_UNSUPPORTED", rep::ExportSheet{},
+                 "серверный экспорт наборов rest/join не поддерживается: используйте Excel или "
+                 "печать из отчёта (данные уже загружены в браузере)");
+            return;
         }
 
         rep::DatasetQuery query;
@@ -3033,6 +2968,12 @@ int main() {
         };
         for (const auto &col : block["columns"]) walk(col);
 
+        const std::string sheetTitle = tpl.get("title", "").asString();
+        // на экране общий итог включён по умолчанию (ADR-1); в книге — так же
+        const bool grandTotal = block.isNull() || block.get("grandTotal", true).asBool();
+        // collapsible: false — группы в книге не сворачиваются (ADR-94)
+        const bool collapsible = block.isNull() || block.get("collapsible", true).asBool();
+
         std::string finalSql = query.sql;
         const Json::Value &agg = block["aggregate"];
         if (agg.isObject()) {
@@ -3053,11 +2994,6 @@ int main() {
             }
         }
 
-        const std::string sheetTitle = tpl.get("title", "").asString();
-        // на экране общий итог включён по умолчанию (ADR-1); в книге — так же
-        const bool grandTotal = block.isNull() || block.get("grandTotal", true).asBool();
-        // collapsible: false — группы в книге не сворачиваются (ADR-94)
-        const bool collapsible = block.isNull() || block.get("collapsible", true).asBool();
         static const std::map<std::string, std::string> noDeclared;
         runQuery(
             sheetClient, finalSql, query.values,
@@ -4537,7 +4473,7 @@ int main() {
     app().registerHandler(
         "/api/report/data",
         [dataDb, &registry, &templates, &templatesMutex, maxRows, &resultCache, &templatesVersion,
-         &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed, &restCache](
+         &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed, &restCache, &resolveDataset](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -4552,8 +4488,6 @@ int main() {
                 return;
             }
 
-            std::string datasetKey; // какой набор отдаём: '' — первый в шаблоне (ADR-36)
-            std::shared_ptr<TemplateInfo> snapshot; // копия шаблона: нужна в async-колбэках
             // draft=true — считаем по телу черновика, а не по опубликованному (ADR-82)
             const bool wantDraft = (*body).get("draft", false).asBool();
             if (wantDraft && !draftAllowed(req)) {
@@ -4561,46 +4495,13 @@ int main() {
                           "черновик доступен автору и администратору");
                 return;
             }
-            {
-                std::lock_guard<std::mutex> lock(templatesMutex);
-                const TemplateInfo *tpl = nullptr;
-                TemplateInfo draftCopy;
-                if (wantDraft) {
-                    const auto dit = draftsParsed.find(reportId);
-                    if (dit == draftsParsed.end()) {
-                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "у отчёта нет черновика");
-                        return;
-                    }
-                    draftCopy = dit->second;
-                    tpl = &draftCopy;
-                } else {
-                    const auto it = templates.find(reportId);
-                    if (it == templates.end()) {
-                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + reportId + "' не найден");
-                        return;
-                    }
-                    tpl = &it->second;
-                }
-                snapshot = std::make_shared<TemplateInfo>(*tpl);
-                const auto &all = tpl->datasets;
-                if (all.empty()) {
-                    // шаблон без datasets: прежнее поведение через первый SQL (совместимость)
-                    if (tpl->datasetSql.empty()) {
-                        sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
-                                  "в шаблоне не задан набор данных (datasets.<key>.sql|rest|join)");
-                        return;
-                    }
-                } else {
-                    datasetKey = (*body).get("dataset", "").asString();
-                    const auto ds = all.find(datasetKey.empty() ? all.begin()->first : datasetKey);
-                    if (ds == all.end()) {
-                        sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
-                                  "в шаблоне нет набора '" + datasetKey + "'");
-                        return;
-                    }
-                    datasetKey = ds->first;
-                }
+            ResolvedDataset rds;
+            if (!resolveDataset(*body, wantDraft, rds)) {
+                sendError(cb, static_cast<HttpStatusCode>(rds.status), rds.code, rds.message);
+                return;
             }
+            const auto snapshot = rds.tpl;          // копия шаблона для async-колбэков
+            const std::string &datasetKey = rds.key; // '' — первый набор шаблона (ADR-36)
 
             rep::ParamBag bag;
             const Json::Value &rawParams = (*body)["params"];

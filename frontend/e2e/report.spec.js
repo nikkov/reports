@@ -2926,3 +2926,47 @@ test('объединение источников: PostgreSQL + REST в одно
   const shared = await zip.file('xl/sharedStrings.xml').async('string')
   expect(shared).toContain('Менеджер')
 })
+
+test('публичный отчёт с REST: справочник, шаблон и данные без входа (ADR-104)', async ({ browser, baseURL }) => {
+  // аноним: пустое состояние, сервер запущен с REP_REST_ALLOW_HOSTS и CRM_BASE_URL
+  const state = { cookies: [], origins: [] }
+  const ctx = await apiRequest.newContext({ baseURL, storageState: state })
+
+  // параметр-справочник приходит из REST-набора
+  const lookups = await ctx.get('/api/reports/crm-public-filter/lookups/region')
+  expect(lookups.ok()).toBeTruthy()
+  const items = await lookups.json()
+  expect(items.length).toBeGreaterThanOrEqual(5)
+  expect(items.map((i) => i.label)).toContain('Север')
+
+  // шаблон отдаётся без входа и без SQL/заголовков источников
+  const tpl = await ctx.get('/api/reports/crm-public-filter')
+  expect(tpl.ok()).toBeTruthy()
+  const raw = await tpl.text()
+  expect(raw).not.toContain('passwordEnv')
+  expect(raw).not.toContain('Authorization')
+  expect(raw).not.toContain('"sql"')
+
+  // данные объединённого набора — тоже без входа
+  const data = await ctx.post('/api/report/data', {
+    data: {
+      reportId: 'crm-public-filter',
+      dataset: 'orders_by_region',
+      params: { region: '1', from: '2025-11-01', to: '2026-11-14' }
+    }
+  })
+  expect(data.ok()).toBeTruthy()
+  const body = await data.json()
+  expect(body.rowCount).toBeGreaterThan(0)
+  expect(body.columns.map((c) => c.name)).toContain('region_name')
+  expect(body.columns.map((c) => c.name)).toContain('manager')
+
+  // страница открывается без сессии и строит таблицу
+  const page = await (await browser.newContext({ baseURL, storageState: state })).newPage()
+  await page.goto('/report.html?report=crm-public-filter')
+  await expect(page.locator('h1')).toContainText('Публичный отчёт')
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
+
+  await page.context().close()
+  await ctx.dispose()
+})
