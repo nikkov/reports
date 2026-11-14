@@ -1,5 +1,6 @@
 import { expect, request as apiRequest, test } from '@playwright/test'
 import JSZip from 'jszip'
+import { normalizeDataset } from '../src/api/normalize.js'
 import { readFileSync } from 'node:fs'
 
 const BASE = '/report.html?report=sales-summary'
@@ -2085,7 +2086,7 @@ test('внешний источник: данные второго набора 
     data: { reportId: 'sales-external', dataset: 'shipments', params: { from: '2026-01-01', to: '2026-03-31' } }
   })
   expect(res.ok()).toBeTruthy()
-  const body = await res.json()
+  const body = normalizeDataset(await res.json())
   expect(body.rowCount).toBe(5)
   const east = body.rows.find((r) => r.region === 'Восток')
   expect(String(east.shipped)).toBe('88350000')
@@ -2979,8 +2980,9 @@ test('постраничный REST: набор собирает страниц�
   const body = await res.json()
   // 2500 записей при size=1000: страницы 1000 + 1000 + 500
   expect(body.rowCount).toBe(2500)
-  expect(body.rows[0].id).toBe(1)
-  expect(body.rows.at(-1).id).toBe(2500)
+  const rows = normalizeDataset(body).rows
+  expect(rows[0].id).toBe(1)
+  expect(rows.at(-1).id).toBe(2500)
 
   await page.goto('/report.html?report=crm-paged')
   await expect(page.locator('.meta')).toContainText('строк: 2500')
@@ -2996,8 +2998,9 @@ test('постраничный REST в режиме offset: страницы и�
   const body = await res.json()
   // 2500 записей при size=1000 и start=0: offset=0, 1000, 2000
   expect(body.rowCount).toBe(2500)
-  expect(body.rows[0].id).toBe(1)
-  expect(body.rows.at(-1).id).toBe(2500)
+  const rows = normalizeDataset(body).rows
+  expect(rows[0].id).toBe(1)
+  expect(rows.at(-1).id).toBe(2500)
 
   await page.goto('/report.html?report=crm-paged-offset')
   await expect(page.locator('.meta')).toContainText('строк: 2500')

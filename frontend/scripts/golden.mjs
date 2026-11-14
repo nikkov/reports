@@ -4,6 +4,7 @@
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { normalizeDataset } from '../src/api/normalize.js'
 import { buildTableModel } from '../src/engine/group.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -40,13 +41,16 @@ async function main() {
 
   const auth = await authHeaders()
   const template = await (await fetch(`${API}/api/reports/${REPORT}`, { headers: auth })).json()
-  const data = await (
+  const dataRaw = await (
     await fetch(`${API}/api/report/data`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({ reportId: REPORT, params: { from: FROM, to: TO } })
     })
   ).json()
+
+  // ADR-114: строки приходят массивами — приводим к объектам, как это делает клиент
+  const data = normalizeDataset(dataRaw)
 
   const block = template.blocks.find((b) => b.type === 'table')
 
