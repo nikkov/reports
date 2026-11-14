@@ -31,6 +31,7 @@ add_library(rep_core STATIC
   src/csv_export.cc
   src/dataset.cc
   src/join.cc
+  src/logging.cc
   src/rest_client.cc
   src/smtp.cc
   src/subscriptions.cc
@@ -82,6 +83,7 @@ add_executable(rep_tests
   tests/static_web_test.cc
   tests/dataset_test.cc
   tests/join_test.cc
+  tests/logging_test.cc
   tests/rest_client_test.cc
   tests/dates_expr_test.cc
   tests/queries_test.cc

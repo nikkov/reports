@@ -230,3 +230,18 @@ export REP_SMTP_HOST=smtp.corp.local REP_SMTP_PORT=587 REP_SMTP_TLS=1
 
 Таймаут запроса задаётся в шаблоне (`connections.<ключ>.timeoutMs`, 100…30000 мс), кеш — там же
 (`cacheSeconds`). Без `REP_REST_ALLOW_HOSTS` REST-наборы недоступны: это осознанная защита от SSRF.
+
+## Логирование (ADR-109)
+
+Все события сервера идут через `rep::log::event(level, action, user, message, context)`:
+уровень (`trace|debug|info|warning|error`), тип действия (enum, `open_report`, `change_user`, …),
+логин пользователя (пусто — системное или анонимное событие), метка времени события (ISO-8601 UTC
+с миллисекундами), текст и необязательный контекст.
+
+- в stdout пишется одна строка JSON: `{"ts","level","action","user","message","context"}`;
+- приёмник (sink) дополнительно пишет событие в `reports.audit_log`: `actor` — логин или `system`,
+  `action` — имя enum, `details` — уровень, текст, метка времени и контекст;
+- приёмник сменный: файл, SIEM и другие системы подключаются через `rep::log::setSink`, места
+  вызовов при этом не меняются;
+- технические сообщения пишутся теми же макросами `REP_LOG_INFO/WARN/ERROR(action, user) << …`,
+  что и действия пользователей — единая точка.

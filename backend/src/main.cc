@@ -43,6 +43,7 @@
 #include "env.h"
 #include "params.h"
 #include "join.h"
+#include "logging.h"
 #include "queries.h"
 #include "rest_client.h"
 #include "base_path.h"
@@ -136,7 +137,7 @@ void auditEvent(const std::string &actor, const std::string &action, const std::
                 const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
     PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
     if (PQstatus(conn) != CONNECTION_OK) {
-        LOG_WARN << "аудит: нет соединения с БД: " << PQerrorMessage(conn);
+        REP_LOG_WARN(AuditFailed, "") << "аудит: нет соединения с БД: " << PQerrorMessage(conn);
         PQfinish(conn);
         return;
     }
@@ -259,7 +260,7 @@ std::time_t nextRunInZone(PGconn *conn, const rep::Cron &cron, const std::string
 int closeStaleRuns(int leaseSeconds) {
     PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
     if (PQstatus(conn) != CONNECTION_OK) {
-        LOG_WARN << "прерванные отправки: нет соединения с БД: " << PQerrorMessage(conn);
+        REP_LOG_WARN(ServerStop, "") << "прерванные отправки: нет соединения с БД: " << PQerrorMessage(conn);
         PQfinish(conn);
         return -1;
     }
@@ -275,7 +276,7 @@ int closeStaleRuns(int leaseSeconds) {
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
         closed = static_cast<int>(std::strtol(PQcmdTuples(res), nullptr, 10));
     } else {
-        LOG_WARN << "прерванные отправки: " << PQerrorMessage(conn);
+        REP_LOG_WARN(ServerStop, "") << "прерванные отправки: " << PQerrorMessage(conn);
     }
     PQclear(res);
     PQfinish(conn);
@@ -839,6 +840,26 @@ int main() {
     }
     rep::loadDotEnv(rep::envOr("REP_ENV_FILE", "backend/.env"));
 
+    // Приёмник логов (ADR-109): каждое событие rep::log::event пишется в журнал аудита.
+    // object_type = "log", object_id — из контекста (reportId/id), ip пока не передаётся.
+    rep::log::setSink([](const rep::log::Event &e, const std::string &ts) {
+        std::string objectId;
+        if (e.context.isObject()) {
+            if (e.context.isMember("reportId")) objectId = e.context["reportId"].asString();
+            else if (e.context.isMember("id")) objectId = e.context["id"].asString();
+        }
+        Json::Value details(Json::objectValue);
+        details["level"] = rep::log::levelName(e.level);
+        details["message"] = e.message;
+        details["ts"] = ts;
+        if (e.context.isObject()) details["context"] = e.context;
+        Json::StreamWriterBuilder writer;
+        writer["indentation"] = "";
+        writer["emitUTF8"] = true;
+        auditEvent(e.user.empty() ? "system" : e.user, rep::log::actionName(e.action), "log",
+                   objectId, Json::writeString(writer, details), "");
+    });
+
     const std::string host = rep::envOr("REP_HOST", "0.0.0.0");
     const auto port = static_cast<uint16_t>(std::stoi(rep::envOr("REP_PORT", "8080")));
     const std::string queriesPath = rep::envOr("REP_QUERIES", "backend/config/queries.json");
@@ -859,7 +880,7 @@ int main() {
         LOG_FATAL << "queries.json: " << e.what();
         return 1;
     }
-    LOG_INFO << "loaded " << registry.size() << " queries from " << queriesPath;
+    REP_LOG_INFO(Other, "") << "loaded " << registry.size() << " queries from " << queriesPath;
 
     // Клиент БД нужен и для данных, и для загрузки шаблонов (ADR-21).
     auto db = orm::DbClient::newPgClient(rep::connInfoFromEnv(), poolSize);
@@ -870,10 +891,10 @@ int main() {
     orm::DbClientPtr dbRo;
     if (!roDsn.empty()) {
         dbRo = orm::DbClient::newPgClient(roDsn, 2);
-        LOG_INFO << "данные отчётов читаются под ролью только-чтения ("
+        REP_LOG_INFO(Other, "") << "данные отчётов читаются под ролью только-чтения ("
                  << rep::envOr("REP_RO_DB_USER", "") << ")";
     } else {
-        LOG_WARN << "REP_RO_DB_USER/REP_RO_DB_PASSWORD не заданы: данные читаются основной ролью";
+        REP_LOG_WARN(Other, "") << "REP_RO_DB_USER/REP_RO_DB_PASSWORD не заданы: данные читаются основной ролью";
     }
 
 
@@ -887,15 +908,15 @@ int main() {
                 if (res.empty()) return;
                 const std::string role = res[0]["role"].c_str();
                 if (!res[0]["is_super"].as<bool>()) {
-                    LOG_INFO << "сервер работает под ролью " << role;
+                    REP_LOG_INFO(Other, "") << "сервер работает под ролью " << role;
                     return;
                 }
                 if (roleCheck == "1") {
-                    LOG_ERROR << "сервер запущен под суперпользователем " << role
+                    REP_LOG_ERROR(Other, "") << "сервер запущен под суперпользователем " << role
                               << " — для эксплуатации нужна reporting_srv (REP_STRICT_ROLE=1)";
                     std::_Exit(1);
                 }
-                LOG_WARN << "сервер работает под суперпользователем " << role
+                REP_LOG_WARN(Other, "") << "сервер работает под суперпользователем " << role
                          << ": так можно только на стенде, для эксплуатации — reporting_srv";
             },
             [](const std::exception_ptr &) {});
@@ -922,7 +943,7 @@ int main() {
                 if (!entry.is_regular_file() || entry.path().extension() != ".json") continue;
                 TemplateInfo info;
                 if (!loadTemplateFile(entry.path(), info)) {
-                    LOG_ERROR << "шаблон не разобран: " << entry.path();
+                    REP_LOG_ERROR(ChangeTemplate, "") << "шаблон не разобран: " << entry.path();
                     continue;
                 }
                 templates[info.id] = info;
@@ -932,7 +953,7 @@ int main() {
                 templatesRaw[info.id] = ss.str();
             }
         }
-        LOG_INFO << "loaded " << templates.size() << " templates from " << templatesDir;
+        REP_LOG_INFO(ChangeTemplate, "") << "loaded " << templates.size() << " templates from " << templatesDir;
     } else {
         try {
             auto rows = db->execSqlSync("SELECT id, title, body::text FROM report_templates ORDER BY id");
@@ -941,7 +962,7 @@ int main() {
                 const std::string body = row["body"].as<std::string>();
                 TemplateInfo info;
                 if (!parseTemplate(body, id, info)) {
-                    LOG_ERROR << "шаблон в БД не разобран: " << id;
+                    REP_LOG_ERROR(ChangeTemplate, "") << "шаблон в БД не разобран: " << id;
                     continue;
                 }
                 info.id = id;
@@ -949,7 +970,7 @@ int main() {
                 templates[id] = info;
                 templatesRaw[id] = body;
             }
-            LOG_INFO << "loaded " << templates.size() << " templates from database";
+            REP_LOG_INFO(ChangeTemplate, "") << "loaded " << templates.size() << " templates from database";
             auto draftRows = db->execSqlSync(
                 "SELECT id, draft::text AS draft FROM report_templates WHERE draft IS NOT NULL");
             for (const auto &row : draftRows) {
@@ -957,7 +978,7 @@ int main() {
                 const std::string draft = row["draft"].as<std::string>();
                 TemplateInfo info;
                 if (!parseTemplate(draft, id, info)) {
-                    LOG_WARN << "черновик в БД не разобран: " << id;
+                    REP_LOG_WARN(ChangeTemplate, "") << "черновик в БД не разобран: " << id;
                     continue;
                 }
                 info.id = id;
@@ -1009,7 +1030,7 @@ int main() {
     try {
         reloadAccessRoles();
     } catch (const std::exception &e) {
-        LOG_WARN << "роли доступа не загружены: " << e.what();
+        REP_LOG_WARN(ChangeRoles, "") << "роли доступа не загружены: " << e.what();
     }
 
 
@@ -2011,7 +2032,7 @@ int main() {
     // иначе относительные ссылки на ассеты (`./assets/…`) поехали бы на уровень выше.
     const std::string basePath = rep::normalizeBasePath(rep::envOr("REP_BASE_PATH", "/reports"));
     if (!basePath.empty()) {
-        LOG_INFO << "префикс приложения: " << basePath << "/";
+        REP_LOG_INFO(Other, "") << "префикс приложения: " << basePath << "/";
         app().registerPreRoutingAdvice(
             [basePath](const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
                 const std::string path = req->path();
@@ -3217,11 +3238,22 @@ int main() {
             }
             buildXlsx(
                 reportId, (*body).get("dataset", "").asString(), (*body)["params"], wantDraft,
-                [cb, reportId](int status, const std::string &code, const std::string &bytes, int) {
+                [cb, reportId, req](int status, const std::string &code, const std::string &bytes, int) {
                     if (status != 200) {
                         sendError(cb, static_cast<HttpStatusCode>(status), code, bytes);
                         return;
                     }
+                    // действие пользователя: выгрузка отчёта (ADR-109)
+                    std::string user;
+                    if (req->attributes()->find("session_login")) {
+                        user = req->attributes()->get<std::string>("session_login");
+                    }
+                    Json::Value ctx(Json::objectValue);
+                    ctx["reportId"] = reportId;
+                    ctx["format"] = "xlsx";
+                    ctx["bytes"] = static_cast<Json::UInt64>(bytes.size());
+                    rep::log::event(rep::log::Level::Info, rep::log::Action::ExportReport, user,
+                                    "экспорт отчёта " + reportId + " (xlsx)", ctx);
                     auto resp = HttpResponse::newHttpResponse();
                     resp->setContentTypeString(
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -4653,7 +4685,18 @@ int main() {
 
             fetchDatasetRows(
                 *snapshot, datasetKey, bag, dataDb, connRegistry, restCache, maxRows,
-                [cb, &resultCache, cacheKey, etag](const rep::DatasetRows &rows) {
+                [cb, &resultCache, cacheKey, etag, req, reportId, datasetKey](const rep::DatasetRows &rows) {
+                    // действие пользователя: отчёт открыт (ADR-109)
+                    std::string user;
+                    if (req->attributes()->find("session_login")) {
+                        user = req->attributes()->get<std::string>("session_login");
+                    }
+                    Json::Value ctx(Json::objectValue);
+                    ctx["reportId"] = reportId;
+                    ctx["dataset"] = datasetKey;
+                    ctx["rows"] = static_cast<Json::UInt64>(rows.rows.size());
+                    rep::log::event(rep::log::Level::Info, rep::log::Action::OpenReport, user,
+                                    "открыт отчёт " + reportId, ctx);
                     Json::Value out = datasetJson(rows);
 
                     Json::StreamWriterBuilder wb;
@@ -4684,7 +4727,7 @@ int main() {
                             smtpRetryDelaySeconds](long long id, bool manual, const std::string &actor, bool retry) {
         PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
         if (PQstatus(conn) != CONNECTION_OK) {
-            LOG_ERROR << "рассылка: нет соединения с БД: " << PQerrorMessage(conn);
+            REP_LOG_ERROR(RunSubscription, "") << "рассылка: нет соединения с БД: " << PQerrorMessage(conn);
             PQfinish(conn);
             return;
         }
@@ -4698,7 +4741,7 @@ int main() {
         if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
             PQclear(res);
             PQfinish(conn);
-            LOG_WARN << "рассылка: подписка " << id << " не найдена";
+            REP_LOG_WARN(RunSubscription, "") << "рассылка: подписка " << id << " не найдена";
             return;
         }
         const std::string reportId = PQgetvalue(res, 0, 0);
@@ -4850,7 +4893,7 @@ int main() {
         }
         PQfinish(conn);
 
-        LOG_INFO << "рассылка: подписка " << id << " («" << title << "», " << reportId << "), попытка " << attempt
+        REP_LOG_INFO(RunSubscription, "") << "рассылка: подписка " << id << " («" << title << "», " << reportId << "), попытка " << attempt
                  << (retry ? " (повтор)" : "") << ", строк " << rows << ", писем " << sent << "/" << recipients.size()
                  << ", зона " << timezone << ", " << (ok ? "ок" : ("ошибка: " + error))
                  << (manual ? " (вручную)" : "");
@@ -4945,14 +4988,14 @@ int main() {
     // Чистка журналов: сразу при старте и раз в 6 часов, только если глубина задана.
     auto startLogRetention = [logRetentionDays]() {
         if (logRetentionDays <= 0) {
-            LOG_INFO << "ретеншен журналов выключен (REP_LOG_RETENTION_DAYS=0)";
+            REP_LOG_INFO(Other, "") << "ретеншен журналов выключен (REP_LOG_RETENTION_DAYS=0)";
             return;
         }
         std::thread([logRetentionDays]() {
             while (true) {
                 const PurgeResult purged = purgeOldLogs(logRetentionDays);
                 if (purged.ok) {
-                    LOG_INFO << "ретеншен журналов: " << logRetentionDays << " дн., удалено audit_log "
+                    REP_LOG_INFO(Other, "") << "ретеншен журналов: " << logRetentionDays << " дн., удалено audit_log "
                              << purged.audit << ", subscription_runs " << purged.runs;
                     if (purged.audit > 0 || purged.runs > 0) {
                         auditEvent("system", "logs.purge", "journal", "audit_log",
@@ -4962,7 +5005,7 @@ int main() {
                                    "");
                     }
                 } else {
-                    LOG_WARN << "ретеншен журналов: ошибка: " << purged.error;
+                    REP_LOG_WARN(Other, "") << "ретеншен журналов: ошибка: " << purged.error;
                 }
                 std::this_thread::sleep_for(std::chrono::hours(6));
             }
@@ -5025,18 +5068,18 @@ int main() {
                 }
             }
         }).detach();
-        LOG_INFO << "планировщик рассылки запущен (тик " << schedulerTickSeconds << " с, заём "
+        REP_LOG_INFO(Other, "") << "планировщик рассылки запущен (тик " << schedulerTickSeconds << " с, заём "
                  << subscriptionLeaseSeconds << " с, SMTP "
                  << (smtpHost.empty() ? std::string("не настроен") : smtpHost + ":" + std::to_string(smtpPort)) << ")";
     };
 
-    LOG_INFO << "listening on " << host << ":" << port;
+    REP_LOG_INFO(ServerStart, "") << "listening on " << host << ":" << port;
     // Порт проверяем сами: drogon при занятом порте уходит в abort(), а на аварийном
     // выходе с работающими потоками (планировщик) память уже рушилась — вместо
     // понятного сообщения получали SIGABRT и «corrupted double-linked list».
     if (!rep::net::portFree(port)) {
         // _Exit: разрушать статику drogon на фатальном выходе нельзя — падало в SIGSEGV
-        LOG_ERROR << "порт " << port << " уже занят — сервер не запущен";
+        REP_LOG_ERROR(ServerStart, "") << "порт " << port << " уже занят — сервер не запущен";
         std::_Exit(1);
     }
 
@@ -5044,7 +5087,7 @@ int main() {
     {
         const int closedRuns = closeStaleRuns(subscriptionLeaseSeconds);
         if (closedRuns > 0) {
-            LOG_WARN << "прерванные отправки: закрыто " << closedRuns
+            REP_LOG_WARN(ServerStop, "") << "прерванные отправки: закрыто " << closedRuns
                      << " попыток (процесс останавливался во время отправки)";
         }
     }
@@ -5058,7 +5101,7 @@ int main() {
         const std::string explicitRoot = rep::envOr("REP_WEB_ROOT", "");
         const std::string exeDir = rep::net::exeDir();
         if (rep::findWebRoot(explicitRoot, exeDir, web)) {
-            LOG_INFO << "статика: " << rep::describeWebRoot(web.path, exeDir)
+            REP_LOG_INFO(Other, "") << "статика: " << rep::describeWebRoot(web.path, exeDir)
                      << " (" << web.source << ")";
             const std::string root = web.path;
             // Именно ViaRegex: registerHandler считает путь без «{…}» литералом,
@@ -5096,10 +5139,10 @@ int main() {
                 },
                 {Get, Head});
         } else if (!explicitRoot.empty()) {
-            LOG_ERROR << "REP_WEB_ROOT=" << explicitRoot << " не содержит index.html —"
+            REP_LOG_ERROR(Other, "") << "REP_WEB_ROOT=" << explicitRoot << " не содержит index.html —"
                       << " сервер отдаёт только API";
         } else {
-            LOG_WARN << "статика не найдена: сервер отдаёт только API"
+            REP_LOG_WARN(Other, "") << "статика не найдена: сервер отдаёт только API"
                      << " (соберите фронтенд или задайте REP_WEB_ROOT)";
         }
     }
@@ -5113,7 +5156,7 @@ int main() {
         // Планировщик и SMTP-поток живут отдельно от drogon: при фатальной ошибке
         // (например, порт занят) разрушать статику под работающими потоками нельзя —
         // это уже приводило к «corrupted double-linked list» вместо внятного выхода.
-        LOG_ERROR << "сервер остановлен: " << e.what();
+        REP_LOG_ERROR(ServerStop, "") << "сервер остановлен: " << e.what();
         std::_Exit(1);
     }
     return 0;

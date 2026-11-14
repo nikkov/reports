@@ -1,5 +1,31 @@
 # История версий
 
+## v2.4.0 — 2026-11-12
+
+Единая функция логирования (ADR-109).
+
+### Что было не так
+
+Логи писались напрямую `LOG_*` drogon — свободный текст без типа действия и пользователя; журнал
+аудита заполнялся отдельно и только для админских действий («кто открыл отчёт» и «кто выгрузил Excel»
+в нём не было).
+
+### Что сделано
+- модуль `logging.{h,cc}`: `rep::log::event(level, action, user, message, context)` — уровень
+  (`trace|debug|info|warning|error`), тип действия (enum: `open_report`, `export_report`,
+  `print_report`, `login`, `logout`, `create_user`, `change_user`, `delete_user`, `change_roles`,
+  `change_template`, `publish_template`, `run_subscription`, `access_denied` + технические), логин
+  (пусто — системное/анонимное), метка времени ISO-8601 UTC с мс, текст, контекст;
+- JSON-строка в stdout + сменный приёмник: пишет `reports.audit_log` (`actor`, `action`, `details`);
+- макросы `REP_LOG_INFO/WARN/ERROR(action, user) << …`; заменены все 30 прежних `LOG_*` в `main.cc`;
+- события действий: `open_report` (открытие набора отчёта) и `export_report` (выгрузка xlsx);
+- документация — раздел «Логирование» в `configuration.md`.
+
+### Проверки
+Живой прогон: `open_report` — JSON с `context.reportId/rows` и `user: admin`, та же запись в
+`audit_log` (`actor=admin`, `action=open_report`); `export_report` — с `bytes=18063`, `format=xlsx`.
+Catch2: 6 кейсов на уровни, имена enum, JSON-поля, пустого пользователя, метку времени и приёмник.
+
 ## v2.3.1 — 2026-11-12
 
 Проверки к v2.3.0 и исправление проверки циклов.
