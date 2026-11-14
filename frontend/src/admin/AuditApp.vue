@@ -9,14 +9,14 @@
     <div class="filters">
       <label>
         Действие
-        <select v-model="action" @change="reload">
+        <select v-model="action" data-filter="action" @change="reload">
           <option value="">все</option>
           <option v-for="a in actions" :key="a" :value="a">{{ a }}</option>
         </select>
       </label>
       <label>
         Уровень
-        <select v-model="level" @change="reload">
+        <select v-model="level" data-filter="level" @change="reload">
           <option value="">любой</option>
           <option v-for="l in levels" :key="l" :value="l">{{ l }}</option>
         </select>

@@ -1777,7 +1777,7 @@ test('журнал: выгрузка CSV с фильтрами и запись �
   await page.goto('/audit.html')
   const csvLink = page.locator('a[data-export="csv"]')
   await expect(csvLink).toHaveAttribute('href', /\/api\/admin\/audit\/export\.csv/)
-  await page.locator('select').selectOption('auth.login')
+  await page.locator('select[data-filter="action"]').selectOption('auth.login')
   await expect(csvLink).toHaveAttribute('href', /action=auth\.login/)
   await expect(page.locator('a[data-export="excel"]')).toHaveAttribute('href', /excel=1/)
 })
