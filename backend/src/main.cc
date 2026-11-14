@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cctype>
+#include <regex>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -454,6 +455,7 @@ int main() {
         LOG_WARN << "REP_RO_DB_USER/REP_RO_DB_PASSWORD не заданы: данные читаются основной ролью";
     }
 
+
     // Эксплуатация не должна идти под суперпользователем (ADR-75): для сервера есть
     // reporting_srv. На стенде это предупреждение, в строгом режиме — отказ стартовать.
     {
@@ -555,6 +557,145 @@ int main() {
     // приходит от реверс-прокси в заголовке (ADR-54), иначе выключена.
     const rep::AuthMode authMode = rep::parseAuthMode(rep::envOr("REP_AUTH", "0"));
     const bool authEnabled = authMode != rep::AuthMode::Off;
+
+    // --- Роли доступа к отчётам (ADR-102) ------------------------------------------------
+    // Ключи ролей и связи «пользователь → роли» держим в памяти: проверка нужна на каждом
+    // запросе данных, а меняются они только через админку (тогда перечитываем).
+    struct AccessRolesState {
+        std::mutex m;
+        std::map<std::string, std::set<std::string>> byLogin; // login в нижнем регистре → ключи
+        std::set<std::string> known;                         // ключи справочника
+    };
+    auto accessState = std::make_shared<AccessRolesState>();
+    auto reloadAccessRoles = [db, accessState]() {
+        auto dir = db->execSqlSync("SELECT key, title FROM reports.access_roles ORDER BY key");
+        auto links = db->execSqlSync(
+            "SELECT lower(u.login) AS login, r.key AS role_key FROM reports.user_roles ur "
+            "JOIN reports.users u ON u.id = ur.user_id "
+            "JOIN reports.access_roles r ON r.id = ur.role_id");
+        std::map<std::string, std::set<std::string>> byLogin;
+        std::set<std::string> known;
+        for (const auto &row : dir) {
+            known.insert(row["key"].as<std::string>());
+        }
+        for (const auto &row : links) {
+            byLogin[row["login"].as<std::string>()].insert(row["role_key"].as<std::string>());
+        }
+        std::lock_guard<std::mutex> lock(accessState->m);
+        accessState->byLogin = std::move(byLogin);
+        accessState->known = std::move(known);
+    };
+    try {
+        reloadAccessRoles();
+    } catch (const std::exception &e) {
+        LOG_WARN << "роли доступа не загружены: " << e.what();
+    }
+
+
+    // Сохранить роли пользователя по ключам (ADR-102): сначала снимаем все, затем ставим
+    // известные справочнику; незнакомый ключ — ошибка, иначе опечатка молча терялась бы.
+    auto saveUserRoles = [](PGconn *conn, const std::string &userId, const Json::Value &keys,
+                            std::string &err) {
+        const char *del[] = {userId.c_str()};
+        PGresult *d = PQexecParams(conn, "DELETE FROM user_roles WHERE user_id = $1", 1, nullptr, del,
+                                   nullptr, nullptr, 0);
+        if (PQresultStatus(d) != PGRES_COMMAND_OK) {
+            err = PQerrorMessage(conn);
+            PQclear(d);
+            return false;
+        }
+        PQclear(d);
+        if (!keys.isArray()) return true;
+        for (const auto &k : keys) {
+            if (!k.isString()) continue;
+            const std::string key = k.asString();
+            const char *v[] = {userId.c_str(), key.c_str()};
+            PGresult *ins = PQexecParams(
+                conn,
+                "INSERT INTO user_roles (user_id, role_id) "
+                "SELECT $1::int, id FROM access_roles WHERE key = $2 ON CONFLICT DO NOTHING",
+                2, nullptr, v, nullptr, nullptr, 0);
+            if (PQresultStatus(ins) != PGRES_COMMAND_OK) {
+                err = PQerrorMessage(conn);
+                PQclear(ins);
+                return false;
+            }
+            const bool unknown = std::string(PQcmdTuples(ins)) == "0";
+            PQclear(ins);
+            if (unknown) {
+                err = "роль «" + key + "» не найдена в справочнике ролей доступа";
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // Список ролей и ключи пользователей для GET /api/admin/users (ADR-102)
+    auto rolesByUser = [](PGconn *conn, std::map<std::string, Json::Value> &out) {
+        PGresult *res = PQexec(conn,
+                               "SELECT ur.user_id, r.key FROM user_roles ur "
+                               "JOIN access_roles r ON r.id = ur.role_id ORDER BY r.key");
+        if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+            PQclear(res);
+            return;
+        }
+        for (int i = 0; i < PQntuples(res); ++i) {
+            Json::Value &arr = out[PQgetvalue(res, i, 0)];
+            if (!arr.isArray()) arr = Json::Value(Json::arrayValue);
+            arr.append(PQgetvalue(res, i, 1));
+        }
+        PQclear(res);
+    };
+
+    // Ключи ролей, объявленные шаблоном отчёта (accessRoles).
+    auto templateAccessRoles = [](const Json::Value &tpl) {
+        std::vector<std::string> out;
+        const Json::Value &arr = tpl["accessRoles"];
+        if (arr.isArray()) {
+            for (const auto &v : arr) {
+                if (v.isString()) out.push_back(v.asString());
+            }
+        }
+        return out;
+    };
+    auto accessRolesOfRaw = [templateAccessRoles](const std::string &raw) {
+        std::vector<std::string> out;
+        if (raw.empty()) return out;
+        Json::CharReaderBuilder builder;
+        Json::Value tpl;
+        std::string errs;
+        std::istringstream in(raw);
+        if (Json::parseFromStream(builder, in, &tpl, &errs)) out = templateAccessRoles(tpl);
+        return out;
+    };
+
+    // Пустой список ролей у отчёта — доступ всем авторизованным (обратная совместимость),
+    // администратор видит всё, остальным нужна хотя бы одна из объявленных ролей.
+    auto allowedForReport = [accessState, authEnabled](const HttpRequestPtr &req,
+                                                       const std::vector<std::string> &need) {
+        if (!authEnabled) return true; // REP_AUTH=0: поведение без аутентификации
+        if (need.empty()) return true;
+        std::string role = "viewer";
+        std::string login;
+        if (auto attrs = req->attributes()) {
+            if (attrs->find("session_role")) role = attrs->get<std::string>("session_role");
+            if (attrs->find("session_login")) login = attrs->get<std::string>("session_login");
+        }
+        if (role == "admin") return true;
+        std::transform(login.begin(), login.end(), login.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::set<std::string> mine;
+        {
+            std::lock_guard<std::mutex> lock(accessState->m);
+            const auto it = accessState->byLogin.find(login);
+            if (it != accessState->byLogin.end()) mine = it->second;
+        }
+        for (const auto &key : need) {
+            if (mine.count(key)) return true;
+        }
+        return false;
+    };
+
     const bool proxyAuth = authMode == rep::AuthMode::Proxy;
     const std::string proxyHeader = rep::envOr("REP_AUTH_PROXY_HEADER", "X-Remote-User");
     // Кому верим: адрес, с которого пришёл запрос, должен быть в списке. Пустое
@@ -1437,8 +1578,59 @@ int main() {
                     [&unauthorized, respond](const std::exception_ptr &) {
                         respond(unauthorized("не удалось проверить сессию"));
                     });
-            });
-    }
+                    });
+                    }
+
+                    // Доступ к отчёту по ролям (ADR-102): одна точка на все запросы данных. Выполняется после
+                    // проверки сессии (роль и логин уже в attributes) и до маршрутизации.
+                    if (authEnabled) {
+                    app().registerPreRoutingAdvice(
+                    [allowedForReport, accessRolesOfRaw, &templatesRaw, &templatesMutex](
+                    const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
+                    const std::string path = req->path();
+                    static const std::set<std::string> dataPaths = {
+                        "/api/report/data",     "/api/report/aggregate", "/api/report/group",
+                        "/api/report/text",     "/api/report/export.xlsx", "/api/report/export.csv"};
+                    std::string reportId;
+                    if (dataPaths.count(path)) {
+                        if (const auto body = req->getJsonObject()) {
+                            reportId = body->get("reportId", "").asString();
+                        }
+                    } else if (req->method() == Get && path.rfind("/api/reports/", 0) == 0) {
+                        const std::string rest = path.substr(std::string("/api/reports/").size());
+                        if (rest.find('/') == std::string::npos) reportId = rest;
+                    }
+                    if (reportId.empty()) {
+                        next();
+                        return;
+                    }
+                    std::string raw;
+                    {
+                        std::lock_guard<std::mutex> lock(templatesMutex);
+                        const auto it = templatesRaw.find(reportId);
+                        if (it == templatesRaw.end()) {
+                            next(); // «не найден» отдаст сам обработчик
+                            return;
+                        }
+                        raw = it->second;
+                    }
+                    if (!allowedForReport(req, accessRolesOfRaw(raw))) {
+                        auto resp = HttpResponse::newHttpResponse();
+                        Json::Value body;
+                        body["error"]["code"] = "REPORT_FORBIDDEN";
+                        body["error"]["message"] = "нет доступа к отчёту: нужна роль из его accessRoles";
+                        Json::StreamWriterBuilder wb;
+                        wb["indentation"] = "";
+                        resp->setStatusCode(k403Forbidden);
+                        resp->setContentTypeCode(CT_APPLICATION_JSON);
+                        resp->setBody(Json::writeString(wb, body));
+                        respond(resp);
+                        return;
+                    }
+                    next();
+                    });
+                    }
+
 
     app().registerHandler(
         "/api/auth/login",
@@ -2476,7 +2668,8 @@ int main() {
 
     app().registerHandler(
         "/api/admin/users",
-        [adminEnabled, userJson](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [adminEnabled, userJson, rolesByUser, saveUserRoles, reloadAccessRoles](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -2504,6 +2697,13 @@ int main() {
                 Json::Value out;
                 out["items"] = userJson(res);
                 PQclear(res);
+                // роли доступа каждого пользователя (ADR-102)
+                std::map<std::string, Json::Value> byUser;
+                rolesByUser(conn, byUser);
+                for (auto &item : out["items"]) {
+                    const std::string id = std::to_string(item["id"].asLargestInt());
+                    item["roles"] = byUser.count(id) ? byUser[id] : Json::Value(Json::arrayValue);
+                }
                 PQfinish(conn);
                 cb(jsonResponse(out));
                 return;
@@ -2548,6 +2748,16 @@ int main() {
                 return;
             }
             const std::string newId = PQgetvalue(res, 0, 0);
+            {
+                std::string roleErr;
+                if (!saveUserRoles(conn, newId, (*body)["roles"], roleErr)) {
+                    PQclear(res);
+                    PQfinish(conn);
+                    sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", roleErr);
+                    return;
+                }
+                reloadAccessRoles();
+            }
             auditEvent(requestActor(req), "user.create", "user", newId,
                        "{\"login\":\"" + login + "\",\"role\":\"" + role + "\",\"enabled\":" +
                            (enabled == "true" ? "true" : "false") + "}",
@@ -2558,6 +2768,7 @@ int main() {
             out["login"] = login;
             out["role"] = role;
             out["enabled"] = enabled == "true";
+            out["roles"] = (*body)["roles"].isArray() ? (*body)["roles"] : Json::Value(Json::arrayValue);
             PQclear(res);
             PQfinish(conn);
             cb(jsonResponse(out));
@@ -2566,8 +2777,9 @@ int main() {
 
     app().registerHandler(
         "/api/admin/users/{id}",
-        [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
-                       const std::string &id) {
+        [adminEnabled, saveUserRoles, reloadAccessRoles](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
+            const std::string &id) {
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -2727,12 +2939,180 @@ int main() {
                     PQclear(sessions);
                 }
             }
+            // роли доступа меняются отдельно от системной роли (ADR-102)
+            Json::Value rolesOut(Json::arrayValue);
+            if ((*body).isMember("roles")) {
+                std::string roleErr;
+                if (!saveUserRoles(conn, id, (*body)["roles"], roleErr)) {
+                    finish(k422UnprocessableEntity, "INVALID_PARAMS", roleErr);
+                    return;
+                }
+                rolesOut = (*body)["roles"];
+            }
+            reloadAccessRoles();
             auditEvent(requestActor(req), "user.update", "user", id,
                        "{\"login\":\"" + login + "\",\"role\":\"" + role + "\",\"enabled\":" +
                            (enabled ? "true" : "false") +
                            ",\"passwordChanged\":" + (password.empty() ? "false" : "true") + "}",
                        requestIp(req));
             PQfinish(conn);
+            Json::Value out;
+            out["updated"] = true;
+            if (rolesOut.isArray()) out["roles"] = rolesOut;
+            cb(jsonResponse(out));
+        },
+        {Put, Delete});
+
+
+    // --- Справочник ролей доступа к отчётам (ADR-102) ---------------------------------------
+    // Ключ роли указывается в шаблоне (accessRoles) и у пользователя; роль без пользователей
+    // и без отчётов безвредна. Удаление роли снимает её у всех пользователей (FK ON DELETE CASCADE).
+    app().registerHandler(
+        "/api/admin/access-roles",
+        [adminEnabled, reloadAccessRoles](const HttpRequestPtr &req,
+                                          std::function<void(const HttpResponsePtr &)> &&cb) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            if (req->method() == Get) {
+                PGresult *res = PQexec(conn, "SELECT id, key, title FROM access_roles ORDER BY key");
+                if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                    const std::string msg = PQerrorMessage(conn);
+                    PQclear(res);
+                    PQfinish(conn);
+                    sendError(cb, k500InternalServerError, "QUERY_FAILED", msg);
+                    return;
+                }
+                Json::Value items(Json::arrayValue);
+                for (int i = 0; i < PQntuples(res); ++i) {
+                    Json::Value one;
+                    one["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, i, 0)));
+                    one["key"] = PQgetvalue(res, i, 1);
+                    one["title"] = PQgetvalue(res, i, 2);
+                    items.append(one);
+                }
+                PQclear(res);
+                PQfinish(conn);
+                Json::Value out;
+                out["items"] = items;
+                cb(jsonResponse(out));
+                return;
+            }
+
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                PQfinish(conn);
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string key = (*body).get("key", "").asString();
+            const std::string title = (*body).get("title", "").asString();
+            static const std::regex keyRe("^[a-z][a-z0-9_-]{1,31}$");
+            if (!std::regex_match(key, keyRe)) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                          "ключ роли задаётся латиницей: ^[a-z][a-z0-9_-]{1,31}$");
+                return;
+            }
+            if (title.empty()) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "title обязателен");
+                return;
+            }
+            const char *values[] = {key.c_str(), title.c_str()};
+            PGresult *res = PQexecParams(
+                conn, "INSERT INTO access_roles (key, title) VALUES ($1, $2) RETURNING id", 2,
+                nullptr, values, nullptr, nullptr, 0);
+            if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                const bool duplicate = msg.find("access_roles_key_key") != std::string::npos;
+                sendError(cb, duplicate ? k409Conflict : k422UnprocessableEntity,
+                          duplicate ? "ROLE_TAKEN" : "INVALID_PARAMS",
+                          duplicate ? "роль «" + key + "» уже есть" : msg);
+                return;
+            }
+            Json::Value out;
+            out["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, 0, 0)));
+            out["key"] = key;
+            out["title"] = title;
+            PQclear(res);
+            PQfinish(conn);
+            reloadAccessRoles();
+            auditEvent(requestActor(req), "role.create", "role", key, "{\"key\":\"" + key + "\"}", requestIp(req));
+            cb(jsonResponse(out));
+        },
+        {Get, Post});
+
+    app().registerHandler(
+        "/api/admin/access-roles/{id}",
+        [adminEnabled, reloadAccessRoles](const HttpRequestPtr &req,
+                                          std::function<void(const HttpResponsePtr &)> &&cb,
+                                          const std::string &id) {
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            if (req->method() == Delete) {
+                const char *values[] = {id.c_str()};
+                PGresult *res = PQexecParams(conn, "DELETE FROM access_roles WHERE id = $1", 1, nullptr,
+                                             values, nullptr, nullptr, 0);
+                const bool ok = PQresultStatus(res) == PGRES_COMMAND_OK;
+                const std::string msg = ok ? "" : PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                if (!ok) {
+                    sendError(cb, k500InternalServerError, "DELETE_FAILED", msg);
+                    return;
+                }
+                reloadAccessRoles();
+                auditEvent(requestActor(req), "role.delete", "role", id, "{}", requestIp(req));
+                Json::Value out;
+                out["deleted"] = true;
+                cb(jsonResponse(out));
+                return;
+            }
+
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                PQfinish(conn);
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string title = (*body).get("title", "").asString();
+            if (title.empty()) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "title обязателен");
+                return;
+            }
+            const char *values[] = {id.c_str(), title.c_str()};
+            PGresult *res = PQexecParams(conn, "UPDATE access_roles SET title = $2 WHERE id = $1", 2,
+                                         nullptr, values, nullptr, nullptr, 0);
+            const bool ok = PQresultStatus(res) == PGRES_COMMAND_OK;
+            const std::string msg = ok ? "" : PQerrorMessage(conn);
+            PQclear(res);
+            PQfinish(conn);
+            if (!ok) {
+                sendError(cb, k500InternalServerError, "UPDATE_FAILED", msg);
+                return;
+            }
+            reloadAccessRoles();
             Json::Value out;
             out["updated"] = true;
             cb(jsonResponse(out));
@@ -3326,7 +3706,8 @@ int main() {
 
     app().registerHandler(
         "/api/reports",
-        [&templatesRaw, &templatesMutex](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+        [&templatesRaw, &templatesMutex, allowedForReport, accessRolesOfRaw](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             std::map<std::string, std::string> snapshot;
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
@@ -3335,6 +3716,8 @@ int main() {
             // список для экрана отчётов: заголовок, описание и состав параметров
             Json::Value list(Json::arrayValue);
             for (const auto &kv : snapshot) {
+                // недоступные по ролям отчёты не показываем в каталоге (ADR-102)
+                if (!allowedForReport(req, accessRolesOfRaw(kv.second))) continue;
                 Json::Value item;
                 item["id"] = kv.first;
 

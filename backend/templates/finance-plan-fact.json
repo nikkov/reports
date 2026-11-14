@@ -3,6 +3,9 @@
   "id": "finance-plan-fact",
   "title": "Финансы: план и факт по центрам затрат",
   "description": "Помесячное исполнение бюджета: план, факт, отклонение и процент исполнения по счетам.",
+  "accessRoles": [
+    "finance"
+  ],
   "params": [
     {
       "name": "cost_center",

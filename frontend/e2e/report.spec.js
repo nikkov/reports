@@ -2770,3 +2770,61 @@ test('текстовый блок: данные из запроса и гипе�
   expect(empty.ok()).toBeTruthy()
   expect((await empty.json()).row).toBeNull()
 })
+
+test('доступ к отчётам по ролям: каталог скрывает, API отдаёт 403 (ADR-102)', async ({ request, baseURL }) => {
+  const ensureRole = async (key, title) => {
+    const res = await request.post('/api/admin/access-roles', { data: { key, title } })
+    if (res.ok()) return (await res.json()).id
+    const list = await (await request.get('/api/admin/access-roles')).json()
+    return list.items.find((r) => r.key === key)?.id
+  }
+  await ensureRole('sales', 'Продажи')
+  await ensureRole('finance', 'Финансы')
+
+  const login = 'roles_e2e_user'
+  const password = 'roles-pass-123'
+  const users = await (await request.get('/api/admin/users')).json()
+  for (const u of users.items.filter((x) => x.login === login)) {
+    await request.delete(`/api/admin/users/${u.id}`)
+  }
+  const created = await request.post('/api/admin/users', {
+    data: { login, role: 'viewer', password, roles: ['sales'] }
+  })
+  expect(created.ok()).toBeTruthy()
+  const { id } = await created.json()
+
+  const ctx = await apiRequest.newContext({ baseURL })
+  expect((await ctx.post('/api/auth/login', { data: { login, password } })).ok()).toBeTruthy()
+
+  // каталог: отчёт с ролью sales виден, с ролью finance — скрыт; без ролей виден всем
+  const catalog = (await (await ctx.get('/api/reports')).json()).map((r) => r.id)
+  expect(catalog).toContain('sales-summary')
+  expect(catalog).toContain('sales-drill')
+  expect(catalog).not.toContain('finance-plan-fact')
+  expect(catalog).not.toContain('ops-events')
+
+  // прямой доступ к шаблону и к данным — 403 REPORT_FORBIDDEN
+  expect((await ctx.get('/api/reports/finance-plan-fact')).status()).toBe(403)
+  const denied = await ctx.post('/api/report/data', {
+    data: { reportId: 'finance-plan-fact', params: {} }
+  })
+  expect(denied.status()).toBe(403)
+  expect((await denied.json()).error.code).toBe('REPORT_FORBIDDEN')
+  // доступный отчёт открывается
+  expect((await ctx.get('/api/reports/sales-summary')).ok()).toBeTruthy()
+
+  // администратор видит все отчёты
+  const adminCatalog = (await (await request.get('/api/reports')).json()).map((r) => r.id)
+  expect(adminCatalog).toContain('finance-plan-fact')
+
+  // выдали вторую роль — отчёт стал доступен
+  expect(
+    (await request.put(`/api/admin/users/${id}`, {
+      data: { role: 'viewer', enabled: true, roles: ['sales', 'finance'] }
+    })).ok()
+  ).toBeTruthy()
+  expect((await ctx.get('/api/reports/finance-plan-fact')).ok()).toBeTruthy()
+
+  await ctx.dispose()
+  expect((await request.delete(`/api/admin/users/${id}`)).ok()).toBeTruthy()
+})

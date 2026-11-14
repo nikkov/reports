@@ -61,6 +61,15 @@ export default {
     "styles": {
       "$ref": "#/$defs/styles"
     },
+    "accessRoles": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{1,31}$"
+      },
+      "description": "ключи ролей доступа (ADR-102): видеть отчёт может тот, у кого есть хотя бы одна из них; пусто — доступ всем авторизованным"
+    },
     "autoLoad": {
       "type": "boolean",
       "description": "загружать данные при открытии отчёта; false — только по кнопке «Обновить» (ADR-89)"

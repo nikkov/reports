@@ -15,6 +15,7 @@
         <tr>
           <th>Логин</th>
           <th>Роль</th>
+          <th>Роли доступа</th>
           <th>Состояние</th>
           <th>Создан</th>
           <th>Изменён</th>
@@ -30,6 +31,19 @@
               <option value="author">author</option>
               <option value="admin">admin</option>
             </select>
+          </td>
+          <td class="roles" :data-roles="(u.roles || []).join(',')">
+            <label v-for="r in roles" :key="r.key" class="role-check">
+              <input
+                type="checkbox"
+                :value="r.key"
+                :checked="(u.roles || []).includes(r.key)"
+                :disabled="busy === u.id"
+                @change="toggleRole(u, r.key, $event.target.checked)"
+              />
+              <span :title="r.title">{{ r.key }}</span>
+            </label>
+            <span v-if="!roles.length" class="muted small">ролей нет</span>
           </td>
           <td>
             <span :class="u.enabled ? 'on' : 'off-label'">{{ u.enabled ? 'включён' : 'отключён' }}</span>
@@ -50,6 +64,26 @@
     </table>
     <p v-else class="muted">Пользователей нет.</p>
 
+    <section class="roles-admin">
+      <h2>Роли доступа</h2>
+      <p class="muted small">
+        Роли указываются в шаблоне отчёта (<code>accessRoles</code>) и выдаются пользователям.
+        Пустой список у отчёта — доступ всем авторизованным; администратор видит всё.
+      </p>
+      <ul class="role-list">
+        <li v-for="r in roles" :key="r.id">
+          <b>{{ r.key }}</b> — {{ r.title }}
+          <button type="button" class="tool danger" :disabled="saving" @click="removeRole(r)">Удалить</button>
+        </li>
+        <li v-if="!roles.length" class="muted small">ролей пока нет</li>
+      </ul>
+      <form class="role-new" @submit.prevent="addRole">
+        <input v-model.trim="newRole.key" placeholder="finance" autocomplete="off" />
+        <input v-model.trim="newRole.title" placeholder="Финансы" autocomplete="off" />
+        <button type="submit" class="tool primary" :disabled="saving">Добавить роль</button>
+      </form>
+    </section>
+
     <form class="form" @submit.prevent="create">
       <h2>Новый пользователь</h2>
       <label>
@@ -67,6 +101,15 @@
           <option value="author">author</option>
           <option value="admin">admin</option>
         </select>
+      </label>
+      <label v-if="roles.length">
+        Роли доступа
+        <span class="roles form-roles">
+          <label v-for="r in roles" :key="r.key" class="role-check">
+            <input type="checkbox" :value="r.key" v-model="form.roles" />
+            <span :title="r.title">{{ r.key }}</span>
+          </label>
+        </span>
       </label>
       <label>
         Пароль
@@ -96,7 +139,9 @@ const busy = ref(null)
 const saving = ref(false)
 const me = props.session?.login || ''
 
-const form = reactive({ login: '', role: 'viewer', password: '' })
+const form = reactive({ login: '', role: 'viewer', password: '', roles: [] })
+const roles = ref([])
+const newRole = reactive({ key: '', title: '' })
 
 function formatDate(value) {
   if (!value) return '—'
@@ -113,16 +158,80 @@ async function load() {
   }
 }
 
+async function loadRoles() {
+  try {
+    roles.value = (await api.accessRoles()).items || []
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function addRole() {
+  saving.value = true
+  error.value = null
+  notice.value = null
+  try {
+    await api.createAccessRole({ key: newRole.key.trim(), title: newRole.title.trim() })
+    notice.value = `Роль ${newRole.key} добавлена`
+    newRole.key = ''
+    newRole.title = ''
+    await loadRoles()
+    await load()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeRole(role) {
+  if (!window.confirm(`Удалить роль «${role.key}»? Она снимется у всех пользователей.`)) return
+  error.value = null
+  try {
+    await api.deleteAccessRole(role.id)
+    notice.value = `Роль ${role.key} удалена`
+    await loadRoles()
+    await load()
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+// роли пользователя (ADR-102): меняются отдельно от системной роли
+async function toggleRole(user, key, on) {
+  const next = new Set(user.roles || [])
+  if (on) next.add(key)
+  else next.delete(key)
+  busy.value = user.id
+  error.value = null
+  try {
+    await api.updateUser(user.id, { role: user.role, enabled: user.enabled, roles: [...next] })
+    notice.value = `Роли ${user.login}: ${[...next].join(', ') || 'нет'}`
+    await load()
+  } catch (e) {
+    error.value = e.message
+    await load()
+  } finally {
+    busy.value = null
+  }
+}
+
 async function create() {
   saving.value = true
   error.value = null
   notice.value = null
   try {
-    await api.createUser({ login: form.login.trim(), role: form.role, password: form.password })
+    await api.createUser({
+      login: form.login.trim(),
+      role: form.role,
+      password: form.password,
+      roles: [...form.roles]
+    })
     notice.value = `Пользователь ${form.login} создан`
     form.login = ''
     form.password = ''
     form.role = 'viewer'
+    form.roles = []
     await load()
   } catch (e) {
     error.value = e.message
@@ -178,7 +287,10 @@ async function remove(u) {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await loadRoles()
+  await load()
+})
 </script>
 
 <style scoped>
@@ -291,5 +403,41 @@ select {
 .buttons {
   display: flex;
   gap: 8px;
+}
+
+/* Роли доступа (ADR-102) */
+.roles-admin {
+  margin: 18px 0 8px;
+}
+.role-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+.role-list li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 4px 0;
+}
+.role-new {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.role-new input {
+  min-width: 180px;
+}
+td.roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.role-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 </style>

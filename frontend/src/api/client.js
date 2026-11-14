@@ -154,6 +154,14 @@ export const api = {
     request(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
 
+  // справочник ролей доступа к отчётам (ADR-102)
+  accessRoles: () => request('/api/admin/access-roles'),
+  createAccessRole: (payload) =>
+    request('/api/admin/access-roles', { method: 'POST', body: JSON.stringify(payload) }),
+  updateAccessRole: (id, payload) =>
+    request(`/api/admin/access-roles/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteAccessRole: (id) => request(`/api/admin/access-roles/${id}`, { method: 'DELETE' }),
+
   // журнал действий (ADR-52)
   audit: ({ action = '', actor = '', from = '', to = '', limit = 50, offset = 0 } = {}) => {
     const qs = new URLSearchParams()

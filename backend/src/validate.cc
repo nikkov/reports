@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <regex>
 #include <set>
 #include <sstream>
 
@@ -638,6 +639,28 @@ ValidationResult validateTemplateJson(const Json::Value &root,
     }
     if (!root["datasets"].isNull() && !root["datasets"].isObject()) {
         addError(r, "datasets", "datasets должен быть объектом");
+    }
+
+    // Роли доступа к отчёту (ADR-102): ключи в нижнем регистре, без повторов
+    if (root["accessRoles"].isArray()) {
+        std::set<std::string> seen;
+        int ri = 0;
+        static const std::regex keyRe("^[a-z][a-z0-9_-]{1,31}$");
+        for (const auto &key : root["accessRoles"]) {
+            if (!key.isString()) {
+                addError(r, "accessRoles." + std::to_string(ri), "роль должна быть строкой-ключом");
+            } else {
+                const std::string k = key.asString();
+                if (!std::regex_match(k, keyRe)) {
+                    addError(r, "accessRoles." + std::to_string(ri),
+                             "ключ роли задаётся латиницей: ^[a-z][a-z0-9_-]{1,31}$");
+                }
+                if (!seen.insert(k).second) {
+                    addError(r, "accessRoles." + std::to_string(ri), "роль «" + k + "» указана дважды");
+                }
+            }
+            ++ri;
+        }
     }
 
     // Источники данных (ADR-76): блок connections описывает, КУДА идти за данными —

@@ -249,6 +249,17 @@ export function validateTemplate(template) {
     warnings.push({ path: 'version', message: `шаблон версии ${template.version}: при сохранении будет переведён в версию 2` })
   }
 
+  // Роли доступа к отчёту (ADR-102): ключи в нижнем регистре, без повторов
+  if (Array.isArray(template.accessRoles)) {
+    const seen = new Set()
+    template.accessRoles.forEach((key, i) => {
+      if (seen.has(key)) {
+        errors.push({ path: `accessRoles.${i}`, message: `роль «${key}» указана дважды` })
+      }
+      seen.add(key)
+    })
+  }
+
   const params = template.params || []
   const datasetNames = Object.keys(template.datasets || {})
   const datasetKeys = new Set(datasetNames)

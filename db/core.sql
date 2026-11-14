@@ -44,6 +44,24 @@ CREATE TABLE IF NOT EXISTS reports.users (
 
 CREATE INDEX IF NOT EXISTS users_login_idx ON reports.users (login);
 
+-- Роли доступа к отчётам (ADR-102): отдельный список, не связанный с системными
+-- admin/author/viewer. В шаблоне отчёта перечисляются ключи ролей, у пользователя
+-- их может быть несколько; администратор видит все отчёты.
+CREATE TABLE IF NOT EXISTS reports.access_roles (
+    id         serial      PRIMARY KEY,
+    key        text        NOT NULL UNIQUE CHECK (key ~ '^[a-z][a-z0-9_-]{1,31}$'),
+    title      text        NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS reports.user_roles (
+    user_id integer NOT NULL REFERENCES reports.users (id) ON DELETE CASCADE,
+    role_id integer NOT NULL REFERENCES reports.access_roles (id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS user_roles_user_idx ON reports.user_roles (user_id);
+
 -- Доменные учётные записи (ADR-93): логин сравнивается без учёта регистра, поэтому
 -- CORP\ivanov и corp\Ivanov — одна и та же учётная запись, дубликат не создаётся.
 CREATE UNIQUE INDEX IF NOT EXISTS users_login_lower_key ON reports.users (lower(login));
