@@ -112,7 +112,7 @@
         ]
       },
       "errors": [
-        "datasets.sales.sql"
+        "datasets.sales"
       ]
     },
     {

@@ -41,9 +41,15 @@ struct ConnSpec {
     std::string sslMode;     // disable | prefer | require | verify-ca | verify-full
     int connectTimeout = 5;  // секунды
     int statementTimeoutMs = 0;
-    // rest (зарезервировано)
+    // rest (ADR-104)
     std::string baseUrl;
+    std::map<std::string, std::string> headers; // значения могут быть ${ENV} (секреты — только так)
+    int timeoutMs = 5000;
+    int cacheSeconds = 0;
 };
+
+// Подстановка ${NAME} в строковом поле источника (ADR-77). Незаданная переменная — ошибка.
+std::string expandEnvValue(const std::string &value, const std::string &key, std::string &error);
 
 // Разбор блока `connections`. Возвращает false, если блок не объект или содержит
 // элемент не-объект; семантику полей проверяет валидатор шаблона (клиент и сервер).

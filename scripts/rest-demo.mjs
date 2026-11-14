@@ -1,0 +1,41 @@
+// Демонстрационный REST-источник для примеров ADR-104 (sales-crm).
+// Отдаёт справочник регионов с менеджерами — так отчёт объединяет PostgreSQL и REST.
+//
+//   node scripts/rest-demo.mjs [порт]        # по умолчанию 8099
+//
+// В шаблоне: connections.crm.baseUrl = "${CRM_BASE_URL}" (http://127.0.0.1:8099),
+// а на сервере нужен allowlist: REP_REST_ALLOW_HOSTS=127.0.0.1:8099
+import http from 'node:http'
+
+const port = Number(process.argv[2] || process.env.REST_DEMO_PORT || 8099)
+
+const regions = [
+  { id: 1, name: 'Север', manager: 'Иванов А.', active: true },
+  { id: 2, name: 'Юг', manager: 'Петрова М.', active: true },
+  { id: 3, name: 'Запад', manager: 'Сидоров К.', active: true },
+  { id: 4, name: 'Восток', manager: 'Кузнецова О.', active: true },
+  { id: 5, name: 'Центр', manager: 'Смирнов Д.', active: true }
+]
+
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`)
+  if (url.pathname === '/api/regions') {
+    // фильтр active=1 поддерживает пример параметризованного REST-набора
+    const active = url.searchParams.get('active')
+    const items = active === '1' ? regions.filter((r) => r.active) : regions
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ items, total: items.length }))
+    return
+  }
+  if (url.pathname === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true }))
+    return
+  }
+  res.writeHead(404, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({ error: 'not found' }))
+})
+
+server.listen(port, '127.0.0.1', () => {
+  console.log(`REST-демо на http://127.0.0.1:${port}/api/regions`)
+})

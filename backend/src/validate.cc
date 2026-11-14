@@ -681,6 +681,7 @@ ValidationResult validateTemplateJson(const Json::Value &root,
     }
 
     std::set<std::string> connKeys;
+    std::map<std::string, std::string> connKinds; // ключ → kind (ADR-104)
     if (!root["connections"].isNull()) {
         if (!root["connections"].isObject()) {
             addError(r, "connections", "connections должен быть объектом");
@@ -698,6 +699,7 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 }
                 connKeys.insert(key);
                 const std::string kind = conn.get("kind", "postgres").asString();
+                connKinds[key] = kind;
                 if (!kinds.count(kind)) {
                     addError(r, base + ".kind",
                              "неизвестный kind «" + kind + "»: поддержаны postgres и rest");
@@ -706,6 +708,32 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 if (conn.isMember("password")) {
                     addError(r, base + ".password",
                              "пароль в шаблоне не хранится: укажите passwordEnv с именем переменной окружения");
+                }
+                if (kind == "rest") {
+                    if (asString(conn["baseUrl"]).empty()) {
+                        addError(r, base + ".baseUrl", "для rest-источника нужен baseUrl");
+                    }
+                    const Json::Value &headers = conn["headers"];
+                    if (!headers.isNull() && !headers.isObject()) {
+                        addError(r, base + ".headers", "headers должен быть объектом строк");
+                    } else if (headers.isObject()) {
+                        for (const auto &h : headers.getMemberNames()) {
+                            const std::string value = asString(headers[h]);
+                            const bool looksSecret =
+                                value.find("Bearer ") != std::string::npos ||
+                                value.find("bearer ") != std::string::npos ||
+                                value.find("token=") != std::string::npos ||
+                                value.find("api_key") != std::string::npos ||
+                                value.find("apikey") != std::string::npos ||
+                                value.find("password") != std::string::npos ||
+                                value.find("secret") != std::string::npos;
+                            if (looksSecret && value.find("${") == std::string::npos) {
+                                addError(r, base + ".headers." + h,
+                                         "секрет в шаблоне запрещён: значение заголовка задаётся через "
+                                         "${ИМЯ_ПЕРЕМЕННОЙ}");
+                            }
+                        }
+                    }
                 }
                 if (kind == "postgres") {
                     if (asString(conn["host"]).empty()) addError(r, base + ".host", "для postgres нужен host");
@@ -990,15 +1018,91 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 addError(r, path + ".queryId", "недопустимое поле: «queryId»");
                 addError(r, path, "queryId больше не поддерживается: SQL задаётся в datasets.<key>.sql");
             }
+            // Вид набора (ADR-104): ровно одно из sql / rest / join
             const std::string sql = asString(ds["sql"]);
-            if (sql.empty()) {
-                // путь совпадает с клиентским (required.sql в схеме) — см. фикстуры parity
-                addError(r, path + ".sql", "у набора данных нет sql");
-            } else {
+            const bool hasRest = ds.isMember("rest");
+            const bool hasJoin = ds.isMember("join");
+            const int kindsCount = (sql.empty() ? 0 : 1) + (hasRest ? 1 : 0) + (hasJoin ? 1 : 0);
+            if (kindsCount == 0) {
+                addError(r, path, "нужен SQL, rest или join");
+            } else if (kindsCount > 1) {
+                addError(r, path, "у набора может быть только одно из sql / rest / join");
+            }
+            if (!sql.empty()) {
                 std::string sqlErr;
                 if (!checkSql(sql, sqlErr)) addError(r, path, sqlErr);
             }
             const std::string dsConn = asString(ds["connection"]);
+            if (hasRest) {
+                if (dsConn.empty()) {
+                    addError(r, path + ".connection", "для rest-набора нужен connection");
+                } else if (connKeys.count(dsConn) && connKinds[dsConn] != "rest") {
+                    addError(r, path + ".connection",
+                             "источник «" + dsConn + "» не помечен kind: \"rest\"");
+                }
+                const Json::Value &cols = ds["rest"]["columns"];
+                if (!cols.isArray() || cols.empty()) {
+                    addError(r, path + ".rest.columns", "rest.columns: нужен непустой массив колонок");
+                } else {
+                    std::set<std::string> names;
+                    for (Json::ArrayIndex i = 0; i < cols.size(); ++i) {
+                        const std::string field = asString(cols[i]["field"]);
+                        if (field.empty()) {
+                            addError(r, path + ".rest.columns." + std::to_string(i),
+                                     "у колонки нет field");
+                            continue;
+                        }
+                        const std::string name = asString(cols[i]["as"]).empty() ? field : asString(cols[i]["as"]);
+                        if (!names.insert(name).second) {
+                            addError(r, path + ".rest.columns." + std::to_string(i),
+                                     "колонка «" + name + "» повторяется");
+                        }
+                    }
+                }
+            }
+            if (hasJoin) {
+                const Json::Value &join = ds["join"];
+                for (const char *side : {"left", "right"}) {
+                    const Json::Value &s = join[side];
+                    const std::string ref = s.isObject() ? asString(s["dataset"]) : asString(s);
+                    const std::string spath = path + ".join." + side + ".dataset";
+                    if (ref.empty()) {
+                        addError(r, spath, "нужен набор-источник");
+                    } else if (ref == key) {
+                        addError(r, spath, "набор не может объединяться сам с собой");
+                    } else if (!root["datasets"].isMember(ref)) {
+                        addError(r, spath, "набор «" + ref + "» не объявлен в datasets");
+                    } else if (root["datasets"][ref].isMember("join")) {
+                        addError(r, spath, "join не может ссылаться на другой join: один уровень");
+                    }
+                }
+                const Json::Value &cols = join["columns"];
+                std::set<std::string> asNames;
+                if (cols.isArray()) {
+                    for (Json::ArrayIndex i = 0; i < cols.size(); ++i) {
+                        const std::string field = asString(cols[i]["field"]);
+                        if (field.empty()) {
+                            addError(r, path + ".join.columns." + std::to_string(i),
+                                     "у колонки нет field");
+                            continue;
+                        }
+                        const std::string name = asString(cols[i]["as"]).empty() ? field : asString(cols[i]["as"]);
+                        if (!asNames.insert(name).second) {
+                            addError(r, path + ".join.columns." + std::to_string(i),
+                                     "имя «" + name + "» повторяется");
+                        }
+                    }
+                }
+                const Json::Value &on = join["on"];
+                if (on.isArray()) {
+                    for (Json::ArrayIndex i = 0; i < on.size(); ++i) {
+                        if (asString(on[i]["left"]).empty() || asString(on[i]["right"]).empty()) {
+                            addError(r, path + ".join.on." + std::to_string(i),
+                                     "у пары нужны left и right");
+                        }
+                    }
+                }
+            }
             if (!dsConn.empty() && dsConn != "default" && !connKeys.count(dsConn)) {
                 addError(r, path + ".connection", "источник «" + dsConn + "» не объявлен в connections");
             }

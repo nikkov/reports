@@ -2891,3 +2891,38 @@ test('публичный отчёт открывается без входа, о
   await anon.close()
   await anonCtx.dispose()
 })
+
+test('объединение источников: PostgreSQL + REST в одной таблице (ADR-104)', async ({ page, request }) => {
+  // REST-демо (scripts/rest-demo.mjs) должен быть запущен на :8099, сервер — с REP_REST_ALLOW_HOSTS.
+  await page.goto('/report.html?report=sales-crm')
+  await expect(page.locator('.meta')).toContainText('строк')
+  const headers = await page.locator('.rt-table thead th').allInnerTexts()
+  expect(headers.join(' | ')).toContain('Менеджер')
+  expect(headers.join(' | ')).toContain('Регион')
+  // первая строка содержит менеджера из REST-справочника
+  const first = await page.locator('.rt-table tbody tr.detail').first().innerText()
+  expect(first).toMatch(/Иванов|Петрова|Сидоров|Кузнецова|Смирнов/)
+
+  // агрегация по объединённому набору: 5 регионов + группа без пары (left join)
+  const agg = await request.post('/api/report/aggregate', {
+    data: {
+      reportId: 'sales-crm',
+      dataset: 'orders_by_region',
+      params: { from: '2025-11-01', to: '2026-11-14' },
+      groupBy: ['region_name', 'manager'],
+      measures: [{ field: 'amount', agg: 'sum' }]
+    }
+  })
+  expect(agg.ok()).toBeTruthy()
+  const body = await agg.json()
+  expect(body.rowCount).toBeGreaterThanOrEqual(5)
+
+  // клиентский Excel: колонка правой стороны на месте, строки не потеряны
+  const [dl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('button.tool', { hasText: 'Excel' }).first().click()
+  ])
+  const zip = await JSZip.loadAsync(readFileSync(await dl.path()))
+  const shared = await zip.file('xl/sharedStrings.xml').async('string')
+  expect(shared).toContain('Менеджер')
+})

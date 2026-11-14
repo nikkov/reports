@@ -216,3 +216,15 @@ export REP_SMTP_HOST=smtp.corp.local REP_SMTP_PORT=587 REP_SMTP_TLS=1
 Проверить, что настройки применились: `curl -s localhost:8080/api/health` — в ответе видны
 `db`, `maxRows`, `readOnlyRole`, `authMode`, `schemaVersion` (версия формата шаблона, сейчас 2)
 и `version` (версия приложения из файла `VERSION`).
+
+## REST-источники (ADR-104)
+
+| Переменная | По умолчанию | Что задаёт |
+|---|---|---|
+| `REP_REST_ALLOW_HOSTS` | пусто (REST выключен) | список хостов через запятую (`crm.example.com,127.0.0.1:8099`); запрос на другой хост → 403 `REST_FORBIDDEN` |
+| `REP_REST_MAX_BYTES` | `5242880` (5 МБ) | предел размера ответа REST; больше — `REST_TOO_LARGE` |
+| `REP_REST_CACHE_ENTRIES` | `128` | размер LRU-кеша ответов REST |
+| `REP_REST_CACHE_TTL_SECONDS` | `0` | запасной TTL кеша, если в шаблоне не задан `cacheSeconds` |
+
+Таймаут запроса задаётся в шаблоне (`connections.<ключ>.timeoutMs`, 100…30000 мс), кеш — там же
+(`cacheSeconds`). Без `REP_REST_ALLOW_HOSTS` REST-наборы недоступны: это осознанная защита от SSRF.

@@ -232,6 +232,20 @@ function checkBlockHeight(block, base, errors) {
   errors.push({ path: `${base}.height`, message: 'height: пиксели — целое 160…2000 или процент от окна («60%»)' })
 }
 
+// Есть ли в шаблоне REST-источник (сам или в одной из сторон join) — ADR-104.
+function usesRest(template) {
+  const datasets = template.datasets || {}
+  for (const ds of Object.values(datasets)) {
+    if (ds?.rest) return true
+    if (ds?.join) {
+      const left = ds.join.left?.dataset
+      const right = ds.join.right?.dataset
+      if (datasets[left]?.rest || datasets[right]?.rest) return true
+    }
+  }
+  return false
+}
+
 export function validateTemplate(template) {
   const errors = []
   const warnings = []
@@ -598,6 +612,22 @@ function checkGaugeZones(block, base, errors) {
     }
   })
 
+  for (const [key, conn] of Object.entries(template.connections || {})) {
+    if (conn?.kind === 'rest' && !conn.baseUrl) {
+      errors.push({ path: `connections.${key}.baseUrl`, message: 'для rest-источника нужен baseUrl' })
+    }
+    for (const [header, value] of Object.entries(conn?.headers || {})) {
+      // секрет в шаблоне запрещён: только ${ИМЯ_ПЕРЕМЕННОЙ} (ADR-104)
+      if (typeof value === 'string' && /(bearer\s+\S|token=|api[-_]?key|password|secret)/i.test(value) &&
+          !value.includes('${')) {
+        errors.push({
+          path: `connections.${key}.headers.${header}`,
+          message: 'секрет в шаблоне запрещён: значение заголовка задаётся через ${ИМЯ_ПЕРЕМЕННОЙ}'
+        })
+      }
+    }
+  }
+
   for (const [key, ds] of Object.entries(template.datasets || {})) {
     if (ds?.queryId) {
       errors.push({ path: `datasets.${key}`, message: 'queryId больше не поддерживается: SQL задаётся в datasets.<key>.sql' })
@@ -619,6 +649,79 @@ function checkGaugeZones(block, base, errors) {
         }
       }
     }
+
+    // Вид набора (ADR-104): ровно одно из sql / rest / join
+    const kinds = ['sql', 'rest', 'join'].filter((k) => ds?.[k] !== undefined)
+    if (kinds.length === 0) {
+      errors.push({ path: `datasets.${key}`, message: 'нужен SQL, rest или join' })
+    } else if (kinds.length > 1) {
+      errors.push({
+        path: `datasets.${key}`,
+        message: `у набора может быть только одно из sql / rest / join (есть: ${kinds.join(', ')})`
+      })
+    }
+
+    if (ds?.rest) {
+      if (!ds.connection) {
+        errors.push({ path: `datasets.${key}.connection`, message: 'для rest-набора нужен connection' })
+      } else {
+        const conn = template.connections?.[ds.connection]
+        if (conn && conn.kind !== 'rest') {
+          errors.push({
+            path: `datasets.${key}.connection`,
+            message: `источник «${ds.connection}» не помечен kind: "rest"`
+          })
+        }
+      }
+      const names = new Set()
+      for (const [ci, col] of (ds.rest.columns || []).entries()) {
+        const name = col?.as || col?.field
+        if (!name) continue
+        if (names.has(name)) {
+          errors.push({ path: `datasets.${key}.rest.columns.${ci}`, message: `колонка «${name}» повторяется` })
+        }
+        names.add(name)
+      }
+    }
+
+    if (ds?.join) {
+      const join = ds.join
+      for (const [sideName, side] of [['left', join.left], ['right', join.right]]) {
+        const name = typeof side === 'string' ? side : side?.dataset
+        const path = `datasets.${key}.join.${sideName}.dataset`
+        if (!name) {
+          errors.push({ path, message: 'нужен набор-источник' })
+        } else if (name === key) {
+          errors.push({ path, message: 'набор не может объединяться сам с собой' })
+        } else if (!template.datasets?.[name]) {
+          errors.push({ path, message: `набор «${name}» не объявлен в datasets` })
+        } else if (template.datasets[name].join) {
+          errors.push({ path, message: 'join не может ссылаться на другой join: один уровень' })
+        }
+      }
+      const asNames = new Set()
+      for (const [ci, col] of (join.columns || []).entries()) {
+        const name = col?.as || col?.field
+        if (!name) continue
+        if (asNames.has(name)) {
+          errors.push({ path: `datasets.${key}.join.columns.${ci}`, message: `имя «${name}» повторяется` })
+        }
+        asNames.add(name)
+      }
+      for (const [ki, keyPair] of (join.on || []).entries()) {
+        if (!keyPair?.left || !keyPair?.right) {
+          errors.push({ path: `datasets.${key}.join.on.${ki}`, message: 'у пары нужны left и right' })
+        }
+      }
+    }
+  }
+
+  // Публичный отчёт с REST: данные REST уйдут анонимному пользователю — предупреждаем
+  if (template.public === true && usesRest(template)) {
+    warnings.push({
+      path: 'public',
+      message: 'отчёт публичный и использует REST-источник: данные увидит любой по ссылке'
+    })
   }
 
   const columnsByDataKey = {}

@@ -1,0 +1,177 @@
+{
+  "version": 2,
+  "id": "sales-crm",
+  "title": "Продажи и менеджеры из CRM",
+  "description": "Объединение PostgreSQL (заказы) и REST-справочника регионов с менеджерами (ADR-104)",
+  "folder": "Примеры",
+  "tags": [
+    "join",
+    "REST",
+    "источники"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    },
+    "crm": {
+      "kind": "rest",
+      "baseUrl": "${CRM_BASE_URL}",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "timeoutMs": 5000,
+      "cacheSeconds": 30
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "*-1y",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "*",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "orders": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT s.region_id, s.order_date, s.amount, s.qty FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date"
+    },
+    "regions": {
+      "connection": "crm",
+      "rest": {
+        "path": "/api/regions",
+        "query": {
+          "active": "1"
+        },
+        "rowsPath": "items",
+        "columns": [
+          {
+            "field": "id",
+            "type": "int"
+          },
+          {
+            "field": "name",
+            "type": "text",
+            "title": "Регион"
+          },
+          {
+            "field": "manager",
+            "type": "text",
+            "title": "Менеджер"
+          }
+        ]
+      }
+    },
+    "orders_by_region": {
+      "join": {
+        "left": {
+          "dataset": "orders"
+        },
+        "right": {
+          "dataset": "regions"
+        },
+        "on": [
+          {
+            "left": "region_id",
+            "right": "id",
+            "type": "int"
+          }
+        ],
+        "type": "left",
+        "columns": [
+          {
+            "field": "name",
+            "as": "region_name",
+            "title": "Регион",
+            "type": "text"
+          },
+          {
+            "field": "manager",
+            "title": "Менеджер",
+            "type": "text"
+          }
+        ]
+      }
+    }
+  },
+  "styles": {
+    "preset": "default"
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Заказы берутся из PostgreSQL, регионы и менеджеры — из REST-сервиса CRM; набор `orders_by_region` связывает их по `region_id = id` (ADR-104). Период: {{from}} — {{to}}."
+    },
+    {
+      "type": "table",
+      "dataKey": "orders_by_region",
+      "span": 12,
+      "title": "Заказы с менеджерами",
+      "height": 420,
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "region_name",
+          "title": "Регион"
+        },
+        {
+          "field": "manager",
+          "title": "Менеджер"
+        },
+        {
+          "field": "order_date",
+          "title": "Дата",
+          "type": "date"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "aggregate": "sum",
+          "format": {
+            "style": "number",
+            "decimals": 0,
+            "group": " "
+          },
+          "align": "right"
+        },
+        {
+          "field": "qty",
+          "title": "Кол-во",
+          "aggregate": "sum",
+          "format": {
+            "style": "integer"
+          },
+          "align": "right"
+        }
+      ]
+    }
+  ]
+}

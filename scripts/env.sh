@@ -21,6 +21,11 @@ if [ -f "$REP_ROOT/backend/.env" ]; then
   set +a
 fi
 
+# REST-источники (ADR-104): allowlist хостов обязателен — без него REST выключен.
+# Для локального стенда разрешаем демонстрационный сервис (scripts/rest-demo.mjs).
+export REP_REST_ALLOW_HOSTS="${REP_REST_ALLOW_HOSTS:-127.0.0.1:8099}"
+export CRM_BASE_URL="${CRM_BASE_URL:-http://127.0.0.1:8099}"
+
 # Режим аутентификации (ADR-54): пусто — выключена, 1 — сессии, proxy — личность от прокси.
 export REP_AUTH="${REP_AUTH:-}"
 export REP_AUTH_PROXY_HEADER="${REP_AUTH_PROXY_HEADER:-X-Remote-User}"

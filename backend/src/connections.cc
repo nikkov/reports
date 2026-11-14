@@ -74,6 +74,14 @@ bool parseConnections(const Json::Value &connections, std::map<std::string, Conn
             spec.statementTimeoutMs = (*it)["statementTimeoutMs"].asInt();
         }
         spec.baseUrl = it->get("baseUrl", "").asString();
+        const Json::Value &hdrs = (*it)["headers"];
+        if (hdrs.isObject()) {
+            for (auto h = hdrs.begin(); h != hdrs.end(); ++h) {
+                if (h->isString()) spec.headers[h.name()] = h->asString();
+            }
+        }
+        if (it->isMember("timeoutMs")) spec.timeoutMs = (*it)["timeoutMs"].asInt();
+        if (it->isMember("cacheSeconds")) spec.cacheSeconds = (*it)["cacheSeconds"].asInt();
         out[spec.key] = spec;
     }
     return true;
@@ -121,6 +129,10 @@ std::string expandEnv(const std::string &value, const std::string &key, std::str
 }
 
 }  // namespace
+
+std::string expandEnvValue(const std::string &value, const std::string &key, std::string &error) {
+    return expandEnv(value, key, error);
+}
 
 std::string ConnRegistry::dsnFor(const ConnSpec &spec, std::string &error) {
     error.clear();

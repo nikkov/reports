@@ -255,13 +255,17 @@ export default {
     "dataset": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "sql"
-      ],
+      "description": "набор данных: ровно одно из sql (PostgreSQL), rest (REST-сервис) или join (объединение двух наборов, ADR-104)",
       "properties": {
         "sql": {
           "type": "string",
           "minLength": 1
+        },
+        "rest": {
+          "$ref": "#/$defs/rest"
+        },
+        "join": {
+          "$ref": "#/$defs/join"
         },
         "connection": {
           "type": "string",
@@ -280,6 +284,176 @@ export default {
         }
       }
     },
+    "rest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "columns"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "путь запроса относительно baseUrl источника"
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "query-параметры запроса (литералы)"
+        },
+        "rowsPath": {
+          "type": "string",
+          "description": "путь к массиву строк в ответе: items, data.rows; пусто — корень (ADR-104)"
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/restColumn"
+          }
+        }
+      }
+    },
+    "restColumn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "text",
+            "int",
+            "float",
+            "date",
+            "datetime",
+            "bool"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "as": {
+          "type": "string"
+        }
+      }
+    },
+    "join": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "left",
+        "right",
+        "on",
+        "columns"
+      ],
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/joinSide"
+        },
+        "right": {
+          "$ref": "#/$defs/joinSide"
+        },
+        "on": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/joinKey"
+          }
+        },
+        "type": {
+          "enum": [
+            "inner",
+            "left"
+          ]
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/joinColumn"
+          }
+        }
+      }
+    },
+    "joinSide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset"
+      ],
+      "properties": {
+        "dataset": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "joinKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "left",
+        "right"
+      ],
+      "properties": {
+        "left": {
+          "type": "string",
+          "minLength": 1
+        },
+        "right": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "text",
+            "int",
+            "float",
+            "date",
+            "datetime"
+          ]
+        }
+      }
+    },
+    "joinColumn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "as": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "text",
+            "int",
+            "float",
+            "date",
+            "datetime",
+            "bool"
+          ]
+        }
+      }
+    },
     "connection": {
       "type": "object",
       "additionalProperties": false,
@@ -289,7 +463,7 @@ export default {
             "postgres",
             "rest"
           ],
-          "description": "тип источника; rest зарезервирован под будущие версии"
+          "description": "тип источника: postgres или rest (ADR-104)"
         },
         "host": {
           "type": "string",
@@ -348,6 +522,23 @@ export default {
           "type": "integer",
           "minimum": 0,
           "maximum": 600000
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "заголовки REST-запроса; секреты — только через ${ENV} (ADR-104)"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 30000
+        },
+        "cacheSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600
         },
         "baseUrl": {
           "type": "string",

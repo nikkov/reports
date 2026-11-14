@@ -369,6 +369,53 @@ REP_CONN_FINANCE_PASSWORD=…   # из хранилища секретов, не
 (ADR-36), текстовые блоки — тоже. Пример с двумя таблицами: `two-sets-styles` — листы «Продажи по
 регионам — светлая…» и «Сервисы — тёмная тема».
 
+### Объединение источников: REST и join (ADR-104)
+
+Набор данных может быть не только SQL: второй вид — **REST-сервис**, третий — **объединение двух
+наборов** по полям. Обе стороны работают как обычный набор: блок таблицы, агрегация, группы,
+текст, Excel и печать — без изменений.
+
+```json
+"connections": {
+  "crm": { "kind": "rest", "baseUrl": "${CRM_BASE_URL}",
+           "headers": { "Accept": "application/json", "Authorization": "Bearer ${CRM_TOKEN}" },
+           "timeoutMs": 5000, "cacheSeconds": 30 }
+},
+"datasets": {
+  "orders":  { "connection": "main", "params": { "from": "$from", "to": "$to" },
+               "sql": "SELECT region_id, order_date, amount FROM … WHERE order_date BETWEEN :from::date AND :to::date" },
+  "regions": { "connection": "crm",
+               "rest": { "path": "/api/regions", "query": { "active": "1" }, "rowsPath": "items",
+                         "columns": [ {"field": "id", "type": "int"},
+                                      {"field": "name", "type": "text", "title": "Регион"},
+                                      {"field": "manager", "type": "text", "title": "Менеджер"} ] } },
+  "orders_by_region": {
+    "join": { "left": { "dataset": "orders" }, "right": { "dataset": "regions" },
+              "on": [ { "left": "region_id", "right": "id", "type": "int" } ],
+              "type": "left",
+              "columns": [ { "field": "name", "as": "region_name", "title": "Регион", "type": "text" },
+                           { "field": "manager", "title": "Менеджер", "type": "text" } ] } }
+}
+```
+
+Правила:
+
+- у набора ровно одно из `sql`, `rest`, `join`;
+- `rest`: `connection` ссылается на источник `kind: "rest"`; `columns` обязательны (типы из JSON
+  неоднозначны); `rowsPath` — путь к массиву (`items`, `data.rows`), пусто — корень;
+- `join`: стороны — объявленные наборы, но **не** `join` (один уровень); `on` — 1…4 пары, `type`
+  (`text|int|float|date|datetime`) задаёт нормализацию ключа (`"05"` = `5` при `int`);
+  `type: "left"` сохраняет строки без пары (правые колонки пустые), `"inner"` — только совпадения;
+  имена `as` не повторяются; дубли справа размножают строки, как в SQL;
+- секреты — только через `${ИМЯ_ПЕРЕМЕННОЙ}` в `headers`; литеральный токен валидатор отклоняет;
+- хосты REST ограничены allowlist `REP_REST_ALLOW_HOSTS` (иначе `REST_FORBIDDEN`) — защита от SSRF;
+  редиректы запрещены;
+- ошибки: `REST_ERROR` (недоступен/не-2xx), `REST_TIMEOUT` (504), `REST_INVALID` (не JSON/не массив),
+  `REST_TOO_LARGE`, `ROW_LIMIT`;
+- серверный экспорт (`.xlsx`/`.csv`) и рассылка пока только для SQL-наборов: для rest/join ответ
+  `EXPORT_UNSUPPORTED` — используйте Excel и печать из отчёта;
+- пример: `sales-crm` — заказы из PostgreSQL, менеджеры из REST (`scripts/rest-demo.mjs`).
+
 ### Доступ к отчёту по ролям (accessRoles)
 
 Необязательный список ключей ролей: отчёт видят пользователи, у которых есть **хотя бы одна** из них

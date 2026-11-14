@@ -13,6 +13,9 @@
 #include <filesystem>
 #include <fstream>
 #include <cctype>
+#include <cmath>
+#include <iomanip>
+#include <limits>
 #include <regex>
 #include <chrono>
 #include <cstdio>
@@ -39,7 +42,9 @@
 #include "xlsx_export.h"
 #include "env.h"
 #include "params.h"
+#include "join.h"
 #include "queries.h"
+#include "rest_client.h"
 #include "base_path.h"
 #include "static_web.h"
 
@@ -322,6 +327,10 @@ struct DatasetInfo {
     std::string sql;
     std::map<std::string, std::string> params; // имя параметра запроса → "$param" шаблона
     std::string connection;                    // ключ connections; пусто — источник сервера (ADR-76)
+    // ADR-104: вид набора — sql (по умолчанию), rest или join
+    std::string kind = "sql";
+    rep::RestSpec rest;
+    rep::JoinSpec join;
 };
 
 struct TemplateInfo {
@@ -365,18 +374,39 @@ bool parseTemplate(const std::string &text, const std::string &fallbackId, Templ
     for (auto ds = datasets.begin(); ds != datasets.end(); ++ds) {
         if (ds->isMember("queryId")) return false;
         DatasetInfo info;
-        info.sql = (*ds).get("sql", "").asString();
-        if (info.sql.empty()) return false;
         const Json::Value &p = (*ds)["params"];
         info.connection = (*ds).get("connection", "").asString();
         if (p.isObject()) {
             for (auto it = p.begin(); it != p.end(); ++it) info.params[it.name()] = it->asString();
         }
+        // Три вида набора (ADR-104): SQL, REST и объединение. Ровно один.
+        std::string kindErr;
+        if (ds->isMember("join")) {
+            if (!rep::parseJoin((*ds)["join"], info.join, kindErr)) return false;
+            info.kind = "join";
+        } else if (ds->isMember("rest")) {
+            if (!rep::parseRestSpec((*ds)["rest"], info.rest, kindErr)) return false;
+            info.kind = "rest";
+        } else {
+            info.sql = (*ds).get("sql", "").asString();
+            if (info.sql.empty()) return false;
+        }
         out.datasets[ds.name()] = info;
     }
-    out.datasetSql = out.datasets.begin()->second.sql;
-    out.datasetParams = out.datasets.begin()->second.params;
-    out.datasetConnection = out.datasets.begin()->second.connection;
+    // Ссылки join: стороны существуют и сами не являются объединением (один уровень).
+    for (const auto &kv : out.datasets) {
+        if (kv.second.kind != "join") continue;
+        for (const std::string &side : {kv.second.join.left, kv.second.join.right}) {
+            const auto it = out.datasets.find(side);
+            if (it == out.datasets.end() || it->second.kind == "join") return false;
+        }
+    }
+    const auto &first = out.datasets.begin()->second;
+    if (first.kind == "sql") {
+        out.datasetSql = first.sql;
+        out.datasetParams = first.params;
+        out.datasetConnection = first.connection;
+    }
     return true;
 }
 
@@ -398,6 +428,327 @@ void runQuery(const orm::DbClientPtr &db, const std::string &sql,
     binder >> std::move(onOk);
     binder >> std::move(onErr);
     binder.exec();
+}
+
+}  // namespace
+
+// --- Наборы данных любого вида (ADR-104) -------------------------------------------------
+// SQL, REST и join приводятся к одному контейнеру строк, поэтому данные, агрегация,
+// группы, текст и экспорт работают одинаково и не знают, откуда пришли строки.
+
+namespace {
+
+std::string cellText(const Json::Value &v) {
+    if (v.isNull()) return {};
+    if (v.isBool()) return v.asBool() ? "true" : "false";
+    if (v.isInt64()) return std::to_string(v.asInt64());
+    if (v.isUInt64()) return std::to_string(v.asUInt64());
+    if (v.isDouble()) {
+        std::ostringstream os;
+        os << v.asDouble();
+        return os.str();
+    }
+    return v.asString();
+}
+
+void rowsFromSqlResult(const orm::Result &res, rep::DatasetRows &out) {
+    out = rep::DatasetRows{};
+    static const std::map<std::string, std::string> noDeclared;
+    const auto ncols = static_cast<size_t>(res.columns());
+    std::vector<std::string> types;
+    types.reserve(ncols);
+    for (size_t c = 0; c < ncols; ++c) {
+        rep::RowColumn col;
+        col.name = res.columnName(static_cast<unsigned long>(c));
+        col.type = columnType(col.name, noDeclared, res);
+        col.title = col.name;
+        types.push_back(col.type);
+        out.columns.push_back(col);
+    }
+    for (const auto &row : res) {
+        std::vector<std::string> cells;
+        cells.reserve(ncols);
+        for (size_t c = 0; c < ncols; ++c) cells.push_back(cellText(fieldToJson(row[c], types[c])));
+        out.rows.push_back(std::move(cells));
+    }
+}
+
+Json::Value datasetJson(const rep::DatasetRows &rows) {
+    Json::Value out;
+    Json::Value columns(Json::arrayValue);
+    for (const auto &c : rows.columns) {
+        Json::Value col;
+        col["name"] = c.name;
+        col["type"] = c.type;
+        if (!c.title.empty() && c.title != c.name) col["title"] = c.title;
+        columns.append(col);
+    }
+    Json::Value data(Json::arrayValue);
+    for (const auto &row : rows.rows) {
+        Json::Value obj(Json::objectValue);
+        for (size_t i = 0; i < rows.columns.size(); ++i) {
+            const std::string value = i < row.size() ? row[i] : std::string();
+            const std::string &type = rows.columns[i].type;
+            if (value.empty()) {
+                obj[rows.columns[i].name] = Json::Value(Json::nullValue);
+                continue;
+            }
+            if (type == "int") {
+                try {
+                    obj[rows.columns[i].name] = static_cast<Json::Int64>(std::stoll(value));
+                } catch (...) {
+                    obj[rows.columns[i].name] = value;
+                }
+            } else if (type == "float") {
+                try {
+                    obj[rows.columns[i].name] = std::stod(value);
+                } catch (...) {
+                    obj[rows.columns[i].name] = value;
+                }
+            } else if (type == "bool") {
+                obj[rows.columns[i].name] = (value == "true" || value == "1");
+            } else {
+                obj[rows.columns[i].name] = value;
+            }
+        }
+        data.append(obj);
+    }
+    out["columns"] = columns;
+    out["rows"] = data;
+    out["rowCount"] = static_cast<Json::UInt64>(rows.rows.size());
+    out["truncated"] = false;
+    return out;
+}
+
+// Агрегация в памяти для наборов, у которых нет SQL (rest и join, ADR-104):
+// те же groupBy/меры, что у серверной агрегации SQL-наборов (ADR-37).
+bool aggregateRows(const rep::DatasetRows &in, const std::vector<std::string> &groupBy,
+                   const std::vector<std::pair<std::string, std::string>> &measures,
+                   rep::DatasetRows &out, std::string &err) {
+    out = rep::DatasetRows{};
+    std::vector<int> groupIdx;
+    for (const auto &name : groupBy) {
+        int idx = -1;
+        for (size_t i = 0; i < in.columns.size(); ++i) {
+            if (in.columns[i].name == name) idx = static_cast<int>(i);
+        }
+        if (idx < 0) {
+            err = "в наборе нет колонки группировки '" + name + "'";
+            return false;
+        }
+        groupIdx.push_back(idx);
+        out.columns.push_back(in.columns[static_cast<size_t>(idx)]);
+    }
+    std::vector<int> measureIdx;
+    for (const auto &mv : measures) {
+        int idx = -1;
+        for (size_t i = 0; i < in.columns.size(); ++i) {
+            if (in.columns[i].name == mv.first) idx = static_cast<int>(i);
+        }
+        if (idx < 0) {
+            err = "в наборе нет колонки меры '" + mv.first + "'";
+            return false;
+        }
+        measureIdx.push_back(idx);
+        rep::RowColumn col;
+        col.name = mv.first;
+        col.title = mv.first;
+        col.type = (mv.second == "avg" || (mv.second != "count" && in.columns[static_cast<size_t>(idx)].type == "float"))
+                       ? "float"
+                       : in.columns[static_cast<size_t>(idx)].type;
+        if (mv.second == "count") col.type = "int";
+        out.columns.push_back(col);
+    }
+
+    struct Acc {
+        std::vector<long double> sum;
+        std::vector<long double> min;
+        std::vector<long double> max;
+        std::vector<long double> count;
+    };
+    std::map<std::string, Acc> groups;
+    std::map<std::string, std::vector<std::string>> groupValues;
+    for (const auto &row : in.rows) {
+        std::string key;
+        std::vector<std::string> vals;
+        for (int gi : groupIdx) {
+            const std::string v = static_cast<size_t>(gi) < row.size() ? row[static_cast<size_t>(gi)] : std::string();
+            vals.push_back(v);
+            key += v;
+            key += '\x1f';
+        }
+        auto &acc = groups[key];
+        if (acc.sum.empty()) {
+            acc.sum.assign(measures.size(), 0);
+            acc.min.assign(measures.size(), 0);
+            acc.max.assign(measures.size(), 0);
+            acc.count.assign(measures.size(), 0);
+            acc.min.assign(measures.size(), std::numeric_limits<long double>::max());
+            acc.max.assign(measures.size(), std::numeric_limits<long double>::lowest());
+            groupValues[key] = vals;
+        }
+        for (size_t mi = 0; mi < measures.size(); ++mi) {
+            const std::string raw = static_cast<size_t>(measureIdx[mi]) < row.size()
+                                        ? row[static_cast<size_t>(measureIdx[mi])]
+                                        : std::string();
+            if (raw.empty()) continue;
+            long double value = 0;
+            try {
+                value = std::stold(raw);
+            } catch (...) {
+                continue;
+            }
+            acc.sum[mi] += value;
+            acc.min[mi] = std::min(acc.min[mi], value);
+            acc.max[mi] = std::max(acc.max[mi], value);
+            acc.count[mi] += 1;
+        }
+    }
+
+    for (const auto &kv : groups) {
+        std::vector<std::string> row = groupValues[kv.first];
+        for (size_t mi = 0; mi < measures.size(); ++mi) {
+            const auto &acc = kv.second;
+            long double value = 0;
+            const std::string &agg = measures[mi].second;
+            if (agg == "count") value = acc.count[mi];
+            else if (agg == "sum") value = acc.sum[mi];
+            else if (agg == "avg") value = acc.count[mi] > 0 ? acc.sum[mi] / acc.count[mi] : 0;
+            else if (agg == "min") value = acc.count[mi] > 0 ? acc.min[mi] : 0;
+            else if (agg == "max") value = acc.count[mi] > 0 ? acc.max[mi] : 0;
+            std::ostringstream os;
+            if (agg == "avg") os << std::fixed << std::setprecision(2) << static_cast<double>(value);
+            else os << static_cast<long long>(std::llround(static_cast<double>(value)));
+            row.push_back(os.str());
+        }
+        out.rows.push_back(std::move(row));
+    }
+    return true;
+}
+
+using DatasetOk = std::function<void(const rep::DatasetRows &)>;
+using DatasetErr = std::function<void(int status, const std::string &code, const std::string &message)>;
+
+// Асинхронно исполняет набор. Для join рекурсивно грузит стороны (они не могут быть join).
+void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep::ParamBag &bag,
+                      const orm::DbClientPtr &dataDb, rep::ConnRegistry &connRegistry,
+                      rep::RestCache &restCache, size_t maxRows, DatasetOk onOk, DatasetErr onErr) {
+    const auto it = tpl.datasets.find(key);
+    if (it == tpl.datasets.end()) {
+        onErr(422, "DATASET_NOT_FOUND", "в шаблоне нет набора '" + key + "'");
+        return;
+    }
+    const DatasetInfo &ds = it->second;
+
+    if (ds.kind == "join") {
+        auto left = std::make_shared<rep::DatasetRows>();
+        auto right = std::make_shared<rep::DatasetRows>();
+        auto joinSpec = std::make_shared<rep::JoinSpec>(ds.join);
+        auto done = std::make_shared<int>(0);
+        auto failed = std::make_shared<bool>(false);
+        auto take = [&, done, left, right, joinSpec, onOk, onErr, maxRows](bool isLeft,
+                                                                         const rep::DatasetRows &rows) {
+            if (*failed) return;
+            if (isLeft) *left = rows;
+            else *right = rows;
+            if (++*done < 2) return;
+            rep::DatasetRows joined;
+            std::string err;
+            if (!rep::hashJoin(*left, *right, *joinSpec, joined, err)) {
+                *failed = true;
+                onErr(422, "JOIN_INVALID", err);
+                return;
+            }
+            if (joined.rows.size() > maxRows) {
+                *failed = true;
+                onErr(422, "ROW_LIMIT",
+                      "объединение " + std::to_string(joined.rows.size()) + " строк > лимита " +
+                          std::to_string(maxRows) + ": сузьте параметры");
+                return;
+            }
+            onOk(joined);
+        };
+        auto fail = [&, failed, onErr](int status, const std::string &code, const std::string &msg) {
+            if (*failed) return;
+            *failed = true;
+            onErr(status, code, msg);
+        };
+        fetchDatasetRows(tpl, ds.join.left, bag, dataDb, connRegistry, restCache, maxRows,
+                         [take](const rep::DatasetRows &rows) { take(true, rows); }, fail);
+        fetchDatasetRows(tpl, ds.join.right, bag, dataDb, connRegistry, restCache, maxRows,
+                         [take](const rep::DatasetRows &rows) { take(false, rows); }, fail);
+        return;
+    }
+
+    if (ds.kind == "rest") {
+        const auto conn = tpl.connections.find(ds.connection);
+        if (conn == tpl.connections.end() || conn->second.kind != "rest") {
+            onErr(422, "CONNECTION_ERROR",
+                  "у набора '" + key + "' источник '" + ds.connection + "' не объявлен как rest");
+            return;
+        }
+        rep::restFetch(
+            conn->second, ds.rest, restCache,
+            [maxRows, onOk, onErr](const rep::DatasetRows &rows) {
+                if (rows.rows.size() > maxRows) {
+                    onErr(422, "ROW_LIMIT",
+                          "REST-набор " + std::to_string(rows.rows.size()) + " строк > лимита " +
+                              std::to_string(maxRows));
+                    return;
+                }
+                onOk(rows);
+            },
+            [onErr](const std::string &code, const std::string &message) {
+                const int status = code == "REST_TIMEOUT" ? 504 : (code == "REST_FORBIDDEN" ? 403 : 422);
+                onErr(status, code, message);
+            });
+        return;
+    }
+
+    // SQL-набор
+    rep::DatasetQuery query;
+    std::string err;
+    if (!rep::compileDataset(ds.sql, ds.params, bag, query, err)) {
+        onErr(422, "INVALID_PARAMS", err);
+        return;
+    }
+    std::string connError;
+    auto client = connRegistry.resolve(tpl.connections, ds.connection, dataDb, connError);
+    if (!client) {
+        onErr(422, "CONNECTION_ERROR", connError);
+        return;
+    }
+    runQuery(
+        client, query.sql, query.values,
+        [maxRows, onOk, onErr](const orm::Result &res) {
+            if (res.size() > maxRows) {
+                onErr(422, "ROW_LIMIT",
+                      "результат " + std::to_string(res.size()) + " строк > лимита " +
+                          std::to_string(maxRows) + ": сузьте параметры");
+                return;
+            }
+            rep::DatasetRows rows;
+            rowsFromSqlResult(res, rows);
+            onOk(rows);
+        },
+        [onErr](const std::exception_ptr &eptr) {
+            const std::string msg = describeError(eptr);
+            if (msg.find("statement timeout") != std::string::npos ||
+                msg.find("canceling statement") != std::string::npos) {
+                onErr(504, "SQL_TIMEOUT", msg);
+                return;
+            }
+            if (msg.find("invalid input syntax") != std::string::npos) {
+                onErr(422, "INVALID_PARAMS", msg);
+                return;
+            }
+            if (msg.find("Connection refused") != std::string::npos ||
+                msg.find("could not connect") != std::string::npos) {
+                onErr(503, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            onErr(500, "QUERY_FAILED", msg);
+        });
 }
 
 }  // namespace
@@ -764,6 +1115,10 @@ int main() {
     // автоматически «сбрасывают» устаревшие результаты.
     std::atomic<std::uint64_t> templatesVersion{1};
     rep::ResultCache resultCache(cacheTtl, cacheMax, cacheMaxBody);
+    // Кеш ответов REST (ADR-104): TTL задаётся в шаблоне (cacheSeconds), здесь — предел и запасной TTL
+    const size_t restCacheEntries = std::stoul(rep::envOr("REP_REST_CACHE_ENTRIES", "128"));
+    const int restCacheTtl = std::stoi(rep::envOr("REP_REST_CACHE_TTL_SECONDS", "0"));
+    rep::RestCache restCache(restCacheEntries, restCacheTtl);
 
     auto adminGuard = [adminEnabled](std::function<void(const HttpResponsePtr &)> &cb) {
         if (adminEnabled) return true;
@@ -1850,7 +2205,8 @@ int main() {
     // уходит параметром, SQL набора — в подзапрос, без интерполяции.
     app().registerHandler(
         "/api/report/group",
-        [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed](
+        [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed,
+         &restCache, maxRows](
             const HttpRequestPtr &req,
                                               std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
@@ -1873,6 +2229,9 @@ int main() {
             std::string datasetSql;
             std::map<std::string, std::string> datasetParams;
             std::string datasetConn;
+            std::string datasetKey;
+            std::string datasetKind = "sql";
+            std::shared_ptr<TemplateInfo> snapshot;
             std::map<std::string, rep::ConnSpec> conns;
             const bool wantDraft = (*body).get("draft", false).asBool();
             if (wantDraft && !draftAllowed(req)) {
@@ -1900,6 +2259,7 @@ int main() {
                     tpl = &it->second;
                 }
                 conns = tpl->connections;
+                snapshot = std::make_shared<TemplateInfo>(*tpl);
                 const auto &all = tpl->datasets;
                 if (all.empty()) {
                     datasetSql = tpl->datasetSql;
@@ -1913,12 +2273,16 @@ int main() {
                                   "в шаблоне нет набора '" + key + "'");
                         return;
                     }
+                    datasetKey = ds->first;
+                    datasetKind = ds->second.kind;
+                    datasetKey = ds->first;
+                    datasetKind = ds->second.kind;
                     datasetSql = ds->second.sql;
                     datasetParams = ds->second.params;
                     datasetConn = ds->second.connection;
                 }
             }
-            if (datasetSql.empty()) {
+            if (datasetKind == "sql" && datasetSql.empty()) {
                 sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
                           "в шаблоне не задан datasets.<key>.sql");
                 return;
@@ -1942,7 +2306,7 @@ int main() {
 
             rep::DatasetQuery query;
             std::string err;
-            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
+            if (datasetKind == "sql" && !rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
                 return;
             }
@@ -1995,6 +2359,71 @@ int main() {
                     order.emplace_back(orderField, dir);
                 }
             }
+            // join/rest-набор (ADR-104): фильтр по группе и страница — в памяти
+            if (datasetKind != "sql") {
+                const Json::Value groupValue = (*body)["value"];
+                std::vector<std::pair<std::string, std::string>> orderCopy = order;
+                fetchDatasetRows(
+                    *snapshot, datasetKey, bag, dataDb, connRegistry, restCache, maxRows,
+                    [cb, field, groupValue, limit, offset, orderCopy](const rep::DatasetRows &rows) {
+                        int colIdx = -1;
+                        for (size_t i = 0; i < rows.columns.size(); ++i) {
+                            if (rows.columns[i].name == field) colIdx = static_cast<int>(i);
+                        }
+                        if (colIdx < 0) {
+                            sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                      "в наборе нет колонки '" + field + "'");
+                            return;
+                        }
+                        const bool wantNull = groupValue.isNull() || !groupValue.isString();
+                        const std::string want = groupValue.isString() ? groupValue.asString() : std::string();
+                        std::vector<std::vector<std::string>> matched;
+                        for (const auto &r : rows.rows) {
+                            const std::string v = static_cast<size_t>(colIdx) < r.size()
+                                                      ? r[static_cast<size_t>(colIdx)]
+                                                      : std::string();
+                            if (wantNull ? v.empty() : v == want) matched.push_back(r);
+                        }
+                        // detailOrder шаблона (ADR-71): устойчивая сортировка по заданным полям
+                        for (auto it = orderCopy.rbegin(); it != orderCopy.rend(); ++it) {
+                            int oi = -1;
+                            for (size_t i = 0; i < rows.columns.size(); ++i) {
+                                if (rows.columns[i].name == it->first) oi = static_cast<int>(i);
+                            }
+                            if (oi < 0) continue;
+                            const bool desc = it->second == "desc";
+                            std::stable_sort(matched.begin(), matched.end(),
+                                             [oi, desc](const std::vector<std::string> &a,
+                                                        const std::vector<std::string> &b) {
+                                                 const std::string va = static_cast<size_t>(oi) < a.size()
+                                                                            ? a[static_cast<size_t>(oi)]
+                                                                            : std::string();
+                                                 const std::string vb = static_cast<size_t>(oi) < b.size()
+                                                                            ? b[static_cast<size_t>(oi)]
+                                                                            : std::string();
+                                                 return desc ? va > vb : va < vb;
+                                             });
+                        }
+                        const long long total = static_cast<long long>(matched.size());
+                        const size_t from = std::min<size_t>(static_cast<size_t>(offset), matched.size());
+                        const size_t to = std::min<size_t>(from + static_cast<size_t>(limit), matched.size());
+                        rep::DatasetRows page;
+                        page.columns = rows.columns;
+                        page.rows.assign(matched.begin() + static_cast<long>(from),
+                                         matched.begin() + static_cast<long>(to));
+                        Json::Value out = datasetJson(page);
+                        out["total"] = static_cast<Json::Int64>(total);
+                        out["offset"] = static_cast<Json::Int64>(offset);
+                        out["limit"] = static_cast<Json::Int64>(limit);
+                        out["hasMore"] = static_cast<Json::Int64>(to) < total;
+                        cb(jsonResponse(out));
+                    },
+                    [cb](int status, const std::string &code, const std::string &msg) {
+                        sendError(cb, static_cast<HttpStatusCode>(status), code, msg);
+                    });
+                return;
+            }
+
             std::string lowered = query.sql;
             std::transform(lowered.begin(), lowered.end(), lowered.begin(),
                            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
@@ -2078,7 +2507,8 @@ int main() {
     // больше одной — 422: шаблон должен уточнить SQL, а не показывать случайную строку.
     app().registerHandler(
         "/api/report/text",
-        [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftAllowed](
+        [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftAllowed, &restCache,
+         maxRows](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -2100,6 +2530,8 @@ int main() {
             std::string datasetSql;
             std::map<std::string, std::string> datasetParams;
             std::string datasetConn;
+            std::string datasetKind = "sql";
+            std::shared_ptr<TemplateInfo> snapshot;
             std::map<std::string, rep::ConnSpec> conns;
             {
                 std::lock_guard<std::mutex> lock(templatesMutex);
@@ -2123,25 +2555,22 @@ int main() {
                     tpl = &it->second;
                 }
                 conns = tpl->connections;
-                const auto ds = tpl->datasets.find(datasetKey);
+                snapshot = std::make_shared<TemplateInfo>(*tpl);
+                const auto ds = tpl->datasets.find(datasetKey.empty() && !tpl->datasets.empty()
+                                                       ? tpl->datasets.begin()->first
+                                                       : datasetKey);
                 if (ds == tpl->datasets.end()) {
                     sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
                               "в шаблоне нет набора '" + datasetKey + "'");
                     return;
                 }
+                datasetKind = ds->second.kind;
                 datasetSql = ds->second.sql;
                 datasetParams = ds->second.params;
                 datasetConn = ds->second.connection;
             }
-            if (datasetSql.empty()) {
+            if (datasetKind == "sql" && datasetSql.empty()) {
                 sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", "в наборе нет sql");
-                return;
-            }
-
-            std::string connError;
-            auto connClient = connRegistry.resolve(conns, datasetConn, dataDb, connError);
-            if (!connClient) {
-                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", connError);
                 return;
             }
 
@@ -2158,6 +2587,45 @@ int main() {
                     }
                 }
             }
+            // join/rest-набор (ADR-104): та же семантика «не более одной строки»
+            if (datasetKind != "sql") {
+                const std::string key = datasetKey.empty() && !snapshot->datasets.empty()
+                                            ? snapshot->datasets.begin()->first
+                                            : datasetKey;
+                fetchDatasetRows(
+                    *snapshot, key, bag, dataDb, connRegistry, restCache, maxRows,
+                    [cb](const rep::DatasetRows &rows) {
+                        if (rows.rows.size() > 1) {
+                            sendError(cb, k422UnprocessableEntity, "TEXT_ROW_MULTIPLE",
+                                      "текстовый блок ждёт не более одной строки, запрос вернул " +
+                                          std::to_string(rows.rows.size()) + ": добавьте условие в набор");
+                            return;
+                        }
+                        Json::Value out;
+                        out["row"] = Json::Value(Json::objectValue);
+                        if (rows.rows.size() == 1) {
+                            for (size_t c = 0; c < rows.columns.size(); ++c) {
+                                const std::string v = c < rows.rows[0].size() ? rows.rows[0][c] : std::string();
+                                out["row"][rows.columns[c].name] = v;
+                            }
+                        } else {
+                            out["row"] = Json::Value(Json::nullValue);
+                        }
+                        cb(jsonResponse(out));
+                    },
+                    [cb](int status, const std::string &code, const std::string &msg) {
+                        sendError(cb, static_cast<HttpStatusCode>(status), code, msg);
+                    });
+                return;
+            }
+
+            std::string connError;
+            auto connClient = connRegistry.resolve(conns, datasetConn, dataDb, connError);
+            if (!connClient) {
+                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", connError);
+                return;
+            }
+
             rep::DatasetQuery query;
             std::string compileErr;
             if (!rep::compileDataset(datasetSql, datasetParams, bag, query, compileErr)) {
@@ -2201,7 +2669,8 @@ int main() {
 
     app().registerHandler(
         "/api/report/aggregate",
-        [dataDb, &templates, &templatesMutex, maxRows, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed](
+        [dataDb, &templates, &templatesMutex, maxRows, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed,
+         &restCache](
             const HttpRequestPtr &req,
                                                        std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
@@ -2218,6 +2687,9 @@ int main() {
             std::string datasetSql;
             std::map<std::string, std::string> datasetParams;
             std::string datasetConn;
+            std::string datasetKey;
+            std::string datasetKind = "sql";
+            std::shared_ptr<TemplateInfo> snapshot;
             std::map<std::string, rep::ConnSpec> conns;
             const bool wantDraft = (*body).get("draft", false).asBool();
             if (wantDraft && !draftAllowed(req)) {
@@ -2245,6 +2717,7 @@ int main() {
                     tpl = &it->second;
                 }
                 conns = tpl->connections;
+                snapshot = std::make_shared<TemplateInfo>(*tpl);
                 const auto &all = tpl->datasets;
                 if (all.empty()) {
                     datasetSql = tpl->datasetSql;
@@ -2258,16 +2731,17 @@ int main() {
                                   "в шаблоне нет набора '" + key + "'");
                         return;
                     }
+                    datasetKey = ds->first;
+                    datasetKind = ds->second.kind;
                     datasetSql = ds->second.sql;
                     datasetParams = ds->second.params;
                     datasetConn = ds->second.connection;
                 }
-            }
-            std::string connError;
-            auto connClient = connRegistry.resolve(conns, datasetConn, dataDb, connError);
-            if (!connClient) {
-                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", connError);
-                return;
+                if (tpl->datasets.empty() && tpl->datasetSql.empty()) {
+                    sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
+                              "в шаблоне не задан набор данных");
+                    return;
+                }
             }
 
             rep::ParamBag bag;
@@ -2289,6 +2763,70 @@ int main() {
                 if (m.isObject() && m["field"].isString() && m["agg"].isString()) {
                     measures.emplace_back(m["field"].asString(), m["agg"].asString());
                 }
+            }
+
+            // join/rest-набор (ADR-104): агрегация в памяти, тем же контрактом
+            if (datasetKind != "sql") {
+                fetchDatasetRows(
+                    *snapshot, datasetKey, bag, dataDb, connRegistry, restCache, maxRows,
+                    [cb, groupBy, measures](const rep::DatasetRows &rows) {
+                        rep::DatasetRows agg;
+                        std::string aggErr;
+                        if (!aggregateRows(rows, groupBy, measures, agg, aggErr)) {
+                            sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", aggErr);
+                            return;
+                        }
+                        if (agg.rows.size() > 50000) {
+                            sendError(cb, k422UnprocessableEntity, "ROW_LIMIT",
+                                      "после агрегации " + std::to_string(agg.rows.size()) +
+                                          " строк: сузьте параметры");
+                            return;
+                        }
+                        cb(jsonResponse(datasetJson(agg)));
+                    },
+                    [cb](int status, const std::string &code, const std::string &msg) {
+                        sendError(cb, static_cast<HttpStatusCode>(status), code, msg);
+                    });
+                return;
+            }
+
+            std::string connError;
+            auto connClient = connRegistry.resolve(conns, datasetConn, dataDb, connError);
+            if (!connClient) {
+                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", connError);
+                return;
+            }
+
+            // join/rest-набор (ADR-104): та же семантика «не более одной строки»
+            if (datasetKind != "sql") {
+                fetchDatasetRows(
+                    *snapshot, datasetKey.empty() && !snapshot->datasets.empty()
+                                    ? snapshot->datasets.begin()->first
+                                    : datasetKey,
+                    bag, dataDb, connRegistry, restCache, maxRows,
+                    [cb](const rep::DatasetRows &rows) {
+                        if (rows.rows.size() > 1) {
+                            sendError(cb, k422UnprocessableEntity, "TEXT_ROW_MULTIPLE",
+                                      "текстовый блок ждёт не более одной строки, запрос вернул " +
+                                          std::to_string(rows.rows.size()) + ": добавьте условие в набор");
+                            return;
+                        }
+                        Json::Value out;
+                        out["row"] = Json::Value(Json::objectValue);
+                        if (rows.rows.size() == 1) {
+                            for (size_t c = 0; c < rows.columns.size(); ++c) {
+                                const std::string v = c < rows.rows[0].size() ? rows.rows[0][c] : std::string();
+                                out["row"][rows.columns[c].name] = v;
+                            }
+                        } else {
+                            out["row"] = Json::Value(Json::nullValue);
+                        }
+                        cb(jsonResponse(out));
+                    },
+                    [cb](int status, const std::string &code, const std::string &msg) {
+                        sendError(cb, static_cast<HttpStatusCode>(status), code, msg);
+                    });
+                return;
             }
 
             rep::DatasetQuery query;
@@ -2404,6 +2942,14 @@ int main() {
                     return;
                 }
                 datasetKey = ds->first;
+                // ADR-104: серверный лист собирается из SQL-набора; объединённые и REST-наборы
+                // пока не поддерживаются — говорим об этом прямо, а не «нет sql».
+                if (ds->second.kind != "sql") {
+                    done(422, "EXPORT_UNSUPPORTED", rep::ExportSheet{},
+                         "серверный экспорт наборов rest/join не поддерживается: используйте Excel или "
+                         "печать из отчёта (данные уже загружены в браузере)");
+                    return;
+                }
                 datasetSql = ds->second.sql;
                 datasetParams = ds->second.params;
                 datasetConn = ds->second.connection;
@@ -3905,7 +4451,8 @@ int main() {
     // Кэша на сервере нет — списки кэширует клиент; защита от тяжёлого SQL — statement_timeout.
     app().registerHandler(
         "/api/reports/{reportId}/lookups/{param}",
-        [dataDb, &templatesRaw, &draftsRaw, &templatesMutex, &connRegistry, &draftAllowed](
+        [dataDb, &templatesRaw, &draftsRaw, &templatesMutex, &connRegistry, &draftAllowed, &restCache,
+         maxRows](
             const HttpRequestPtr &req,
                                                  std::function<void(const HttpResponsePtr &)> &&cb,
                                                  const std::string &reportId, const std::string &param) {
@@ -3958,82 +4505,31 @@ int main() {
                           "набор '" + lookupDataset + "' для справочника '" + param + "' не объявлен в datasets");
                 return;
             }
-            sql = lookupDs.get("sql", Json::Value("")).asString();
-            lookupConn = lookupDs.get("connection", Json::Value("")).asString();
-            if (sql.empty()) {
-                sendError(cb, k404NotFound, "LOOKUP_NOT_FOUND",
-                          "у набора '" + lookupDataset + "' нет sql");
-                return;
-            }
+            // Параметры справочника приходят в query-строке; набор может быть любого вида (ADR-104)
+            rep::ParamBag lookupBag;
+            for (const auto &kv : req->getParameters()) lookupBag.set(kv.first, kv.second);
 
-            // ':name' → '$N', значения из query-строки; '::' остаётся кастом типа
-            std::string compiled;
-            std::vector<std::string> values;
-            for (size_t i = 0; i < sql.size();) {
-                const char c = sql[i];
-                if (c == ':') {
-                    if (i + 1 < sql.size() && sql[i + 1] == ':') {
-                        compiled += "::";
-                        i += 2;
-                        continue;
-                    }
-                    size_t j = i + 1;
-                    while (j < sql.size() && (std::isalnum(static_cast<unsigned char>(sql[j])) || sql[j] == '_')) ++j;
-                    const std::string name = sql.substr(i + 1, j - i - 1);
-                    if (name.empty()) {
-                        compiled.push_back(c);
-                        ++i;
-                        continue;
-                    }
-                    const std::string v = req->getParameter(name);
-                    if (v.empty()) {
-                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
-                                  "для справочника нужен параметр '" + name + "'");
-                        return;
-                    }
-                    values.push_back(v);
-                    compiled += "$" + std::to_string(values.size());
-                    i = j;
-                    continue;
-                }
-                compiled.push_back(c);
-                ++i;
-            }
-
-            // справочник может читаться с другого сервера (ADR-76)
-            std::map<std::string, rep::ConnSpec> lookupConns;
-            std::string lookupErr;
-            if (!rep::parseConnections(body["connections"], lookupConns, lookupErr)) {
-                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", lookupErr);
+            TemplateInfo lookupTpl;
+            if (!parseTemplate(it->second, reportId, lookupTpl)) {
+                sendError(cb, k500InternalServerError, "TEMPLATE_BROKEN", "шаблон отчёта не разбирается");
                 return;
             }
-            auto lookupClient = connRegistry.resolve(lookupConns, lookupConn, dataDb, lookupErr);
-            if (!lookupClient) {
-                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", lookupErr);
-                return;
-            }
-            runQuery(
-                lookupClient, compiled, values,
-                [cb](const orm::Result &res) {
+            fetchDatasetRows(
+                lookupTpl, lookupDataset, lookupBag, dataDb, connRegistry, restCache, maxRows,
+                [cb](const rep::DatasetRows &rows) {
                     Json::Value list(Json::arrayValue);
-                    for (const auto &row : res) {
-                        const orm::Field v = row[0];
-                        const orm::Field l = row[1];
+                    for (const auto &row : rows.rows) {
+                        const std::string value = row.empty() ? std::string() : row[0];
+                        const std::string label = row.size() > 1 ? row[1] : value;
                         Json::Value item;
-                        item["value"] = v.isNull() ? "" : v.as<std::string>();
-                        item["label"] = l.isNull() ? (v.isNull() ? "" : v.as<std::string>()) : l.as<std::string>();
+                        item["value"] = value;
+                        item["label"] = label.empty() ? value : label;
                         list.append(item);
                     }
                     cb(jsonResponse(list));
                 },
-                [cb](const std::exception_ptr &eptr) {
-                    std::string msg = "lookup failed";
-                    try {
-                        if (eptr) std::rethrow_exception(eptr);
-                    } catch (const std::exception &e) {
-                        msg = e.what();
-                    }
-                    sendError(cb, k500InternalServerError, "LOOKUP_FAILED", msg);
+                [cb](int status, const std::string &code, const std::string &message) {
+                    sendError(cb, static_cast<HttpStatusCode>(status), code, message);
                 });
         },
         {Get});
@@ -4041,7 +4537,7 @@ int main() {
     app().registerHandler(
         "/api/report/data",
         [dataDb, &registry, &templates, &templatesMutex, maxRows, &resultCache, &templatesVersion,
-         &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed](
+         &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed, &restCache](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -4056,11 +4552,8 @@ int main() {
                 return;
             }
 
-            std::string datasetSql;
-            std::map<std::string, std::string> datasetParams;
             std::string datasetKey; // какой набор отдаём: '' — первый в шаблоне (ADR-36)
-            std::string datasetConn;
-            std::map<std::string, rep::ConnSpec> conns;
+            std::shared_ptr<TemplateInfo> snapshot; // копия шаблона: нужна в async-колбэках
             // draft=true — считаем по телу черновика, а не по опубликованному (ADR-82)
             const bool wantDraft = (*body).get("draft", false).asBool();
             if (wantDraft && !draftAllowed(req)) {
@@ -4088,12 +4581,15 @@ int main() {
                     }
                     tpl = &it->second;
                 }
-                conns = tpl->connections;
+                snapshot = std::make_shared<TemplateInfo>(*tpl);
                 const auto &all = tpl->datasets;
                 if (all.empty()) {
-                    datasetSql = tpl->datasetSql; // шаблон без данных: прежнее поведение
-                    datasetParams = tpl->datasetParams;
-                    datasetConn = tpl->datasetConnection;
+                    // шаблон без datasets: прежнее поведение через первый SQL (совместимость)
+                    if (tpl->datasetSql.empty()) {
+                        sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
+                                  "в шаблоне не задан набор данных (datasets.<key>.sql|rest|join)");
+                        return;
+                    }
                 } else {
                     datasetKey = (*body).get("dataset", "").asString();
                     const auto ds = all.find(datasetKey.empty() ? all.begin()->first : datasetKey);
@@ -4103,21 +4599,7 @@ int main() {
                         return;
                     }
                     datasetKey = ds->first;
-                    datasetSql = ds->second.sql;
-                    datasetParams = ds->second.params;
-                    datasetConn = ds->second.connection;
                 }
-            }
-            if (datasetSql.empty()) {
-                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
-                          "в шаблоне не задан datasets.<key>.sql");
-                return;
-            }
-            std::string connError;
-            auto connClient = connRegistry.resolve(conns, datasetConn, dataDb, connError);
-            if (!connClient) {
-                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", connError);
-                return;
             }
 
             rep::ParamBag bag;
@@ -4136,13 +4618,6 @@ int main() {
                 }
             }
 
-            rep::DatasetQuery query;
-            std::string compileErr;
-            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, compileErr)) {
-                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", compileErr);
-                return;
-            }
-
             // Ключ кэша: отчёт + версия шаблонов + значения параметров (map уже отсортирован).
             // Версия в ключе делает публикацию шаблона инвалидацией.
             const std::uint64_t tplVersion = templatesVersion.load();
@@ -4159,7 +4634,7 @@ int main() {
                 cacheKey += kv.second;
             }
             const std::string etag =
-                "\"" + std::to_string(std::hash<std::string>{}(cacheKey + datasetSql)) + "\"";
+                "\"" + std::to_string(std::hash<std::string>{}(cacheKey)) + "\"";
 
             rep::ResultCache::Entry hit;
             if (resultCache.get(cacheKey, hit)) {
@@ -4181,44 +4656,10 @@ int main() {
                 return;
             }
 
-            static const std::map<std::string, std::string> noDeclared;
-            runQuery(
-                connClient, query.sql, query.values,
-                [cb, maxRows, &resultCache, cacheKey, etag](const orm::Result &res) {
-                    if (res.size() > maxRows) {
-                        sendError(cb, k422UnprocessableEntity, "ROW_LIMIT",
-                                  "результат " + std::to_string(res.size()) + " строк > лимита " +
-                                      std::to_string(maxRows) + ": сузьте параметры");
-                        return;
-                    }
-
-                    Json::Value columns(Json::arrayValue);
-                    const auto ncols = static_cast<size_t>(res.columns());
-                    std::vector<std::string> names;
-                    std::vector<std::string> types;
-                    names.reserve(ncols);
-                    types.reserve(ncols);
-                    for (size_t c = 0; c < ncols; ++c) {
-                        names.emplace_back(res.columnName(static_cast<unsigned long>(c)));
-                        types.push_back(columnType(names.back(), noDeclared, res));
-                        Json::Value col;
-                        col["name"] = names.back();
-                        col["type"] = types.back();
-                        columns.append(col);
-                    }
-
-                    Json::Value rows(Json::arrayValue);
-                    for (const auto &row : res) {
-                        Json::Value obj(Json::objectValue);
-                        for (size_t c = 0; c < ncols; ++c) obj[names[c]] = fieldToJson(row[c], types[c]);
-                        rows.append(obj);
-                    }
-
-                    Json::Value out;
-                    out["columns"] = columns;
-                    out["rows"] = rows;
-                    out["rowCount"] = static_cast<Json::UInt64>(res.size());
-                    out["truncated"] = false;
+            fetchDatasetRows(
+                *snapshot, datasetKey, bag, dataDb, connRegistry, restCache, maxRows,
+                [cb, &resultCache, cacheKey, etag](const rep::DatasetRows &rows) {
+                    Json::Value out = datasetJson(rows);
 
                     Json::StreamWriterBuilder wb;
                     wb["indentation"] = "";
@@ -4233,30 +4674,8 @@ int main() {
                     resp->addHeader("Cache-Control", "no-store");
                     cb(resp);
                 },
-                [cb](const std::exception_ptr &eptr) {
-                    std::string msg = "query failed";
-                    try {
-                        if (eptr) std::rethrow_exception(eptr);
-                    } catch (const std::exception &e) {
-                        msg = e.what();
-                    }
-                    if (msg.find("statement timeout") != std::string::npos ||
-                        msg.find("canceling statement") != std::string::npos) {
-                        sendError(cb, k504GatewayTimeout, "SQL_TIMEOUT", msg);
-                        return;
-                    }
-                    // типы параметров больше не описаны в реестре: ошибку приведения значения
-                    // PostgreSQL отдаём как 422, чтобы контракт API не менялся
-                    if (msg.find("invalid input syntax") != std::string::npos) {
-                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", msg);
-                        return;
-                    }
-                    if (msg.find("Connection refused") != std::string::npos ||
-                        msg.find("could not connect") != std::string::npos) {
-                        sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
-                        return;
-                    }
-                    sendError(cb, k500InternalServerError, "QUERY_FAILED", msg);
+                [cb](int status, const std::string &code, const std::string &message) {
+                    sendError(cb, static_cast<HttpStatusCode>(status), code, message);
                 });
         },
         {Post});
