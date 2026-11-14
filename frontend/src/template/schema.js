@@ -441,6 +441,11 @@ export default {
           "type": "string",
           "minLength": 1
         },
+        "dataKey": {
+          "type": "string",
+          "minLength": 1,
+          "description": "набор из datasets, откуда берётся строка для {{data.<колонка>}} (ADR-101)"
+        },
         "width": {
           "enum": [
             "full",

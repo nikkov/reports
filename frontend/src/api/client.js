@@ -99,6 +99,19 @@ export const api = {
     }),
 
   // dataset — ключ из datasets шаблона (ADR-36); без него сервер отдаёт первый набор
+  // Строка для текстового блока (ADR-101): запрос обязан вернуть не более одной строки
+  text: (reportId, params, dataset, draft = false, signal) =>
+    request('/api/report/text', {
+      method: 'POST',
+      body: JSON.stringify({
+        reportId,
+        params,
+        ...(dataset ? { dataset } : {}),
+        ...(draft ? { draft: true } : {})
+      }),
+      signal
+    }),
+
   data: (reportId, params, signal, dataset, draft = false) =>
     request('/api/report/data', {
       method: 'POST',

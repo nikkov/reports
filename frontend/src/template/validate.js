@@ -344,6 +344,25 @@ export function validateTemplate(template) {
   // Способы получения значений параметров (ADR-22): дата/время, статический набор, справочник из БД.
   const paramsByName = new Map(params.map((p) => [p.name, p]))
 
+  // Текстовый блок может брать строку из набора данных (ADR-101): набор обязан быть объявлен,
+  // а подстановки {{data.<колонка>}} без dataKey не на что опереть.
+  ;(template.blocks || []).forEach((b, index) => {
+    if (b?.type !== 'text') return
+    if (b.dataKey && !datasetKeys.has(b.dataKey)) {
+      errors.push({
+        path: `blocks.${index}.dataKey`,
+        message: `набор «${b.dataKey}» не объявлен в datasets`
+      })
+      return
+    }
+    if (!b.dataKey && /\{\{[^}]*\bdata\./.test(String(b.text || ''))) {
+      errors.push({
+        path: `blocks.${index}.text`,
+        message: 'подстановка {{data.<колонка>}} требует dataKey — набор, откуда брать строку'
+      })
+    }
+  })
+
   params.forEach((p, index) => {
     const path = `params.${index}`
     const src = p.source

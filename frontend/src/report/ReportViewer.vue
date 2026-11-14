@@ -57,7 +57,17 @@
         class="block"
         :style="{ gridColumn: `span ${spanOf(block)}` }"
       >
-        <p v-if="block.type === 'text'" class="text">{{ renderText(block.text) }}</p>
+        <p v-if="block.type === 'text'" class="text">
+          <template v-for="(part, pi) in textPartsFor(block)" :key="pi">
+            <a
+              v-if="part.type === 'link'"
+              :href="part.href"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ part.text }}</a>
+            <template v-else>{{ part.text }}</template>
+          </template>
+        </p>
 
         <TableView
           v-else-if="block.type === 'table'"
@@ -90,6 +100,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, API_BASE } from '../api/client.js'
 import { resolveBlockHeight, resolveBlockSpan } from '../engine/layout.js'
+import { textParts } from './text.js'
 import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
 import ChartBlock from './ChartBlock.vue'
@@ -238,6 +249,19 @@ async function load() {
       loaded[key] = serverAgg
         ? (await api.aggregate(reportId, { ...paramValues }, serverAgg, controller.signal, key, draftMode)).rows
         : (await api.data(reportId, { ...paramValues }, controller.signal, key, draftMode)).rows
+    }
+    // Строки для текстовых блоков (ADR-101): по запросу на блок, только у блоков с dataKey.
+    // Запрос обязан вернуть ≤ 1 строку; больше — сервер отвечает 422 и отчёт не строится.
+    const textBlocks = (template.value?.blocks || []).filter((b) => b.type === 'text' && b.dataKey)
+    if (textBlocks.length) {
+      const textData = {}
+      for (const block of textBlocks) {
+        const res = await api.text(reportId, { ...paramValues }, block.dataKey, draftMode, controller.signal)
+        textData[block.dataKey] = res.row || {}
+      }
+      textRows.value = textData
+    } else {
+      textRows.value = {}
     }
     dataByKey.value = loaded
     const data = { rows: loaded[keys[0]] || [] }
@@ -506,9 +530,14 @@ function stylesFor(block) {
   return stylesCache.get(block)
 }
 
-function renderText(text) {
-  // для справочников показываем подпись (NAME), иначе — само значение
-  return text.replace(/\{\{\s*([a-z][a-z0-9_]*)\s*\}\}/g, (_, name) => paramLabels.value[name] || paramValues[name] || '')
+// Текст блока: подписи параметров, строка из набора ({{data.<колонка>}}) и ссылки (ADR-101)
+const textRows = ref({}) // dataKey → строка запроса ({} если запрос вернул 0 строк)
+
+function textPartsFor(block) {
+  return textParts(block.text, {
+    labels: { ...paramValues, ...paramLabels.value },
+    data: block.dataKey ? textRows.value[block.dataKey] || {} : null
+  })
 }
 
 function tableColumns(block) {

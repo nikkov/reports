@@ -1831,6 +1831,133 @@ int main() {
 
     // Серверная агрегация (ADR-37): GROUP BY поверх выбранного набора данных.
     // Клиент получает уже сгруппированные строки — на 2 746 строках это 5 вместо тысяч.
+
+    // --- Текст из запроса (ADR-101): строка набора для подстановок {{data.<колонка>}} --------
+    // Запрос блока обязан вернуть не более одной строки. 0 строк — подстановки пустые,
+    // больше одной — 422: шаблон должен уточнить SQL, а не показывать случайную строку.
+    app().registerHandler(
+        "/api/report/text",
+        [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftAllowed](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string reportId = (*body).get("reportId", "").asString();
+            if (reportId.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен reportId");
+                return;
+            }
+            const std::string datasetKey = (*body).get("dataset", "").asString();
+            const bool wantDraft = (*body).get("draft", false).asBool();
+            if (wantDraft && !draftAllowed(req)) {
+                sendError(cb, k403Forbidden, "DRAFT_FORBIDDEN", "черновик доступен автору и администратору");
+                return;
+            }
+
+            std::string datasetSql;
+            std::map<std::string, std::string> datasetParams;
+            std::string datasetConn;
+            std::map<std::string, rep::ConnSpec> conns;
+            {
+                std::lock_guard<std::mutex> lock(templatesMutex);
+                const TemplateInfo *tpl = nullptr;
+                TemplateInfo draftCopy;
+                if (wantDraft) {
+                    const auto dit = draftsParsed.find(reportId);
+                    if (dit == draftsParsed.end()) {
+                        sendError(cb, k404NotFound, "DRAFT_NOT_FOUND", "у отчёта нет черновика");
+                        return;
+                    }
+                    draftCopy = dit->second;
+                    tpl = &draftCopy;
+                } else {
+                    const auto it = templates.find(reportId);
+                    if (it == templates.end()) {
+                        sendError(cb, k404NotFound, "REPORT_NOT_FOUND",
+                                  "отчёт '" + reportId + "' не найден");
+                        return;
+                    }
+                    tpl = &it->second;
+                }
+                conns = tpl->connections;
+                const auto ds = tpl->datasets.find(datasetKey);
+                if (ds == tpl->datasets.end()) {
+                    sendError(cb, k422UnprocessableEntity, "DATASET_NOT_FOUND",
+                              "в шаблоне нет набора '" + datasetKey + "'");
+                    return;
+                }
+                datasetSql = ds->second.sql;
+                datasetParams = ds->second.params;
+                datasetConn = ds->second.connection;
+            }
+            if (datasetSql.empty()) {
+                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", "в наборе нет sql");
+                return;
+            }
+
+            std::string connError;
+            auto connClient = connRegistry.resolve(conns, datasetConn, dataDb, connError);
+            if (!connClient) {
+                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", connError);
+                return;
+            }
+
+            rep::ParamBag bag;
+            const Json::Value &rawParams = (*body)["params"];
+            if (rawParams.isObject()) {
+                for (auto it = rawParams.begin(); it != rawParams.end(); ++it) {
+                    if (it->isString() || it->isInt64() || it->isUInt64() || it->isDouble() || it->isBool()) {
+                        bag.set(it.name(), it->asString());
+                    } else {
+                        sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS",
+                                  "параметр '" + it.name() + "' должен быть скаляром");
+                        return;
+                    }
+                }
+            }
+            rep::DatasetQuery query;
+            std::string compileErr;
+            if (!rep::compileDataset(datasetSql, datasetParams, bag, query, compileErr)) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", compileErr);
+                return;
+            }
+
+            static const std::map<std::string, std::string> noDeclared;
+            runQuery(
+                connClient, query.sql, query.values,
+                [cb](const orm::Result &res) {
+                    if (res.size() > 1) {
+                        sendError(cb, k422UnprocessableEntity, "TEXT_ROW_MULTIPLE",
+                                  "текстовый блок ждёт не более одной строки, запрос вернул " +
+                                      std::to_string(res.size()) + ": добавьте условие в SQL набора");
+                        return;
+                    }
+                    Json::Value out;
+                    out["row"] = Json::Value(Json::objectValue);
+                    if (res.size() == 1) {
+                        const auto ncols = static_cast<size_t>(res.columns());
+                        for (size_t c = 0; c < ncols; ++c) {
+                            const std::string name = res.columnName(static_cast<unsigned long>(c));
+                            const orm::Field &f = res[0][c];
+                            if (f.isNull()) out["row"][name] = "";
+                            else out["row"][name] = f.as<std::string>();
+                        }
+                    } else {
+                        out["row"] = Json::Value(Json::nullValue);
+                    }
+                    cb(jsonResponse(out));
+                },
+                [cb](const std::exception_ptr &e) {
+                    const std::string msg = describeError(e);
+                    const bool badInput = msg.find("invalid input syntax") != std::string::npos;
+                    sendError(cb, badInput ? k422UnprocessableEntity : k500InternalServerError,
+                              badInput ? "INVALID_PARAMS" : "QUERY_FAILED", msg);
+                });
+        },
+        {Post});
+
     app().registerHandler(
         "/api/report/aggregate",
         [dataDb, &templates, &templatesMutex, maxRows, &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed](

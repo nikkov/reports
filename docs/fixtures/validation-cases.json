@@ -3552,6 +3552,72 @@
       "errors": [
         "blocks.0.span"
       ]
+    },
+    {
+      "name": "текст с данными: dataKey объявлен, подстановка data.*",
+      "template": {
+        "version": 2,
+        "id": "parity-text-data",
+        "title": "Текст из запроса",
+        "datasets": {
+          "summary": {
+            "sql": "SELECT count(*) AS deals FROM reports_examples.sales"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Заказов: {{data.deals}}",
+            "dataKey": "summary"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "текст с данными: набор не объявлен",
+      "template": {
+        "version": 2,
+        "id": "parity-text-data",
+        "title": "Текст из запроса",
+        "datasets": {
+          "summary": {
+            "sql": "SELECT count(*) AS deals FROM reports_examples.sales"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Заказов: {{data.deals}}",
+            "dataKey": "nope"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.dataKey"
+      ]
+    },
+    {
+      "name": "текст с данными: подстановка без dataKey",
+      "template": {
+        "version": 2,
+        "id": "parity-text-data",
+        "title": "Текст из запроса",
+        "datasets": {
+          "summary": {
+            "sql": "SELECT count(*) AS deals FROM reports_examples.sales"
+          }
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Заказов: {{data.deals}}"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.text"
+      ]
     }
   ]
 }

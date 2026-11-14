@@ -1039,6 +1039,16 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 if (block.isMember("height") && !block["height"].isNull()) {
                     addError(r, base + ".height", "height допустим только у таблицы и диаграммы");
                 }
+                // Строка для {{data.<колонка>}} берётся из набора данных (ADR-101)
+                const std::string textKey = asString(block["dataKey"]);
+                if (!textKey.empty() && !datasetKeys.count(textKey)) {
+                    addError(r, base + ".dataKey", "набор «" + textKey + "» не объявлен в datasets");
+                }
+                const std::string textBody = asString(block["text"]);
+                if (textKey.empty() && textBody.find("{{data.") != std::string::npos) {
+                    addError(r, base + ".text",
+                             "подстановка {{data.<колонка>}} требует dataKey — набор, откуда брать строку");
+                }
                 const std::string text = asString(block["text"]);
                 if (text.empty()) addError(r, base + ".text", "text обязателен для текстового блока");
                 for (std::size_t pos = 0; (pos = text.find("{{", pos)) != std::string::npos;) {
@@ -1048,7 +1058,9 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                     name.erase(std::remove_if(name.begin(), name.end(),
                                               [](unsigned char c) { return std::isspace(c) != 0; }),
                                name.end());
-                    if (!name.empty() && !paramIndex.count(name)) {
+                    // {{data.<колонка>}} — не параметр, а колонка строки набора (ADR-101)
+                    const bool isDataRef = name.rfind("data.", 0) == 0;
+                    if (!name.empty() && !isDataRef && !paramIndex.count(name)) {
                         addError(r, base + ".text", "в тексте используется необъявленный параметр «" + name + "»");
                     }
                     pos = end + 2;

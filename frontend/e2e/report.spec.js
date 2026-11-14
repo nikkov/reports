@@ -2736,3 +2736,37 @@ test('условное форматирование: цвета есть в пе
   expect(styles).toContain('FFFFF4D6')
   expect(styles).toContain('FFB42318')
 })
+
+test('текстовый блок: данные из запроса и гиперссылки (ADR-101)', async ({ page, request }) => {
+  await page.goto('/report.html?report=text-data')
+  await expect(page.locator('.meta')).toContainText('строк')
+
+  const text = page.locator('.block p').first()
+  // {{data.<колонка>}} из строки набора summary
+  await expect(text).toContainText('24723')
+  await expect(text).toContainText('2026-03-31')
+  // обычные параметры продолжают работать
+  await expect(text).toContainText('2026-01-01')
+
+  // ссылки: внутренняя и внешняя, обе в новой вкладке
+  const links = text.locator('a')
+  await expect(links).toHaveCount(2)
+  await expect(links.nth(0)).toHaveAttribute('href', 'report.html?report=sales-drill')
+  await expect(links.nth(0)).toHaveAttribute('target', '_blank')
+  await expect(links.nth(0)).toHaveAttribute('rel', 'noopener noreferrer')
+  await expect(links.nth(1)).toHaveAttribute('href', /^https:\/\/www\.postgresql\.org/)
+
+  // запрос больше одной строки — 422, отчёт с таким блоком не строится
+  const many = await request.post('/api/report/text', {
+    data: { reportId: 'text-data', dataset: 'sales', params: { from: '2026-01-01', to: '2026-11-14' } }
+  })
+  expect(many.status()).toBe(422)
+  expect((await many.json()).error.code).toBe('TEXT_ROW_MULTIPLE')
+
+  // ноль строк — пустые подстановки, без ошибки
+  const empty = await request.post('/api/report/text', {
+    data: { reportId: 'text-data', dataset: 'sales', params: { from: '2030-01-01', to: '2030-01-02' } }
+  })
+  expect(empty.ok()).toBeTruthy()
+  expect((await empty.json()).row).toBeNull()
+})

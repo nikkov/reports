@@ -1,0 +1,110 @@
+{
+  "version": 2,
+  "id": "text-data",
+  "title": "Текст с данными из запроса",
+  "description": "Текстовый блок берёт строку из набора (summary) и показывает колонки через {{data.*}}, со ссылками",
+  "folder": "Примеры",
+  "tags": [
+    "текст",
+    "ссылки",
+    "dataKey"
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "year(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "*",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "datasets": {
+    "summary": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT count(*) AS deals, coalesce(sum(amount), 0) AS total, coalesce(max(order_date)::text, '—') AS last_day FROM reports_examples.sales WHERE order_date BETWEEN :from::date AND :to::date"
+    },
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, sum(s.amount) AS amount, count(*) AS deals FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date BETWEEN :from::date AND :to::date GROUP BY r.name ORDER BY amount DESC"
+    }
+  },
+  "styles": {
+    "preset": "default"
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "dataKey": "summary",
+      "text": "За период {{from}} — {{to}} в базе {{data.deals}} заказов на общую сумму {{data.total}} (последняя продажа — {{data.last_day}}). Так строка запроса попадает в текст: {{data.deals}} — это колонка deals набора summary. Детали: [реестр продаж за март](report.html?report=sales-drill) и [документация PostgreSQL](https://www.postgresql.org/docs/current/)."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 12,
+      "title": "Продажи по регионам",
+      "height": 320,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "aggregate": "sum",
+          "format": {
+            "style": "number",
+            "decimals": 0,
+            "group": " "
+          },
+          "align": "right"
+        },
+        {
+          "field": "deals",
+          "title": "Заказов",
+          "aggregate": "sum",
+          "format": {
+            "style": "integer"
+          },
+          "align": "right"
+        }
+      ]
+    }
+  ]
+}
