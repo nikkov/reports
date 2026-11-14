@@ -26,6 +26,7 @@ struct RestColumn {
 
 // Пагинация REST (ADR-104): сервис отдаёт страницами — собираем до лимита строк.
 struct RestPage {
+    std::string mode = "page"; // page — номер страницы, offset — смещение (ADR-108)
     std::string param;      // имя query-параметра номера страницы, например page
     std::string sizeParam;  // имя параметра размера, например limit; пусто — не передаём
     int size = 1000;        // записей на страницу

@@ -412,8 +412,23 @@ bool parseTemplate(const std::string &text, const std::string &fallbackId, Templ
     for (const auto &kv : out.datasets) {
         if (kv.second.kind != "join") continue;
         for (const std::string &side : {kv.second.join.left, kv.second.join.right}) {
-            const auto it = out.datasets.find(side);
-            if (it == out.datasets.end() || it->second.kind == "join") return false;
+            if (out.datasets.find(side) == out.datasets.end()) return false;
+        }
+    }
+    // Цепочки A⋈B⋈C разрешены, цикл — нет: обход по ссылкам должен дойти до конца.
+    for (const auto &kv : out.datasets) {
+        if (kv.second.kind != "join") continue;
+        std::set<std::string> seen;
+        std::vector<std::string> stack{kv.second.join.left, kv.second.join.right};
+        while (!stack.empty()) {
+            const std::string cur = stack.back();
+            stack.pop_back();
+            if (cur == kv.first) return false; // цикл
+            if (!seen.insert(cur).second) continue;
+            const auto it = out.datasets.find(cur);
+            if (it == out.datasets.end() || it->second.kind != "join") continue;
+            stack.push_back(it->second.join.left);
+            stack.push_back(it->second.join.right);
         }
     }
     const auto &first = out.datasets.begin()->second;

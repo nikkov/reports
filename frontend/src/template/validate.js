@@ -246,6 +246,26 @@ function usesRest(template) {
   return false
 }
 
+// Достижим ли набор target по ссылкам join из набора from (защита от циклов, ADR-108).
+function reaches(from, target, datasets) {
+  const seen = new Set()
+  const stack = [from]
+  while (stack.length) {
+    const current = stack.pop()
+    if (!current || seen.has(current)) continue
+    seen.add(current)
+    const ds = datasets?.[current]
+    if (!ds?.join) continue
+    for (const side of [ds.join.left, ds.join.right]) {
+      const name = side?.dataset || side
+      if (!name) continue
+      if (name === target) return true
+      stack.push(name)
+    }
+  }
+  return false
+}
+
 export function validateTemplate(template) {
   const errors = []
   const warnings = []
@@ -695,8 +715,9 @@ function checkGaugeZones(block, base, errors) {
           errors.push({ path, message: 'набор не может объединяться сам с собой' })
         } else if (!template.datasets?.[name]) {
           errors.push({ path, message: `набор «${name}» не объявлен в datasets` })
-        } else if (template.datasets[name].join) {
-          errors.push({ path, message: 'join не может ссылаться на другой join: один уровень' })
+        } else if (name === key || reaches(key, name, template.datasets)) {
+          // цепочки A⋈B⋈C разрешены, цикл — нет
+          errors.push({ path, message: 'цикл объединений: набор ссылается сам на себя через цепочку' })
         }
       }
       const asNames = new Set()
@@ -711,7 +732,32 @@ function checkGaugeZones(block, base, errors) {
       for (const [ki, keyPair] of (join.on || []).entries()) {
         if (!keyPair?.left || !keyPair?.right) {
           errors.push({ path: `datasets.${key}.join.on.${ki}`, message: 'у пары нужны left и right' })
+          continue
         }
+        // тип ключа должен совпадать с объявленным типом колонки, иначе ключи не совпадут
+        const keyType = keyPair.type || 'text'
+        const checkSide = (sideName, sideSpec, columnName) => {
+          const restCols = sideSpec?.rest?.columns
+          if (!Array.isArray(restCols)) return
+          const column = restCols.find((c) => (c.as || c.field) === columnName || c.field === columnName)
+          if (!column) {
+            errors.push({
+              path: `datasets.${key}.join.on.${ki}.${sideName}`,
+              message: `в наборе нет колонки «${columnName}»`
+            })
+            return
+          }
+          if ((column.type || 'text') !== keyType) {
+            errors.push({
+              path: `datasets.${key}.join.on.${ki}.${sideName}`,
+              message: `тип ключа «${keyType}» не совпадает с типом колонки «${column.type}»`
+            })
+          }
+        }
+        const leftName = join.left?.dataset || join.left
+        const rightName = join.right?.dataset || join.right
+        checkSide('left', template.datasets?.[leftName], keyPair.left)
+        checkSide('right', template.datasets?.[rightName], keyPair.right)
       }
     }
   }

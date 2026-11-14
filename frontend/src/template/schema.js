@@ -323,6 +323,13 @@ export default {
           ],
           "description": "постраничный REST: сервис отдаёт страницами, набор собирает их до лимита (ADR-104)",
           "properties": {
+            "mode": {
+              "enum": [
+                "page",
+                "offset"
+              ],
+              "description": "page — номер страницы, offset — смещение (ADR-108)"
+            },
             "param": {
               "type": "string",
               "minLength": 1

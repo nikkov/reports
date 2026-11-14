@@ -1,0 +1,73 @@
+{
+  "version": 2,
+  "id": "crm-paged-offset",
+  "title": "Постраничный REST по смещению",
+  "description": "REST отдаёт по смещению (offset): набор собирает страницы (ADR-108)",
+  "folder": "Примеры",
+  "tags": [
+    "REST",
+    "пагинация"
+  ],
+  "connections": {
+    "crm": {
+      "kind": "rest",
+      "baseUrl": "${CRM_BASE_URL}",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "timeoutMs": 5000
+    }
+  },
+  "params": [],
+  "datasets": {
+    "rows": {
+      "connection": "crm",
+      "rest": {
+        "path": "/api/rows-offset",
+        "rowsPath": "items",
+        "page": {
+          "mode": "offset",
+          "param": "offset",
+          "sizeParam": "limit",
+          "size": 1000,
+          "maxPages": 5,
+          "start": 0
+        },
+        "columns": [
+          {
+            "field": "id",
+            "type": "int"
+          },
+          {
+            "field": "name",
+            "type": "text",
+            "title": "Строка"
+          }
+        ]
+      }
+    }
+  },
+  "styles": {
+    "preset": "default"
+  },
+  "blocks": [
+    {
+      "type": "table",
+      "dataKey": "rows",
+      "span": 12,
+      "title": "Строки из REST",
+      "height": 400,
+      "columns": [
+        {
+          "field": "id",
+          "title": "#",
+          "align": "right"
+        },
+        {
+          "field": "name",
+          "title": "Строка"
+        }
+      ]
+    }
+  ]
+}

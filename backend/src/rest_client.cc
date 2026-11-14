@@ -122,6 +122,11 @@ bool parseRestSpec(const Json::Value &rest, RestSpec &out, std::string &error) {
     out.rowsPath = rest.get("rowsPath", "").asString();
     const Json::Value &page = rest["page"];
     if (page.isObject()) {
+        out.page.mode = page.get("mode", "page").asString();
+        if (out.page.mode != "page" && out.page.mode != "offset") {
+            error = "rest.page.mode: допустимо page или offset";
+            return false;
+        }
         out.page.param = page.get("param", "page").asString();
         out.page.sizeParam = page.get("sizeParam", "limit").asString();
         if (page.isMember("size")) out.page.size = page["size"].asInt();
@@ -362,8 +367,10 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
         if (ctx->spec.page.enabled()) {
             pathWithQuery += first ? '?' : '&';
             first = false;
-            pathWithQuery += urlEncode(ctx->spec.page.param) + "=" +
-                             std::to_string(ctx->spec.page.start + pageIndex);
+            const int pageValue = ctx->spec.page.mode == "offset"
+                                      ? ctx->spec.page.start + pageIndex * ctx->spec.page.size
+                                      : ctx->spec.page.start + pageIndex;
+            pathWithQuery += urlEncode(ctx->spec.page.param) + "=" + std::to_string(pageValue);
             if (!ctx->spec.page.sizeParam.empty()) {
                 pathWithQuery += "&" + urlEncode(ctx->spec.page.sizeParam) + "=" +
                                  std::to_string(ctx->spec.page.size);

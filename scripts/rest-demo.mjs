@@ -46,6 +46,16 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ items, total: all.length, page }))
     return
   }
+  if (url.pathname === '/api/rows-offset') {
+    requests += 1
+    // смещение вместо номера страницы: проверка rest.page.mode = "offset"
+    const offset = Number(url.searchParams.get('offset') || 0)
+    const limit = Number(url.searchParams.get('limit') || 1000)
+    const all = Array.from({ length: 2500 }, (_, i) => ({ id: i + 1, name: 'Строка ' + (i + 1) }))
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ items: all.slice(offset, offset + limit), total: all.length, offset }))
+    return
+  }
   if (url.pathname === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: true }))

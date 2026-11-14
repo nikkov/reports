@@ -1084,6 +1084,25 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             }
             if (hasJoin) {
                 const Json::Value &join = ds["join"];
+                // достижимость по ссылкам join: защита от циклов при цепочках
+                auto reaches = [&root](const std::string &from, const std::string &target) {
+                    std::set<std::string> seen;
+                    std::vector<std::string> stack{from};
+                    while (!stack.empty()) {
+                        const std::string cur = stack.back();
+                        stack.pop_back();
+                        if (!seen.insert(cur).second) continue;
+                        const Json::Value &d = root["datasets"][cur];
+                        if (!d.isObject() || !d.isMember("join")) continue;
+                        for (const char *side : {"left", "right"}) {
+                            const std::string name = asString(d["join"][side]["dataset"]);
+                            if (name.empty()) continue;
+                            if (name == target) return true;
+                            stack.push_back(name);
+                        }
+                    }
+                    return false;
+                };
                 for (const char *side : {"left", "right"}) {
                     const Json::Value &s = join[side];
                     const std::string ref = s.isObject() ? asString(s["dataset"]) : asString(s);
@@ -1094,8 +1113,9 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         addError(r, spath, "набор не может объединяться сам с собой");
                     } else if (!root["datasets"].isMember(ref)) {
                         addError(r, spath, "набор «" + ref + "» не объявлен в datasets");
-                    } else if (root["datasets"][ref].isMember("join")) {
-                        addError(r, spath, "join не может ссылаться на другой join: один уровень");
+                    } else if (reaches(ref, key)) {
+                        // цепочки A⋈B⋈C разрешены, цикл — нет (ADR-108)
+                        addError(r, spath, "цикл объединений: набор ссылается сам на себя через цепочку");
                     }
                 }
                 const Json::Value &cols = join["columns"];
@@ -1118,9 +1138,35 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 const Json::Value &on = join["on"];
                 if (on.isArray()) {
                     for (Json::ArrayIndex i = 0; i < on.size(); ++i) {
-                        if (asString(on[i]["left"]).empty() || asString(on[i]["right"]).empty()) {
+                        const std::string leftCol = asString(on[i]["left"]);
+                        const std::string rightCol = asString(on[i]["right"]);
+                        if (leftCol.empty() || rightCol.empty()) {
                             addError(r, path + ".join.on." + std::to_string(i),
                                      "у пары нужны left и right");
+                            continue;
+                        }
+                        // тип ключа должен совпадать с объявленным типом колонки REST-стороны,
+                        // иначе ключи молча не совпадут (ADR-108)
+                        const std::string keyType = asString(on[i]["type"]).empty()
+                                                        ? "text"
+                                                        : asString(on[i]["type"]);
+                        for (const char *side : {"left", "right"}) {
+                            const std::string ref = asString(join[side]["dataset"]);
+                            const Json::Value &sideDs = root["datasets"][ref];
+                            if (!sideDs.isObject() || !sideDs.isMember("rest")) continue;
+                            const std::string column = std::string(side) == "left" ? leftCol : rightCol;
+                            for (const auto &c : sideDs["rest"]["columns"]) {
+                                const std::string name = asString(c["as"]).empty() ? asString(c["field"])
+                                                                                  : asString(c["as"]);
+                                if (name != column) continue;
+                                const std::string colType =
+                                    asString(c["type"]).empty() ? "text" : asString(c["type"]);
+                                if (colType != keyType) {
+                                    addError(r, path + ".join.on." + std::to_string(i) + "." + side,
+                                             "тип ключа «" + keyType +
+                                                 "» не совпадает с типом колонки «" + colType + "»");
+                                }
+                            }
                         }
                     }
                 }
