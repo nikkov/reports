@@ -194,3 +194,27 @@ describe('Excel: правила условного форматирования 
     expect(cell.font?.color?.argb).not.toBe('FFB42318')
   })
 })
+
+describe('Excel: плоская таблица без группировки', () => {
+  it('структуры и сворачивания строк нет (дефект sales-drill)', async () => {
+    const flatBlock = {
+      type: 'table',
+      title: 'Заказы',
+      columns: [
+        { field: 'region', title: 'Регион' },
+        { field: 'amount', title: 'Сумма', type: 'int' }
+      ]
+    }
+    const flatRows = [
+      { region: 'Север', amount: 10 },
+      { region: 'Юг', amount: 20 }
+    ]
+    const styles = resolveStyles({ styles: { preset: 'default' } }, flatBlock)
+    const blob = await buildWorkbook({ block: flatBlock, rows: flatRows, styles })
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(Buffer.from(await blob.arrayBuffer()))
+    const ws = wb.worksheets[0]
+    expect(levels(ws).every((l) => l === 0)).toBe(true)
+    expect(ws.properties.outlineProperties).toBeUndefined()
+  })
+})

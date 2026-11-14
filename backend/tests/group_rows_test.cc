@@ -202,3 +202,17 @@ TEST_CASE("buildGroupedSheet: плоская таблица без группи�
     // структуры нет: групп не объявляли
     for (int level : sheet.rowLevels) REQUIRE(level == 0);
 }
+
+TEST_CASE("buildGroupedSheet: без групп структуры книги нет (дефект sales-drill)") {
+    auto sheet = sheetWithRows({
+        {"Восток", "Одежда", "10", "1"},
+        {"Юг", "Обувь", "30", "4"},
+    });
+    rep::GroupLayout layout; // групповых колонок нет: плоская таблица
+    layout.measureColumns = {2, 3};
+    layout.grandTotal = true;
+    rep::buildGroupedSheet(sheet, layout);
+
+    // уровни структуры не выставляются вовсе — иначе Excel показывает сворачивание строк
+    for (int lvl : sheet.rowLevels) REQUIRE(lvl == 0);
+}

@@ -2527,6 +2527,27 @@ test('Excel: collapsible: false убирает структуру групп, н
   await expect(page.locator('.rt-table .chev')).toHaveCount(0)
 })
 
+test('Excel: плоская таблица без групп не получает сворачивания (дефект sales-drill)', async ({ page }) => {
+  const levelsOf = async (file) => {
+    const zip = await JSZip.loadAsync(readFileSync(file))
+    const xml = await zip.file('xl/worksheets/sheet1.xml').async('string')
+    return [...xml.matchAll(/outlineLevel="(\d+)"/g)].map((m) => Number(m[1]))
+  }
+
+  await page.goto('/report.html?report=sales-drill')
+  await expect(page.locator('.meta')).toContainText('строк')
+  // на экране группировки нет — шевронов и кнопок сворачивания быть не должно
+  await expect(page.locator('.rt-table .chev')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Свернуть всё|Развернуть всё/ })).toHaveCount(0)
+
+  const [dl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('button.tool', { hasText: 'Excel' }).first().click()
+  ])
+  // и в книге тоже: структуры нет, иначе Excel показывает сворачивание, которого нет на экране
+  expect((await levelsOf(await dl.path())).length).toBe(0)
+})
+
 test('Excel: плоская таблица выгружается целиком, не только шапка и ИТОГО (ADR-95)', async ({ page }) => {
   const sheetOf = async (file) => {
     const zip = await JSZip.loadAsync(readFileSync(file))

@@ -287,11 +287,15 @@ function addSheet(wb, block, rows, styles, name) {
     // outline: детальные строки — внутри групп, подытог группы уровня L — на уровень L.
     // Глубину берём по фактическим подытогам: если подытоги только у верхней группы,
     // детали идут уровнем 1 (а не «висящим» вторым уровнем без родителя).
-    ws.properties.outlineProperties = { summaryBelow: true, summaryRight: false }
     const groupDepth = model.rows.reduce(
       (max, row) => Math.max(max, Array.isArray(row.groupPath) ? row.groupPath.length : 0),
       0
     )
+    // Плоская таблица (групп нет) — структуры нет вовсе: ни outline-свойств, ни уровней.
+    // Иначе Excel включает сворачивание строк, которого на экране нет (дефект sales-drill).
+    if (groupDepth > 0) {
+      ws.properties.outlineProperties = { summaryBelow: true, summaryRight: false }
+    }
     // Вложенность Excel строится по строкам, а не по объединениям: чтобы категория сворачивалась
     // отдельно от региона, первая строка каждой категории остаётся видимой опорой (уровень на 1 меньше),
     // а её детали уходят на уровень глубже. Иначе все детали лежат одним уровнем и Excel даёт
@@ -300,10 +304,14 @@ function addSheet(wb, block, rows, styles, name) {
     model.rows.forEach((row, ri) => {
       let level = 0
       if (row.kind === 'detail') {
-        const key = Array.isArray(row.groupPath) ? row.groupPath.join('\u0001') : ''
-        const anchor = key !== prevGroup
-        prevGroup = key
-        level = groupDepth >= 2 ? groupDepth - (anchor ? 1 : 0) : Math.max(1, groupDepth)
+        // Плоская таблица (групп нет) — структуры в книге быть не должно: иначе Excel
+        // включает сворачивание строк, которого на экране нет.
+        if (groupDepth > 0) {
+          const key = Array.isArray(row.groupPath) ? row.groupPath.join('\u0001') : ''
+          const anchor = key !== prevGroup
+          prevGroup = key
+          level = groupDepth >= 2 ? groupDepth - (anchor ? 1 : 0) : groupDepth
+        }
       } else {
         prevGroup = null
         level = Math.max(0, Number(row.level || 0))
