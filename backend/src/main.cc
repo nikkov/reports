@@ -661,8 +661,10 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
         auto joinSpec = std::make_shared<rep::JoinSpec>(ds.join);
         auto done = std::make_shared<int>(0);
         auto failed = std::make_shared<bool>(false);
-        auto take = [&, done, left, right, joinSpec, onOk, onErr, maxRows](bool isLeft,
-                                                                         const rep::DatasetRows &rows) {
+        // ВАЖНО: только по значению. Колбэк вызывается асинхронно (REST), и захват `&`
+        // оставлял висячие ссылки на локальные переменные — процесс падал в SIGSEGV.
+        auto take = [done, failed, left, right, joinSpec, onOk, onErr, maxRows](
+                        bool isLeft, const rep::DatasetRows &rows) {
             if (*failed) return;
             if (isLeft) *left = rows;
             else *right = rows;
@@ -695,7 +697,7 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
             }
             onOk(joined);
         };
-        auto fail = [&, failed, onErr](int status, const std::string &code, const std::string &msg) {
+        auto fail = [failed, onErr](int status, const std::string &code, const std::string &msg) {
             if (*failed) return;
             *failed = true;
             onErr(status, code, msg);
@@ -780,7 +782,33 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
 
 }  // namespace
 
+#if !defined(_WIN32)
+#include <execinfo.h>
+
+#include <csignal>
+#include <unistd.h>
+
+namespace {
+
+// Диагностика падений: без обработчика процесс умирает молча (лог не успевает сброситься),
+// и причину не видно. Печатаем стек в stderr — по нему ищем место падения.
+void crashHandler(int sig) {
+    void *frames[64];
+    const int n = backtrace(frames, 64);
+    std::fprintf(stderr, "КРИТИЧЕСКАЯ ОШИБКА: сигнал %d, стек:\n", sig);
+    backtrace_symbols_fd(frames, n, STDERR_FILENO);
+    std::fflush(stderr);
+    std::_Exit(128 + sig);
+}
+
+}  // namespace
+#endif
+
 int main() {
+#if !defined(_WIN32)
+    std::signal(SIGSEGV, crashHandler);
+    std::signal(SIGABRT, crashHandler);
+#endif
  #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
@@ -2905,20 +2933,19 @@ int main() {
             }
         }
 
-        // ADR-104: серверный лист собирается из SQL-набора. Для rest/join экспорт пока не
-        // поддержан: сборка листа из DatasetRows приводила к зависанию обработчика — вернёмся
-        // к ней отдельной задачей, а не в релизе.
-        if (rds.kind != "sql") {
-            done(422, "EXPORT_UNSUPPORTED", rep::ExportSheet{},
-                 "серверный экспорт наборов rest/join не поддерживается: используйте Excel или "
-                 "печать из отчёта (данные уже загружены в браузере)");
+        rep::DatasetQuery query;
+        std::string err;
+        if (rds.kind == "sql" && !rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
+            done(422, "INVALID_PARAMS", rep::ExportSheet{}, err);
             return;
         }
 
-        rep::DatasetQuery query;
-        std::string err;
-        if (!rep::compileDataset(datasetSql, datasetParams, bag, query, err)) {
-            done(422, "INVALID_PARAMS", rep::ExportSheet{}, err);
+        // rest/join: сборка листа ещё не доделана (падала из-за захвата ссылок в колбэке;
+        // после исправления лист выходит пустым) — честнее вернуть отказ, чем пустой файл.
+        if (rds.kind != "sql") {
+            done(422, "EXPORT_UNSUPPORTED", rep::ExportSheet{},
+                 "серверный экспорт наборов rest/join пока не поддерживается: используйте Excel или "
+                 "печать из отчёта (данные уже загружены в браузере)");
             return;
         }
 
@@ -2978,13 +3005,60 @@ int main() {
             leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(), numeric, numFmt,
                               aggregated});
         };
-        for (const auto &col : block["columns"]) walk(col);
-
         const std::string sheetTitle = tpl.get("title", "").asString();
         // на экране общий итог включён по умолчанию (ADR-1); в книге — так же
         const bool grandTotal = block.isNull() || block.get("grandTotal", true).asBool();
         // collapsible: false — группы в книге не сворачиваются (ADR-94)
         const bool collapsible = block.isNull() || block.get("collapsible", true).asBool();
+
+        // rest/join-набор (ADR-104): лист из тех же строк, что и таблица на экране.
+        if (rds.kind != "sql") {
+            const auto snapshot = rds.tpl;
+            const std::string dsKey = rds.key;
+            fetchDatasetRows(
+                *snapshot, dsKey, bag, dataDb, connRegistry, restCache, maxRows,
+                [done, leaves, bag, sheetTitle, groupColumns, subtotalLevels, grandTotal,
+                 collapsible, reportId](const rep::DatasetRows &rows) {
+                    std::fprintf(stderr, "export: %s — rows %zu, leaves %zu, cols %zu\n", reportId.c_str(),
+                                 rows.rows.size(), leaves.size(), rows.columns.size());
+                    rep::ExportSheet sheet;
+                    sheet.title = sheetTitle;
+                    for (const auto &leaf : leaves) {
+                        sheet.columns.push_back({leaf.title, leaf.numFmt, leaf.numeric});
+                    }
+                    for (const auto &kv : bag.values()) sheet.params.emplace_back(kv.first, kv.second);
+                    std::map<std::string, size_t> index;
+                    for (size_t i = 0; i < rows.columns.size(); ++i) index[rows.columns[i].name] = i;
+                    for (const auto &row : rows.rows) {
+                        std::vector<std::string> values;
+                        for (const auto &leaf : leaves) {
+                            const auto pos = index.find(leaf.field);
+                            values.push_back(pos == index.end() || pos->second >= row.size()
+                                                 ? std::string()
+                                                 : row[pos->second]);
+                        }
+                        sheet.rows.push_back(std::move(values));
+                    }
+                    if (!(groupColumns.empty() && !grandTotal)) {
+                        rep::GroupLayout layout;
+                        layout.groupColumns = groupColumns;
+                        layout.subtotalLevels = subtotalLevels;
+                        layout.grandTotal = grandTotal;
+                        layout.collapsible = collapsible;
+                        for (std::size_t c = 0; c < leaves.size(); ++c) {
+                            if (leaves[c].aggregated) layout.measureColumns.push_back(c);
+                        }
+                        rep::buildGroupedSheet(sheet, layout);
+                    }
+                    done(200, "", sheet, "");
+                },
+                [done](int status, const std::string &code, const std::string &msg) {
+                    done(status, code, rep::ExportSheet{}, msg);
+                });
+            return;
+        }
+
+
 
         std::string finalSql = query.sql;
         const Json::Value &agg = block["aggregate"];
