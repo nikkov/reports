@@ -19,6 +19,8 @@ static std::string trim(const std::string &s) {
     return s.substr(b, e - b + 1);
 }
 
+// Читает файл .env и применяет его поверх окружения процесса: значения из файла
+// важнее переменных, заданных в оболочке или systemd (ADR-115).
 size_t loadDotEnv(const std::string &path) {
     std::ifstream in(path);
     if (!in) return 0;
@@ -36,19 +38,20 @@ size_t loadDotEnv(const std::string &path) {
         std::string value = trim(t.substr(eq + 1));
         if (key.empty()) continue;
 
-        // Кавычки вокруг значения снимаем, но не перетираем уже заданное окружение.
+        // Кавычки вокруг значения снимаем.
         if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') ||
                                   (value.front() == '\'' && value.back() == '\''))) {
             value = value.substr(1, value.size() - 2);
         }
-        if (std::getenv(key.c_str()) == nullptr) {
+        // Файл .env приоритетнее окружения процесса (ADR-115): значения из файла
+        // перезаписывают переменные, которые уже есть. Так стенд и запуск из оболочки
+        // не расходятся: что записано в .env, то и применяется.
 #ifdef _WIN32
-            _putenv_s(key.c_str(), value.c_str());
+        _putenv_s(key.c_str(), value.c_str());
 #else
-            setenv(key.c_str(), value.c_str(), 0);
+        setenv(key.c_str(), value.c_str(), 1);
 #endif
-            ++loaded;
-        }
+        ++loaded;
     }
     return loaded;
 }

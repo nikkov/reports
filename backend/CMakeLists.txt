@@ -83,6 +83,7 @@ add_executable(rep_tests
   tests/static_web_test.cc
   tests/dataset_test.cc
   tests/join_test.cc
+  tests/env_test.cc
   tests/logging_test.cc
   tests/rest_client_test.cc
   tests/dates_expr_test.cc
