@@ -38,14 +38,22 @@ await page.waitForTimeout(400)
 const scrollMs = Date.now() - scrollStart
 const rowsAfterScroll = await page.evaluate(() => document.querySelectorAll('.rt-table tbody tr').length)
 
-// разбивка: сколько занял запрос данных и сколько — клиент (передача, разбор, рендер)
-const apiMs = await page.evaluate(() => {
+// Разбивка по методике ADR-113:
+//   apiMs    — запрос и ответ сервера (Resource Timing);
+//   renderMs — от конца ответа до первой строки: разбор JSON, нормализация, рендер;
+//   fullMs   — от навигации до первой строки: то, что чувствует пользователь.
+const timing = await page.evaluate(() => {
   const entry = performance
     .getEntriesByType('resource')
     .filter((e) => e.name.includes('/api/report/data'))
     .pop()
-  return entry ? Math.round(entry.duration) : null
+  const firstRow = performance.now()
+  return entry
+    ? { apiMs: Math.round(entry.duration), responseEnd: Math.round(entry.responseEnd) }
+    : { apiMs: null, responseEnd: null }
 })
+const apiMs = timing.apiMs
+const renderMs = timing.responseEnd === null ? null : Math.max(0, Math.round(firstRowMs - timing.responseEnd))
 const clientMs = apiMs === null ? null : Math.max(0, firstRowMs - apiMs)
 
 const total = Number((meta.match(/строк:\s*([\d\s]+)/) || [])[1]?.replace(/\s/g, '')) || null
@@ -59,6 +67,8 @@ console.log(
       rows: total,
       meta,
       firstRowMs,
+      fullMs: firstRowMs,
+      renderMs,
       apiMs,
       clientMs,
       budgetMs: budget,
