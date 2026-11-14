@@ -715,7 +715,7 @@ function checkGaugeZones(block, base, errors) {
           errors.push({ path, message: 'набор не может объединяться сам с собой' })
         } else if (!template.datasets?.[name]) {
           errors.push({ path, message: `набор «${name}» не объявлен в datasets` })
-        } else if (name === key || reaches(key, name, template.datasets)) {
+        } else if (name === key || reaches(name, key, template.datasets)) {
           // цепочки A⋈B⋈C разрешены, цикл — нет
           errors.push({ path, message: 'цикл объединений: набор ссылается сам на себя через цепочку' })
         }

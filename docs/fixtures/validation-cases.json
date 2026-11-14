@@ -3854,6 +3854,276 @@
       "errors": [
         "datasets.rows.rest.page.maxPages"
       ]
+    },
+    {
+      "name": "цепочка объединений без цикла",
+      "template": {
+        "version": 2,
+        "id": "parity-cycle",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "regions": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/regions",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "id",
+                  "type": "int"
+                },
+                {
+                  "field": "name",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "orders": {
+            "sql": "SELECT region_id, amount FROM t"
+          },
+          "first": {
+            "join": {
+              "left": {
+                "dataset": "orders"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "region_name",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "second": {
+            "join": {
+              "left": {
+                "dataset": "first"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "region_name2",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "regions",
+            "columns": [
+              {
+                "field": "id",
+                "title": "#"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "цикл объединений",
+      "template": {
+        "version": 2,
+        "id": "parity-cycle",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "regions": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/regions",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "id",
+                  "type": "int"
+                },
+                {
+                  "field": "name",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "orders": {
+            "sql": "SELECT region_id, amount FROM t"
+          },
+          "a": {
+            "join": {
+              "left": {
+                "dataset": "b"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "x",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "b": {
+            "join": {
+              "left": {
+                "dataset": "a"
+              },
+              "right": {
+                "dataset": "orders"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "region_id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "amount",
+                  "type": "int"
+                }
+              ]
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "regions",
+            "columns": [
+              {
+                "field": "id",
+                "title": "#"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.a.join.left.dataset",
+        "datasets.b.join.left.dataset"
+      ]
+    },
+    {
+      "name": "тип ключа не совпадает с колонкой REST",
+      "template": {
+        "version": 2,
+        "id": "parity-cycle",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "regions": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/regions",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "id",
+                  "type": "int"
+                },
+                {
+                  "field": "name",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "orders": {
+            "sql": "SELECT region_id, amount FROM t"
+          },
+          "m": {
+            "join": {
+              "left": {
+                "dataset": "orders"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "text"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "region_name",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "regions",
+            "columns": [
+              {
+                "field": "id",
+                "title": "#"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.m.join.on.0.right"
+      ]
     }
   ]
 }
