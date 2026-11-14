@@ -2940,15 +2940,6 @@ int main() {
             return;
         }
 
-        // rest/join: сборка листа ещё не доделана (падала из-за захвата ссылок в колбэке;
-        // после исправления лист выходит пустым) — честнее вернуть отказ, чем пустой файл.
-        if (rds.kind != "sql") {
-            done(422, "EXPORT_UNSUPPORTED", rep::ExportSheet{},
-                 "серверный экспорт наборов rest/join пока не поддерживается: используйте Excel или "
-                 "печать из отчёта (данные уже загружены в браузере)");
-            return;
-        }
-
         Json::Value tpl;
         if (!raw.empty()) {
             Json::CharReaderBuilder reader;
@@ -3010,6 +3001,8 @@ int main() {
         const bool grandTotal = block.isNull() || block.get("grandTotal", true).asBool();
         // collapsible: false — группы в книге не сворачиваются (ADR-94)
         const bool collapsible = block.isNull() || block.get("collapsible", true).asBool();
+        // листья блока — общие для SQL- и join-пути (были потеряны при правках, лист выходил пустым)
+        for (const auto &col : block["columns"]) walk(col);
 
         // rest/join-набор (ADR-104): лист из тех же строк, что и таблица на экране.
         if (rds.kind != "sql") {
