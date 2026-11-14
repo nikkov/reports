@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <sstream>
 
+#include <cstdio>
+
 #include <drogon/HttpClient.h>
 
 #include "env.h"
@@ -318,6 +320,9 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
     if (cache.get(cacheKey, cached)) {
         DatasetRows rows;
         if (parseRestRows(cached, spec, rows, error)) {
+            // stderr без буферизации: логи видны сразу, даже если stdout перенаправлен в файл
+            std::fprintf(stderr, "rest: %s%s — кеш (hit), строк %zu\n", host.c_str(),
+                         pathWithQuery.c_str(), rows.rows.size());
             onOk(rows);
             return;
         }
@@ -332,10 +337,18 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
 
     const double timeoutSec = std::max(1, conn.timeoutMs) / 1000.0;
     const size_t maxBytes = static_cast<size_t>(std::stoul(envOr("REP_REST_MAX_BYTES", "5242880")));
+    const auto started = std::chrono::steady_clock::now();
+    std::fprintf(stderr, "rest: %s%s — запрос (miss)\n", host.c_str(), pathWithQuery.c_str());
     client->sendRequest(
         req,
-        [spec, cacheKey, &cache, maxBytes, onOk, onErr, conn](drogon::ReqResult result,
-                                                              const drogon::HttpResponsePtr &resp) {
+        [spec, cacheKey, &cache, maxBytes, onOk, onErr, conn, started, host,
+         pathWithQuery](drogon::ReqResult result, const drogon::HttpResponsePtr &resp) {
+            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - started)
+                                .count();
+            const int statusForLog = resp ? static_cast<int>(resp->statusCode()) : 0;
+            std::fprintf(stderr, "rest: %s%s — ответ %d, %lld мс\n", host.c_str(), pathWithQuery.c_str(),
+                         statusForLog, static_cast<long long>(ms));
             if (result != drogon::ReqResult::Ok || !resp) {
                 if (result == drogon::ReqResult::Timeout) {
                     onErr("REST_TIMEOUT", "источник " + conn.key + ": превышен таймаут " +
