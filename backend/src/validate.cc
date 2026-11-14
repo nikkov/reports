@@ -1,5 +1,7 @@
 #include "validate.h"
 
+#include <functional>
+
 #include "dates_expr.h"
 #include "template_migrate.h"
 
@@ -11,6 +13,9 @@
 #include <sstream>
 
 namespace rep {
+
+// Ограничение глубины цепочки объединений (ADR-111), совпадает с клиентом.
+static constexpr int kMaxJoinDepth = 8;
 namespace {
 
 bool isParamName(const std::string &s) {
@@ -1117,6 +1122,28 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         // цепочки A⋈B⋈C разрешены, цикл — нет (ADR-108)
                         addError(r, spath, "цикл объединений: набор ссылается сам на себя через цепочку");
                     }
+                }
+                // глубина цепочки: A⋈B⋈C разрешены, но не безгранично (ADR-111)
+                std::function<int(const std::string &, std::set<std::string>)> depthOf =
+                    [&root, &depthOf](const std::string &name, std::set<std::string> seen) -> int {
+                    if (name.empty() || seen.count(name)) return 0;
+                    const Json::Value &nested = root["datasets"][name];
+                    if (!nested.isObject() || !nested.isMember("join")) return 1;
+                    seen.insert(name);
+                    const Json::Value &j = nested["join"];
+                    int best = 0;
+                    for (const char *side : {"left", "right"}) {
+                        const Json::Value &sv = j[side];
+                        const std::string ref = sv.isObject() ? asString(sv["dataset"]) : asString(sv);
+                        best = std::max(best, depthOf(ref, seen));
+                    }
+                    return 1 + best;
+                };
+                const int chainDepth = depthOf(key, {});
+                if (chainDepth > kMaxJoinDepth) {
+                    addError(r, path + ".join",
+                             "глубина цепочки объединений " + std::to_string(chainDepth) +
+                                 " больше допустимой " + std::to_string(kMaxJoinDepth));
                 }
                 const Json::Value &cols = join["columns"];
                 std::set<std::string> asNames;

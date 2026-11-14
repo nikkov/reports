@@ -163,24 +163,26 @@ export const api = {
   deleteAccessRole: (id) => request(`/api/admin/access-roles/${id}`, { method: 'DELETE' }),
 
   // журнал действий (ADR-52)
-  audit: ({ action = '', actor = '', from = '', to = '', limit = 50, offset = 0 } = {}) => {
+  audit: ({ action = '', actor = '', from = '', to = '', level = '', limit = 50, offset = 0 } = {}) => {
     const qs = new URLSearchParams()
     if (action) qs.set('action', action)
     if (actor) qs.set('actor', actor)
     if (from) qs.set('from', from)
     if (to) qs.set('to', to)
+    if (level) qs.set('level', level)
     qs.set('limit', String(limit))
     qs.set('offset', String(offset))
     return request(`/api/admin/audit?${qs.toString()}`)
   },
 
   // выгрузка журнала (ADR-67): те же фильтры, что у списка
-  auditExportUrl: ({ action = '', actor = '', from = '', to = '', excel = false } = {}) => {
+  auditExportUrl: ({ action = '', actor = '', from = '', to = '', level = '', excel = false } = {}) => {
     const qs = new URLSearchParams()
     if (action) qs.set('action', action)
     if (actor) qs.set('actor', actor)
     if (from) qs.set('from', from)
     if (to) qs.set('to', to)
+    if (level) qs.set('level', level)
     if (excel) qs.set('excel', '1')
     return `${API_BASE}/api/admin/audit/export.csv?${qs.toString()}`
   },

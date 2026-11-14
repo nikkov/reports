@@ -905,6 +905,22 @@ int main() {
     // Минимальный уровень записи (REP_LOG_LEVEL, по умолчанию info)
     rep::log::setMinLevel(rep::log::parseLevel(rep::envOr("REP_LOG_LEVEL", "info")));
 
+    // Файловый приёмник (REP_LOG_FILE): JSON-строки, отдельный порог и ротация по размеру
+    {
+        const std::string logFile = rep::envOr("REP_LOG_FILE", "");
+        if (!logFile.empty()) {
+            std::size_t maxBytes = 10u * 1024 * 1024;
+            try {
+                const std::string raw = rep::envOr("REP_LOG_FILE_MAX_BYTES", "10485760");
+                if (!raw.empty()) maxBytes = static_cast<std::size_t>(std::stoull(raw));
+            } catch (...) {
+            }
+            rep::log::setFile(logFile,
+                              rep::log::parseLevel(rep::envOr("REP_LOG_FILE_LEVEL", "debug")),
+                              maxBytes);
+        }
+    }
+
     // Приёмник логов (ADR-109): каждое событие rep::log::event пишется в журнал аудита.
     // object_type = "log", object_id — из контекста (reportId/id), ip пока не передаётся.
     rep::log::setSink([](const rep::log::Event &e, const std::string &ts) {
@@ -3334,6 +3350,8 @@ int main() {
                         user = req->attributes()->get<std::string>("session_login");
                     }
                     Json::Value ctx(Json::objectValue);
+                    ctx["object_type"] = "report";
+                    ctx["object_id"] = reportId;
                     ctx["reportId"] = reportId;
                     ctx["format"] = "xlsx";
                     ctx["bytes"] = static_cast<Json::UInt64>(bytes.size());
@@ -4197,7 +4215,8 @@ int main() {
             const std::string offsetText = req->getParameter("offset").empty() ? "0" : req->getParameter("offset");
             const std::string action = req->getParameter("action");
             const std::string actor = req->getParameter("actor");
-            const std::string from = req->getParameter("from");
+                        const std::string level = req->getParameter("level");
+const std::string from = req->getParameter("from");
             const std::string to = req->getParameter("to");
             const auto isDate = [](const std::string &s) {
                 return s.size() == 10 && s[4] == '-' && s[7] == '-' &&
@@ -4213,16 +4232,18 @@ int main() {
             }
 
             const char *values[] = {limitText.c_str(), offsetText.c_str(), action.c_str(), actor.c_str(),
-                                    from.c_str(), to.c_str()};
+                                    from.c_str(), to.c_str(), level.c_str()};
             PGresult *res = PQexecParams(
                 conn,
                 "SELECT id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), actor, action,"
-                " object_type, object_id, details::text, coalesce(ip, ''), count(*) OVER ()"
+                " object_type, object_id, details::text, coalesce(ip, ''), coalesce(details->>'level', ''),"
+                " count(*) OVER ()"
                 " FROM audit_log"
                 " WHERE ($3 = '' OR action = $3) AND ($4 = '' OR actor = $4)"
                 "   AND ($5 = '' OR at >= $5::date) AND ($6 = '' OR at < ($6::date + 1))"
+                "   AND ($7 = '' OR details->>'level' = $7)"
                 " ORDER BY at DESC, id DESC LIMIT LEAST($1::int, 200) OFFSET $2::int",
-                6, nullptr, values, nullptr, nullptr, 0);
+                7, nullptr, values, nullptr, nullptr, 0);
             if (PQresultStatus(res) != PGRES_TUPLES_OK) {
                 const std::string msg = PQerrorMessage(conn);
                 PQclear(res);
@@ -4248,7 +4269,8 @@ int main() {
                 Json::parseFromStream(reader, in, &details, &errs);
                 item["details"] = details;
                 item["ip"] = PQgetvalue(res, i, 7);
-                total = std::stol(PQgetvalue(res, i, 8));
+                item["level"] = PQgetvalue(res, i, 8);
+                total = std::stol(PQgetvalue(res, i, 9));
                 items.append(item);
             }
             PQclear(res);
@@ -4775,6 +4797,8 @@ int main() {
                     // действие пользователя: отчёт открыт (ADR-109)
                     const std::string &user = actor;
                     Json::Value ctx(Json::objectValue);
+                    ctx["object_type"] = "report";
+                    ctx["object_id"] = reportId;
                     ctx["reportId"] = reportId;
                     ctx["dataset"] = datasetKey;
                     ctx["rows"] = static_cast<Json::UInt64>(rows.rows.size());

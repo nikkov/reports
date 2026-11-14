@@ -15,6 +15,13 @@
         </select>
       </label>
       <label>
+        Уровень
+        <select v-model="level" @change="reload">
+          <option value="">любой</option>
+          <option v-for="l in levels" :key="l" :value="l">{{ l }}</option>
+        </select>
+      </label>
+      <label>
         Пользователь
         <input v-model="actor" placeholder="admin, system…" @input="onActorInput" />
       </label>
@@ -39,6 +46,7 @@
         <tr>
           <th>Когда</th>
           <th>Кто</th>
+          <th>Уровень</th>
           <th>Действие</th>
           <th>Объект</th>
           <th>Детали</th>
@@ -49,6 +57,7 @@
         <tr v-for="row in items" :key="row.id" :data-audit="row.action">
           <td class="small">{{ formatDate(row.at) }}</td>
           <td><b>{{ row.actor }}</b></td>
+          <td><span class="lvl" :class="`lvl-${row.level || 'info'}`">{{ row.level || '—' }}</span></td>
           <td><code>{{ row.action }}</code></td>
           <td class="small">{{ row.objectType }} · {{ row.objectId }}</td>
           <td class="small details">{{ details(row.details) }}</td>
@@ -73,6 +82,8 @@ import { api } from '../api/client.js'
 const items = ref([])
 const total = ref(0)
 const action = ref('')
+const level = ref('')
+const levels = ['trace', 'debug', 'info', 'warning', 'error']
 const actor = ref('')
 const from = ref('')
 const to = ref('')
@@ -115,6 +126,7 @@ function details(value) {
 function exportUrl(excel) {
   return api.auditExportUrl({
     action: action.value,
+    level: level.value,
     actor: actor.value.trim(),
     from: from.value,
     to: to.value,
@@ -128,6 +140,7 @@ async function fetchPage(offset) {
   try {
     const page = await api.audit({
       action: action.value,
+      level: level.value,
       actor: actor.value.trim(),
       from: from.value,
       to: to.value,
@@ -180,6 +193,26 @@ h1 {
 }
 .err {
   color: #b3261e;
+}
+.lvl {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #eef1f5;
+  color: #3a4552;
+}
+.lvl-warning {
+  background: #fdf1d8;
+  color: #7a5a12;
+}
+.lvl-error {
+  background: #fbe3e1;
+  color: #8c1f1f;
+}
+.lvl-trace,
+.lvl-debug {
+  background: #e8eefb;
+  color: #334d80;
 }
 .filters {
   display: flex;

@@ -2986,3 +2986,20 @@ test('постраничный REST: набор собирает страниц�
   await expect(page.locator('.meta')).toContainText('строк: 2500')
   await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
 })
+
+// ADR-111: offset-режим пагинации — значение = start + страница × size.
+test('постраничный REST в режиме offset: страницы идут по смещению (ADR-111)', async ({ page, request }) => {
+  const res = await request.post('/api/report/data', {
+    data: { reportId: 'crm-paged-offset', dataset: 'rows', params: {} }
+  })
+  expect(res.ok()).toBeTruthy()
+  const body = await res.json()
+  // 2500 записей при size=1000 и start=0: offset=0, 1000, 2000
+  expect(body.rowCount).toBe(2500)
+  expect(body.rows[0].id).toBe(1)
+  expect(body.rows.at(-1).id).toBe(2500)
+
+  await page.goto('/report.html?report=crm-paged-offset')
+  await expect(page.locator('.meta')).toContainText('строк: 2500')
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
+})

@@ -4124,6 +4124,274 @@
       "errors": [
         "datasets.m.join.on.0.right"
       ]
+    },
+    {
+      "name": "глубина цепочки объединений больше допустимой",
+      "template": {
+        "version": 2,
+        "id": "parity-depth",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "regions": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/regions",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "id",
+                  "type": "int"
+                },
+                {
+                  "field": "name",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "orders": {
+            "sql": "SELECT region_id, amount FROM t"
+          },
+          "chain1": {
+            "join": {
+              "left": {
+                "dataset": "orders"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n1",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "chain2": {
+            "join": {
+              "left": {
+                "dataset": "chain1"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n2",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "chain3": {
+            "join": {
+              "left": {
+                "dataset": "chain2"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n3",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "chain4": {
+            "join": {
+              "left": {
+                "dataset": "chain3"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n4",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "chain5": {
+            "join": {
+              "left": {
+                "dataset": "chain4"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n5",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "chain6": {
+            "join": {
+              "left": {
+                "dataset": "chain5"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n6",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "chain7": {
+            "join": {
+              "left": {
+                "dataset": "chain6"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n7",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "chain8": {
+            "join": {
+              "left": {
+                "dataset": "chain7"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n8",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "chain9": {
+            "join": {
+              "left": {
+                "dataset": "chain8"
+              },
+              "right": {
+                "dataset": "regions"
+              },
+              "on": [
+                {
+                  "left": "region_id",
+                  "right": "id",
+                  "type": "int"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "name",
+                  "as": "n9",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "regions",
+            "columns": [
+              {
+                "field": "id",
+                "title": "#"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.chain8.join",
+        "datasets.chain9.join"
+      ]
     }
   ]
 }

@@ -266,6 +266,10 @@ function reaches(from, target, datasets) {
   return false
 }
 
+// Глубина цепочки объединений ограничена: длинная цепь не даёт ни выигрыша,
+// ни предсказуемого времени выполнения (ADR-111).
+export const MAX_JOIN_DEPTH = 8
+
 export function validateTemplate(template) {
   const errors = []
   const warnings = []
@@ -719,6 +723,25 @@ function checkGaugeZones(block, base, errors) {
           // цепочки A⋈B⋈C разрешены, цикл — нет
           errors.push({ path, message: 'цикл объединений: набор ссылается сам на себя через цепочку' })
         }
+      }
+      // глубина цепочки: A⋈B⋈C разрешены, но не безгранично (ADR-111)
+      const depthOf = (name, seen) => {
+        if (!name || seen.has(name)) return 0
+        const nested = template.datasets?.[name]
+        if (!nested?.join) return 1
+        const nextSeen = new Set(seen)
+        nextSeen.add(name)
+        const left = typeof nested.join.left === 'string' ? nested.join.left : nested.join.left?.dataset
+        const right =
+          typeof nested.join.right === 'string' ? nested.join.right : nested.join.right?.dataset
+        return 1 + Math.max(depthOf(left, nextSeen), depthOf(right, nextSeen))
+      }
+      const depth = depthOf(key, new Set())
+      if (depth > MAX_JOIN_DEPTH) {
+        errors.push({
+          path: `datasets.${key}.join`,
+          message: `глубина цепочки объединений ${depth} больше допустимой ${MAX_JOIN_DEPTH}`
+        })
       }
       const asNames = new Set()
       for (const [ci, col] of (join.columns || []).entries()) {

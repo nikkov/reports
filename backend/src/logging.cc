@@ -3,7 +3,9 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <fstream>
 #include <mutex>
+#include <string>
 
 namespace rep {
 namespace log {
@@ -23,6 +25,52 @@ Sink &sinkRef() {
 std::mutex &writeMutex() {
     static std::mutex m;
     return m;
+}
+
+// --- файловый приёмник -----------------------------------------------------
+std::mutex &fileMutex() {
+    static std::mutex m;
+    return m;
+}
+std::ofstream &fileRef() {
+    static std::ofstream file;
+    return file;
+}
+std::string &filePathRef() {
+    static std::string path;
+    return path;
+}
+Level &fileLevelRef() {
+    static Level level = Level::Debug;
+    return level;
+}
+std::size_t &fileMaxRef() {
+    static std::size_t max = 10u * 1024 * 1024;
+    return max;
+}
+std::size_t &fileBytesRef() {
+    static std::size_t bytes = 0;
+    return bytes;
+}
+bool &fileOnRef() {
+    static bool on = false;
+    return on;
+}
+
+void writeToFile(const std::string &line) {
+    std::lock_guard<std::mutex> lock(fileMutex());
+    if (!fileOnRef()) return;
+    if (fileBytesRef() + line.size() + 1 > fileMaxRef()) {
+        // ротация: текущий файл уходит в <path>.1, запись начинается заново
+        fileRef().close();
+        const std::string path = filePathRef();
+        std::rename(path.c_str(), (path + ".1").c_str());
+        fileRef().open(path, std::ios::app);
+        fileBytesRef() = 0;
+    }
+    fileRef() << line << '\n';
+    fileRef().flush();
+    fileBytesRef() += line.size() + 1;
 }
 
 } // namespace
@@ -84,6 +132,31 @@ std::mutex &minLevelMutex() {
     return m;
 }
 } // namespace
+
+void setFile(const std::string &path, Level level, std::size_t maxBytes) {
+    std::lock_guard<std::mutex> lock(fileMutex());
+    if (fileRef().is_open()) fileRef().close();
+    fileOnRef() = false;
+    if (path.empty()) return;
+    fileRef().open(path, std::ios::app);
+    if (!fileRef().is_open()) {
+        std::fprintf(stderr, "logging: не удалось открыть файл журнала %s\n", path.c_str());
+        return;
+    }
+    filePathRef() = path;
+    fileLevelRef() = level;
+    fileMaxRef() = maxBytes;
+    fileRef().seekp(0, std::ios::end);
+    const auto size = static_cast<std::size_t>(fileRef().tellp());
+    fileBytesRef() = size < 0 ? 0 : size;
+    fileOnRef() = true;
+}
+
+void closeFile() {
+    std::lock_guard<std::mutex> lock(fileMutex());
+    if (fileRef().is_open()) fileRef().close();
+    fileOnRef() = false;
+}
 
 void setMinLevel(Level level) {
     std::lock_guard<std::mutex> lock(minLevelMutex());
@@ -153,6 +226,11 @@ void event(Level level, Action action, const std::string &user, const std::strin
         std::fprintf(stdout, "%s\n", json.c_str());
         std::fflush(stdout);
     }
+    const bool toFile = [level] {
+        std::lock_guard<std::mutex> lock(fileMutex());
+        return fileOnRef() && static_cast<int>(level) >= static_cast<int>(fileLevelRef());
+    }();
+    if (toFile) writeToFile(json);
     // Приёмник читаем под замком, вызываем без него: sink может ходить в БД,
     // и держать мьютекс логгера на время сети нельзя.
     const Sink target = sink();

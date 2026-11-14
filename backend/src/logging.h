@@ -52,6 +52,11 @@ const char *levelName(Level level);   // "trace" | "debug" | "info" | "warning" 
 // Разбор уровня из настройки (REP_LOG_LEVEL); неизвестное значение — info.
 Level parseLevel(const std::string &name);
 
+// Файловый приёмник (REP_LOG_FILE): JSON-строки, дописывание, ротация по размеру.
+// Пустой путь выключает файл. Уровень файла задаётся отдельно (REP_LOG_FILE_LEVEL).
+void setFile(const std::string &path, Level level, std::size_t maxBytes = 10u * 1024 * 1024);
+void closeFile();
+
 // Минимальный уровень для записи (REP_LOG_LEVEL, по умолчанию info).
 void setMinLevel(Level level);
 Level minLevel();
