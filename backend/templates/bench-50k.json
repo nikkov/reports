@@ -1,0 +1,57 @@
+{
+  "version": 2,
+  "id": "bench-50k",
+  "title": "Замер: 50 000 строк",
+  "description": "Бенчмарк виртуализации: вся таблица sales без фильтров и агрегации.",
+  "datasets": {
+    "sales": {
+      "sql": "SELECT id, order_date, region, category, product, amount, qty, profit FROM reports_examples.sales ORDER BY id"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Замер рендера: 50 000 строк без агрегации. Бюджет DoD — до интерактивности не больше 2 с."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "columns": [
+        {
+          "field": "id",
+          "title": "#"
+        },
+        {
+          "field": "order_date",
+          "title": "Дата"
+        },
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "product",
+          "title": "Товар"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "format": "currency"
+        },
+        {
+          "field": "qty",
+          "title": "Кол-во"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "format": "currency"
+        }
+      ]
+    }
+  ]
+}

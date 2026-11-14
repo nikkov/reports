@@ -1,7 +1,7 @@
 {
   "name": "rep-frontend",
   "private": true,
-  "version": "2.6.1",
+  "version": "2.7.0",
   "type": "module",
   "scripts": {
     "build": "vite build",
@@ -10,6 +10,7 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "golden": "node scripts/golden.mjs",
+    "bench": "node scripts/bench-render.mjs",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
