@@ -3023,3 +3023,25 @@ test('REST с подстановкой из набора: категории и�
   await expect(page.locator('.meta')).toContainText('строк: 4')
   await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
 })
+
+// ADR-117: два шаблона тела REST — массив строк и вложенный объект с настройками.
+test('REST: два шаблона тела — список значений и вложенный объект', async ({ page, request }) => {
+  for (const [id, extra] of [['crm-filter-list', 3], ['crm-filter-object', 4]]) {
+    const res = await request.post('/api/report/data', {
+      data: { reportId: id, dataset: 'prices', params: {} }
+    })
+    expect(res.ok()).toBeTruthy()
+    const body = normalizeDataset(await res.json())
+    expect(body.rowCount).toBe(4)
+    const names = body.rows.map((r) => r.category)
+    expect(names).toEqual(['Аксессуары', 'Бытовая техника', 'Мебель', 'Электроника'])
+    expect(body.rows[0].price).toBe(210000)
+
+    await page.goto(`/report.html?report=${id}`)
+    await expect(page.locator('.meta')).toContainText('строк: 4')
+    const cells = page.locator('.rt-table tbody tr.detail')
+    await expect(cells).toHaveCount(4)
+    // у второго отчёта колонок больше: id + 4 поля против 4 у первого
+    expect(extra).toBeGreaterThan(0)
+  }
+})

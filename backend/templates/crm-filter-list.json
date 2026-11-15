@@ -1,0 +1,101 @@
+{
+  "version": 2,
+  "id": "crm-filter-list",
+  "title": "Цены: фильтр списком значений",
+  "description": "Тело POST собирается из массива имён категорий (плейсхолдер-скаляр в массиве).",
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    },
+    "crm": {
+      "kind": "rest",
+      "baseUrl": "${CRM_BASE_URL}",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "timeoutMs": 5000,
+      "cacheSeconds": 30
+    }
+  },
+  "datasets": {
+    "categories": {
+      "connection": "main",
+      "sql": "SELECT DISTINCT category FROM reports_examples.sales ORDER BY category LIMIT 4"
+    },
+    "prices": {
+      "connection": "crm",
+      "rest": {
+        "method": "POST",
+        "path": "/api/prices",
+        "body": {
+          "filter": {
+            "categories": [
+              "$categories.category"
+            ]
+          }
+        },
+        "rowsPath": "items",
+        "columns": [
+          {
+            "field": "category_id",
+            "type": "int",
+            "title": "id"
+          },
+          {
+            "field": "category",
+            "type": "text",
+            "title": "Категория"
+          },
+          {
+            "field": "price",
+            "type": "int",
+            "title": "Цена"
+          },
+          {
+            "field": "currency",
+            "type": "text",
+            "title": "Валюта"
+          }
+        ],
+        "dependsOn": [
+          "categories"
+        ]
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Шаблон тела: {\"filter\":{\"categories\":[\"$categories.category\"]}} — массив строк, разворачивается по строкам набора."
+    },
+    {
+      "type": "table",
+      "dataKey": "prices",
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "price",
+          "title": "Цена",
+          "format": "currency"
+        },
+        {
+          "field": "currency",
+          "title": "Валюта"
+        }
+      ],
+      "grandTotal": false
+    }
+  ]
+}
