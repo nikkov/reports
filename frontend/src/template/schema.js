@@ -297,12 +297,38 @@ export default {
           "pattern": "^/",
           "description": "путь запроса относительно baseUrl источника"
         },
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ],
+          "description": "метод запроса; по умолчанию GET (ADR-117)"
+        },
         "query": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
           },
-          "description": "query-параметры запроса (литералы)"
+          "description": "query-параметры запроса: литералы или плейсхолдеры $набор.колонка (ADR-117)"
+        },
+        "body": {
+          "description": "шаблон тела POST: произвольный JSON с плейсхолдерами $набор.колонка (ADR-117)"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "доп. заголовки набора: значения могут содержать плейсхолдеры $набор.колонка (ADR-118)"
+        },
+        "dependsOn": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "наборы, из которых берутся значения для query/body (ADR-117)"
         },
         "rowsPath": {
           "type": "string",

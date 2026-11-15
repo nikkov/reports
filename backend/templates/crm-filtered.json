@@ -1,0 +1,112 @@
+{
+  "version": 2,
+  "id": "crm-filtered",
+  "title": "Цены по категориям: SQL → REST",
+  "description": "Категории берутся из БД, тело REST-запроса собирается подстановкой $набор.колонка (ADR-117).",
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    },
+    "crm": {
+      "kind": "rest",
+      "baseUrl": "${CRM_BASE_URL}",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "timeoutMs": 5000,
+      "cacheSeconds": 30
+    }
+  },
+  "datasets": {
+    "categories": {
+      "connection": "main",
+      "sql": "SELECT (row_number() OVER (ORDER BY category))::int AS id_category, category FROM (SELECT DISTINCT category FROM reports_examples.sales) t ORDER BY category LIMIT 4"
+    },
+    "prices": {
+      "connection": "crm",
+      "rest": {
+        "method": "POST",
+        "path": "/api/prices",
+        "body": {
+          "filter": {
+            "categories": [
+              {
+                "id_category": "$categories.id_category",
+                "name": "$categories.category"
+              }
+            ]
+          }
+        },
+        "rowsPath": "items",
+        "columns": [
+          {
+            "field": "category_id",
+            "type": "int",
+            "title": "id"
+          },
+          {
+            "field": "category",
+            "type": "text",
+            "title": "Категория"
+          },
+          {
+            "field": "price",
+            "type": "int",
+            "title": "Цена"
+          },
+          {
+            "field": "currency",
+            "type": "text",
+            "title": "Валюта"
+          },
+          {
+            "field": "updated",
+            "type": "date",
+            "title": "Обновлено"
+          }
+        ],
+        "dependsOn": [
+          "categories"
+        ]
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Категории выбираются из PostgreSQL, затем по ним запрашиваются цены в REST (POST, тело с подстановкой)."
+    },
+    {
+      "type": "table",
+      "dataKey": "prices",
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "price",
+          "title": "Цена",
+          "format": "currency"
+        },
+        {
+          "field": "currency",
+          "title": "Валюта"
+        },
+        {
+          "field": "updated",
+          "title": "Обновлено"
+        }
+      ]
+    }
+  ]
+}

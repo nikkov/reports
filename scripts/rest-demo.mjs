@@ -18,8 +18,102 @@ const regions = [
 ]
 
 let requests = 0 // счётчик обращений: по нему e2e проверяет кеш REST (ADR-104)
-const server = http.createServer((req, res) => {
+// Цены по категориям: POST с телом-фильтром (ADR-117). Категории приходят из другого
+// набора (SQL), шаблон тела собирает сервер отчётов подстановкой $набор.колонка.
+const prices = {
+  'Электроника': { id: 1, price: 125000, currency: 'RUB', updated: '2026-11-01' },
+  'Бытовая техника': { id: 2, price: 89000, currency: 'RUB', updated: '2026-11-01' },
+  'Мебель': { id: 3, price: 43000, currency: 'RUB', updated: '2026-11-01' },
+  'Аксессуары': { id: 4, price: 210000, currency: 'RUB', updated: '2026-11-01' }
+}
+
+function readJson(req) {
+  return new Promise((resolve) => {
+    let raw = ''
+    req.on('data', (chunk) => {
+      raw += chunk
+      if (raw.length > 1_000_000) req.destroy()
+    })
+    req.on('end', () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {})
+      } catch {
+        resolve(null)
+      }
+    })
+  })
+}
+
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`)
+  // GET с категорией в пути (ADR-118): проверка плейсхолдера в path и заголовка набора
+  if (url.pathname.startsWith('/api/prices/')) {
+    // путь может прийти как есть, urlencode или дважды закодированным — разбираем все варианты
+    const rawName = url.pathname.split('/').pop()
+    let category = rawName
+    for (let i = 0; i < 2; i += 1) {
+      try {
+        const decoded = decodeURIComponent(category)
+        if (decoded === category) break
+        category = decoded
+      } catch {
+        break
+      }
+    }
+    const row = prices[category]
+    if (!row) {
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: 'unknown category', category }))
+      return
+    }
+    requests += 1
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(
+      JSON.stringify({
+        items: [
+          {
+            category_id: row.id,
+            category,
+            price: row.price,
+            currency: row.currency,
+            tenant: req.headers['x-tenant'] || ''
+          }
+        ],
+        total: 1
+      })
+    )
+    return
+  }
+  if (url.pathname === '/api/prices' && req.method === 'POST') {
+    const body = await readJson(req)
+    if (!body) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: 'bad json' }))
+      return
+    }
+    requests += 1
+    // фильтр: { filter: { categories: [ { id_category: 1, name: "Север" } ] } }
+    const filter = body?.filter?.categories
+    const items = []
+    if (Array.isArray(filter)) {
+      for (const item of filter) {
+        // принимаем и объект {id_category, name}, и просто имя категории
+        const name = typeof item === 'object' && item !== null ? item.name : String(item)
+        const row = prices[name]
+        if (!row) continue
+        items.push({
+          category_id: row.id,
+          category: name,
+          price: row.price,
+          currency: row.currency,
+          updated: row.updated
+        })
+      }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ items, total: items.length, echo: body }))
+    return
+  }
   if (url.pathname === '/api/_stats') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ requests }))

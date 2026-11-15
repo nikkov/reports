@@ -4392,6 +4392,342 @@
         "datasets.chain8.join",
         "datasets.chain9.join"
       ]
+    },
+    {
+      "name": "REST: подстановка из набора в теле POST",
+      "template": {
+        "version": 2,
+        "id": "parity-117",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "cats": {
+            "sql": "SELECT id, name FROM t"
+          },
+          "crm": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/prices",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "category",
+                  "type": "text"
+                },
+                {
+                  "field": "price",
+                  "type": "int"
+                }
+              ],
+              "method": "POST",
+              "dependsOn": [
+                "cats"
+              ],
+              "body": {
+                "filter": {
+                  "categories": [
+                    {
+                      "id": "$cats.id",
+                      "name": "$cats.name"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "crm",
+            "columns": [
+              {
+                "field": "category",
+                "title": "Категория"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "REST: плейсхолдер набора не в dependsOn",
+      "template": {
+        "version": 2,
+        "id": "parity-117",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "cats": {
+            "sql": "SELECT id, name FROM t"
+          },
+          "crm": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/prices",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "category",
+                  "type": "text"
+                },
+                {
+                  "field": "price",
+                  "type": "int"
+                }
+              ],
+              "method": "POST",
+              "dependsOn": [],
+              "body": {
+                "filter": {
+                  "categories": [
+                    "$cats.name"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "crm",
+            "columns": [
+              {
+                "field": "category",
+                "title": "Категория"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.crm.rest.body.filter.categories.0"
+      ]
+    },
+    {
+      "name": "REST: POST без тела",
+      "template": {
+        "version": 2,
+        "id": "parity-117",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "cats": {
+            "sql": "SELECT id, name FROM t"
+          },
+          "crm": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/prices",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "category",
+                  "type": "text"
+                },
+                {
+                  "field": "price",
+                  "type": "int"
+                }
+              ],
+              "method": "POST"
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "crm",
+            "columns": [
+              {
+                "field": "category",
+                "title": "Категория"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.crm.rest.body"
+      ]
+    },
+    {
+      "name": "REST: цикл зависимостей через dependsOn",
+      "template": {
+        "version": 2,
+        "id": "parity-118",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "cats": {
+            "sql": "SELECT id, name FROM t"
+          },
+          "crm": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/prices",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "category",
+                  "type": "text"
+                },
+                {
+                  "field": "price",
+                  "type": "int"
+                }
+              ],
+              "method": "POST",
+              "dependsOn": [
+                "cats"
+              ],
+              "body": {
+                "filter": {
+                  "categories": [
+                    {
+                      "id": "$cats.id",
+                      "name": "$cats.name"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "a": {
+            "connection": "crm",
+            "rest": {
+              "path": "/a",
+              "dependsOn": [
+                "b"
+              ],
+              "columns": [
+                {
+                  "field": "x",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "b": {
+            "connection": "crm",
+            "rest": {
+              "path": "/b",
+              "dependsOn": [
+                "a"
+              ],
+              "columns": [
+                {
+                  "field": "x",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "crm",
+            "columns": [
+              {
+                "field": "category",
+                "title": "Категория"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.a.rest.dependsOn.0",
+        "datasets.b.rest.dependsOn.0"
+      ]
+    },
+    {
+      "name": "REST: плейсхолдер в path без dependsOn",
+      "template": {
+        "version": 2,
+        "id": "parity-118",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          }
+        },
+        "datasets": {
+          "cats": {
+            "sql": "SELECT id, name FROM t"
+          },
+          "crm": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/prices/$cats.name",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "category",
+                  "type": "text"
+                },
+                {
+                  "field": "price",
+                  "type": "int"
+                }
+              ],
+              "method": "POST",
+              "dependsOn": [],
+              "body": {
+                "filter": {
+                  "categories": [
+                    {
+                      "id": "$cats.id",
+                      "name": "$cats.name"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "crm",
+            "columns": [
+              {
+                "field": "category",
+                "title": "Категория"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "datasets.crm.rest.path",
+        "datasets.crm.rest.body.filter.categories.0.id",
+        "datasets.crm.rest.body.filter.categories.0.name"
+      ]
     }
   ]
 }

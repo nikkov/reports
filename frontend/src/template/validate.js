@@ -708,6 +708,155 @@ function checkGaugeZones(block, base, errors) {
       }
     }
 
+    if (ds?.rest) {
+      const rest = ds.rest
+      const method = rest.method || 'GET'
+      if (method !== 'GET' && method !== 'POST') {
+        errors.push({ path: `datasets.${key}.rest.method`, message: 'допустимо GET или POST' })
+      }
+      if (method === 'POST' && rest.body === undefined) {
+        errors.push({ path: `datasets.${key}.rest.body`, message: 'для POST нужен шаблон тела' })
+      }
+      if (method !== 'POST' && rest.body !== undefined) {
+        warnings.push({
+          path: `datasets.${key}.rest.body`,
+          message: 'body используется только при method: "POST" — при GET он игнорируется'
+        })
+      }
+      const deps = rest.dependsOn
+      if (deps !== undefined) {
+        if (!Array.isArray(deps) || deps.some((d) => typeof d !== 'string' || !d)) {
+          errors.push({
+            path: `datasets.${key}.rest.dependsOn`,
+            message: 'нужен массив ключей наборов'
+          })
+        } else {
+          for (const [i, dep] of deps.entries()) {
+            if (dep === key) {
+              errors.push({
+                path: `datasets.${key}.rest.dependsOn.${i}`,
+                message: 'набор не может зависеть сам от себя'
+              })
+            } else if (!template.datasets?.[dep]) {
+              errors.push({
+                path: `datasets.${key}.rest.dependsOn.${i}`,
+                message: `набор «${dep}» не объявлен в datasets`
+              })
+            }
+          }
+        }
+      }
+
+      // ADR-117: плейсхолдеры $набор.колонка — только из объявленных dependsOn
+      const declared = Array.isArray(deps) ? new Set(deps) : new Set()
+      const seen = new Set()
+      // ADR-118: плейсхолдеры внутри строки (path, headers) — любое вхождение $набор.колонка
+      const checkInline = (text, where) => {
+        if (typeof text !== 'string' || !text.includes('$')) return
+        const re = /\$([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)/g
+        let found = false
+        let m
+        while ((m = re.exec(text)) !== null) {
+          found = true
+          const depName = m[1]
+          const column = m[2]
+          if (!declared.has(depName)) {
+            errors.push({
+              path: where,
+              message: 'плейсхолдер «$' + depName + '.' + column + '»: набор «' + depName +
+                '» не указан в rest.dependsOn'
+            })
+            continue
+          }
+          const cols = template.datasets?.[depName]?.rest?.columns
+          if (Array.isArray(cols) && !cols.some((c) => (c.as || c.field) === column)) {
+            errors.push({
+              path: where,
+              message: 'плейсхолдер «$' + depName + '.' + column + '»: в наборе «' + depName +
+                '» нет колонки «' + column + '»'
+            })
+          }
+          seen.add(depName)
+        }
+        if (!found) errors.push({ path: where, message: 'плейсхолдер: ожидается $набор.колонка' })
+      }
+      checkInline(rest.path, `datasets.${key}.rest.path`)
+      for (const [headerName, headerValue] of Object.entries(rest.headers || {})) {
+        checkInline(headerValue, `datasets.${key}.rest.headers.${headerName}`)
+      }
+      // ADR-118: цикл по dependsOn — REST→REST не должен возвращаться к себе
+      if (Array.isArray(deps) && deps.length) {
+        const reaches = (from, target, seenSets = new Set()) => {
+          if (from === target) return true
+          if (seenSets.has(from)) return false
+          seenSets.add(from)
+          const nested = template.datasets?.[from]?.rest?.dependsOn
+          if (!Array.isArray(nested)) return false
+          return nested.some((n) => reaches(n, target, seenSets))
+        }
+        for (const [i, dep] of deps.entries()) {
+          if (typeof dep === 'string' && reaches(dep, key)) {
+            errors.push({
+              path: `datasets.${key}.rest.dependsOn.${i}`,
+              message: 'цикл зависимостей: набор ссылается сам на себя через цепочку dependsOn'
+            })
+          }
+        }
+      }
+
+      const walk = (value, path) => {
+        if (typeof value === 'string') {
+          const m = /^\$([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)$/.exec(value)
+          if (!m) {
+            if (value.startsWith('$')) {
+              errors.push({
+                path,
+                message: `плейсхолдер «${value}»: ожидается $набор.колонка`
+              })
+            }
+            return
+          }
+          const [, depName, column] = m
+          if (!declared.has(depName)) {
+            errors.push({
+              path,
+              message: `плейсхолдер «${value}»: набор «${depName}» не указан в rest.dependsOn`
+            })
+            return
+          }
+          const src = template.datasets?.[depName]
+          const cols = src?.rest?.columns
+          if (Array.isArray(cols) && !cols.some((c) => (c.as || c.field) === column)) {
+            errors.push({
+              path,
+              message: `плейсхолдер «${value}»: в наборе «${depName}» нет колонки «${column}»`
+            })
+          }
+          seen.add(depName)
+          return
+        }
+        if (Array.isArray(value)) {
+          for (const [i, item] of value.entries()) walk(item, `${path}.${i}`)
+          return
+        }
+        if (value && typeof value === 'object') {
+          for (const [k, item] of Object.entries(value)) walk(item, `${path}.${k}`)
+        }
+      }
+      walk(rest.body, `datasets.${key}.rest.body`)
+      walk(rest.query, `datasets.${key}.rest.query`)
+      if (Array.isArray(deps)) {
+        for (const dep of deps) {
+          if (!seen.has(dep)) {
+            warnings.push({
+              path: `datasets.${key}.rest.dependsOn`,
+              message: `набор «${dep}» объявлен в dependsOn, но не используется в шаблоне`
+            })
+          }
+        }
+      }
+    }
+
     if (ds?.join) {
       const join = ds.join
       for (const [sideName, side] of [['left', join.left], ['right', join.right]]) {

@@ -1,0 +1,106 @@
+{
+  "version": 2,
+  "id": "crm-filter-path",
+  "title": "Цена категории: путь и заголовок из набора",
+  "description": "GET с плейсхолдером в path и заголовком X-Tenant из набора settings (ADR-118).",
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    },
+    "crm": {
+      "kind": "rest",
+      "baseUrl": "${CRM_BASE_URL}",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "timeoutMs": 5000,
+      "cacheSeconds": 30
+    }
+  },
+  "datasets": {
+    "category": {
+      "connection": "main",
+      "sql": "SELECT category FROM reports_examples.sales WHERE category = 'Мебель' LIMIT 1"
+    },
+    "settings": {
+      "connection": "main",
+      "sql": "SELECT 'demo-tenant' AS tenant"
+    },
+    "price": {
+      "connection": "crm",
+      "rest": {
+        "method": "GET",
+        "path": "/api/prices/$category.category",
+        "headers": {
+          "X-Tenant": "$settings.tenant"
+        },
+        "dependsOn": [
+          "category",
+          "settings"
+        ],
+        "rowsPath": "items",
+        "columns": [
+          {
+            "field": "category",
+            "type": "text",
+            "title": "Категория"
+          },
+          {
+            "field": "price",
+            "type": "int",
+            "title": "Цена"
+          },
+          {
+            "field": "currency",
+            "type": "text",
+            "title": "Валюта"
+          },
+          {
+            "field": "tenant",
+            "type": "text",
+            "title": "Арендатор"
+          }
+        ]
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Путь /api/prices/$category.category и заголовок X-Tenant: $settings.tenant подставляются из наборов."
+    },
+    {
+      "type": "table",
+      "dataKey": "price",
+      "grandTotal": false,
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "price",
+          "title": "Цена",
+          "format": "currency"
+        },
+        {
+          "field": "currency",
+          "title": "Валюта"
+        },
+        {
+          "field": "tenant",
+          "title": "Арендатор"
+        }
+      ]
+    }
+  ]
+}

@@ -119,6 +119,48 @@ bool parseRestSpec(const Json::Value &rest, RestSpec &out, std::string &error) {
     if (q.isObject()) {
         for (auto it = q.begin(); it != q.end(); ++it) out.query[it.name()] = jsonScalar(*it);
     }
+    out.method = rest.get("method", "GET").asString();
+    if (out.method != "GET" && out.method != "POST") {
+        error = "rest.method: допустимо GET или POST";
+        return false;
+    }
+    const Json::Value &hdrs = rest["headers"];
+    if (!hdrs.isNull()) {
+        if (!hdrs.isObject()) {
+            error = "rest.headers: нужен объект имя → значение";
+            return false;
+        }
+        for (auto it = hdrs.begin(); it != hdrs.end(); ++it) {
+            if (!it->isString()) {
+                error = "rest.headers: значения — строки (можно с $набор.колонка)";
+                return false;
+            }
+            out.headers[it.name()] = it->asString();
+        }
+    }
+    out.body = rest["body"]; // шаблон с плейсхолдерами $набор.колонка (ADR-117)
+    if (rest["body"].isNull() && out.method == "POST") {
+        error = "rest.body: для POST нужен шаблон тела";
+        return false;
+    }
+    if (!rest["body"].isNull() && !rest["body"].isObject() && !rest["body"].isArray()) {
+        error = "rest.body: ожидается объект или массив";
+        return false;
+    }
+    const Json::Value &deps = rest["dependsOn"];
+    if (!deps.isNull()) {
+        if (!deps.isArray()) {
+            error = "rest.dependsOn: нужен массив ключей наборов";
+            return false;
+        }
+        for (const auto &d : deps) {
+            if (!d.isString() || d.asString().empty()) {
+                error = "rest.dependsOn: элементы — строки с ключами наборов";
+                return false;
+            }
+            out.dependsOn.push_back(d.asString());
+        }
+    }
     out.rowsPath = rest.get("rowsPath", "").asString();
     const Json::Value &page = rest["page"];
     if (page.isObject()) {
@@ -297,6 +339,257 @@ size_t RestCache::size() {
     std::lock_guard<std::mutex> lock(mutex_);
     return entries_.size();
 }
+
+namespace {
+
+// "$набор.колонка" (ADR-117). Возвращает false, если строка — не плейсхолдер.
+bool parsePlaceholder(const std::string &s, std::string &dataset, std::string &column) {
+    if (s.size() < 4 || s[0] != '$') return false;
+    const auto dot = s.find('.', 1);
+    if (dot == std::string::npos || dot == 1 || dot + 1 >= s.size()) return false;
+    dataset = s.substr(1, dot - 1);
+    column = s.substr(dot + 1);
+    if (dataset.find('.') != std::string::npos) return false;
+    return true;
+}
+
+bool isPlaceholder(const Json::Value &v) {
+    if (!v.isString()) return false;
+    std::string d, c;
+    return parsePlaceholder(v.asString(), d, c);
+}
+
+// Есть ли в значении хотя бы один плейсхолдер (нужно для правила разворота массива).
+bool hasPlaceholders(const Json::Value &v) {
+    if (isPlaceholder(v)) return true;
+    if (v.isArray()) {
+        for (const auto &e : v) {
+            if (hasPlaceholders(e)) return true;
+        }
+    } else if (v.isObject()) {
+        for (auto it = v.begin(); it != v.end(); ++it) {
+            if (hasPlaceholders(*it)) return true;
+        }
+    }
+    return false;
+}
+
+// Набор, из которого берутся значения в шаблоне; все плейсхолдеры обязаны ссылаться на него,
+// иначе разворот по строкам неоднозначен.
+bool templateDataset(const Json::Value &v, std::string &dataset, std::string &error) {
+    if (isPlaceholder(v)) {
+        std::string d, c;
+        parsePlaceholder(v.asString(), d, c);
+        if (dataset.empty()) dataset = d;
+        if (dataset != d) {
+            error = "разворот массива: плейсхолдеры из разных наборов (" + dataset + ", " + d +
+                    ") — неоднозначно";
+            return false;
+        }
+        return true;
+    }
+    if (v.isArray()) {
+        for (const auto &e : v) {
+            if (!templateDataset(e, dataset, error)) return false;
+        }
+    } else if (v.isObject()) {
+        for (auto it = v.begin(); it != v.end(); ++it) {
+            if (!templateDataset(*it, dataset, error)) return false;
+        }
+    }
+    return true;
+}
+
+const DatasetRows *findSource(const std::map<std::string, DatasetRows> &sources,
+                              const std::string &name) {
+    const auto it = sources.find(name);
+    return it == sources.end() ? nullptr : &it->second;
+}
+
+// Значение ячейки без потери типа: int/float → число, bool → bool, пусто → null.
+Json::Value cellValue(const DatasetRows &rows, size_t rowIdx, size_t colIdx) {
+    if (rowIdx >= rows.rows.size() || colIdx >= rows.rows[rowIdx].size()) return Json::Value();
+    const std::string &value = rows.rows[rowIdx][colIdx];
+    if (value.empty()) return Json::Value();
+    const std::string &type = rows.columns[colIdx].type;
+    if (type == "int") {
+        try {
+            return Json::Value(static_cast<Json::Int64>(std::stoll(value)));
+        } catch (...) {
+            return Json::Value(value);
+        }
+    }
+    if (type == "float") {
+        try {
+            return Json::Value(std::stod(value));
+        } catch (...) {
+            return Json::Value(value);
+        }
+    }
+    if (type == "bool") return Json::Value(value == "true" || value == "1");
+    return Json::Value(value);
+}
+
+bool renderValue(const Json::Value &tpl, const std::map<std::string, DatasetRows> &sources,
+                 size_t rowIdx, Json::Value &out, std::string &error);
+
+// Массив из одного элемента с плейсхолдерами — разворот по строкам набора-источника.
+bool renderArray(const Json::Value &tpl, const std::map<std::string, DatasetRows> &sources,
+                 size_t rowIdx, Json::Value &out, std::string &error) {
+    if (tpl.size() == 1 && hasPlaceholders(tpl[0])) {
+        std::string dataset;
+        if (!templateDataset(tpl[0], dataset, error)) return false;
+        const DatasetRows *src = findSource(sources, dataset);
+        if (src == nullptr) {
+            error = "набор-источник «" + dataset + "» не найден";
+            return false;
+        }
+        out = Json::Value(Json::arrayValue);
+        if (src->rows.empty()) {
+            // пустой источник: массив остаётся пустым, решение «не звать REST» принимает вызывающий
+            return true;
+        }
+        for (size_t r = 0; r < src->rows.size(); ++r) {
+            Json::Value item;
+            if (!renderValue(tpl[0], sources, r, item, error)) return false;
+            out.append(item);
+        }
+        return true;
+    }
+    out = Json::Value(Json::arrayValue);
+    for (const auto &e : tpl) {
+        Json::Value item;
+        if (!renderValue(e, sources, rowIdx, item, error)) return false;
+        out.append(item);
+    }
+    return true;
+}
+
+bool renderValue(const Json::Value &tpl, const std::map<std::string, DatasetRows> &sources,
+                 size_t rowIdx, Json::Value &out, std::string &error) {
+    if (isPlaceholder(tpl)) {
+        std::string dataset, column;
+        parsePlaceholder(tpl.asString(), dataset, column);
+        const DatasetRows *src = findSource(sources, dataset);
+        if (src == nullptr) {
+            error = "набор-источник «" + dataset + "» не найден в dependsOn";
+            return false;
+        }
+        size_t colIdx = src->columns.size();
+        for (size_t i = 0; i < src->columns.size(); ++i) {
+            if (src->columns[i].name == column) colIdx = i;
+        }
+        if (colIdx == src->columns.size()) {
+            error = "в наборе «" + dataset + "» нет колонки «" + column + "»";
+            return false;
+        }
+        out = cellValue(*src, rowIdx, colIdx);
+        return true;
+    }
+    if (tpl.isArray()) return renderArray(tpl, sources, rowIdx, out, error);
+    if (tpl.isObject()) {
+        out = Json::Value(Json::objectValue);
+        for (auto it = tpl.begin(); it != tpl.end(); ++it) {
+            Json::Value item;
+            if (!renderValue(*it, sources, rowIdx, item, error)) return false;
+            out[it.name()] = item;
+        }
+        return true;
+    }
+    out = tpl; // скаляры и null переносятся как есть
+    return true;
+}
+
+
+// Подстановка $набор.колонка внутри строки (path, headers): ADR-118. Значение — первая строка
+// набора, для path — urlencode.
+std::string replaceInline(const std::string &text, const std::map<std::string, DatasetRows> &sources,
+                          bool urlencodeValues, std::string &error) {
+    std::string out;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t dollar = text.find('$', pos);
+        if (dollar == std::string::npos) {
+            out += text.substr(pos);
+            break;
+        }
+        out += text.substr(pos, dollar - pos);
+        size_t i = dollar + 1;
+        const size_t nameStart = i;
+        while (i < text.size() &&
+               (std::isalnum(static_cast<unsigned char>(text[i])) || text[i] == '_' || text[i] == '-')) {
+            i += 1;
+        }
+        const std::string dep = text.substr(nameStart, i - nameStart);
+        if (dep.empty() || i >= text.size() || text[i] != '.') {
+            out += '$';
+            pos = dollar + 1;
+            continue;
+        }
+        i += 1;
+        const size_t colStart = i;
+        while (i < text.size() &&
+               (std::isalnum(static_cast<unsigned char>(text[i])) || text[i] == '_' || text[i] == '.' ||
+                text[i] == '-')) {
+            i += 1;
+        }
+        const std::string col = text.substr(colStart, i - colStart);
+        const DatasetRows *src = findSource(sources, dep);
+        if (src == nullptr) {
+            error = "набор-источник «" + dep + "» не найден в dependsOn";
+            return {};
+        }
+        size_t colIdx = src->columns.size();
+        for (size_t c = 0; c < src->columns.size(); ++c) {
+            if (src->columns[c].name == col) colIdx = c;
+        }
+        if (colIdx == src->columns.size()) {
+            error = "в наборе «" + dep + "» нет колонки «" + col + "»";
+            return {};
+        }
+        const Json::Value value = cellValue(*src, 0, colIdx);
+        const std::string text2 = value.isString() ? value.asString() : jsonScalar(value);
+        out += urlencodeValues ? urlEncode(text2) : text2;
+        pos = i;
+    }
+    return out;
+}
+
+} // namespace
+
+bool renderRestSpec(const RestSpec &spec, const std::map<std::string, DatasetRows> &sources,
+                    RestSpec &out, std::string &error) {
+    out = spec;
+    // path: плейсхолдеры внутри строки, значение первой строки, urlencode (ADR-118)
+    if (spec.path.find('$') != std::string::npos) {
+        out.path = replaceInline(spec.path, sources, true, error);
+        if (!error.empty()) return false;
+    }
+    out.headers = spec.headers;
+    for (auto &kv : out.headers) {
+        if (kv.second.find('$') == std::string::npos) continue;
+        kv.second = replaceInline(kv.second, sources, false, error);
+        if (!error.empty()) return false;
+    }
+    out.query.clear();
+    for (const auto &kv : spec.query) {
+        Json::Value tpl(kv.second);
+        if (!hasPlaceholders(tpl)) {
+            out.query[kv.first] = kv.second;
+            continue;
+        }
+        Json::Value value;
+        if (!renderValue(tpl, sources, 0, value, error)) return false;
+        out.query[kv.first] = value.isString() ? value.asString() : jsonScalar(value);
+    }
+    if (spec.body.isObject() || spec.body.isArray()) {
+        if (!renderValue(spec.body, sources, 0, out.body, error)) return false;
+    } else {
+        out.body = spec.body;
+    }
+    return true;
+}
+
 void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
                std::function<void(const DatasetRows &)> onOk,
                std::function<void(const std::string &, const std::string &)> onErr) {
@@ -314,6 +607,11 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
     }
     std::map<std::string, std::string> headers;
     size_t headersHash = 0;
+    // заголовки набора (ADR-118) перекрывают заголовки источника
+    for (const auto &kv : spec.headers) {
+        headers[kv.first] = kv.second;
+        headersHash ^= std::hash<std::string>{}(kv.first + ":" + kv.second) + 0x9e3779b97f4a7c15ULL;
+    }
     for (const auto &kv : conn.headers) {
         const std::string value = expandEnvValue(kv.second, conn.key, error);
         if (!error.empty()) {
@@ -376,8 +674,16 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
                                  std::to_string(ctx->spec.page.size);
             }
         }
-        const std::string cacheKey =
-            ctx->baseUrl + "|" + pathWithQuery + "|" + std::to_string(ctx->headersHash);
+        // тело POST участвует в ключе кеша: один path с разными фильтрами — разные ответы
+        std::string bodyText;
+        if (ctx->spec.method == "POST" && !ctx->spec.body.isNull()) {
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            bodyText = Json::writeString(wb, ctx->spec.body);
+        }
+        const std::string cacheKey = ctx->baseUrl + "|" + pathWithQuery + "|" +
+                                     std::to_string(ctx->headersHash) + "|" +
+                                     std::to_string(std::hash<std::string>{}(bodyText));
 
         auto append = [ctx, pathWithQuery](const DatasetRows &rows, bool fromCache) {
             if (ctx->acc.columns.empty()) {
@@ -413,8 +719,15 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
         }
 
         auto req = drogon::HttpRequest::newHttpRequest();
-        req->setMethod(drogon::Get);
-        req->setPath(pathWithQuery);
+        if (ctx->spec.method == "POST") {
+            req->setMethod(drogon::Post);
+            req->setPath(pathWithQuery);
+            req->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            req->setBody(bodyText);
+        } else {
+            req->setMethod(drogon::Get);
+            req->setPath(pathWithQuery);
+        }
         for (const auto &kv : ctx->headers) req->addHeader(kv.first, kv.second);
 
         const auto started = std::chrono::steady_clock::now();
