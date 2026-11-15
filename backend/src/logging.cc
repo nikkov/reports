@@ -48,6 +48,10 @@ std::size_t &fileMaxRef() {
     static std::size_t max = 10u * 1024 * 1024;
     return max;
 }
+int &fileKeepRef() {
+    static int keep = 5;
+    return keep;
+}
 std::size_t &fileBytesRef() {
     static std::size_t bytes = 0;
     return bytes;
@@ -61,10 +65,22 @@ void writeToFile(const std::string &line) {
     std::lock_guard<std::mutex> lock(fileMutex());
     if (!fileOnRef()) return;
     if (fileBytesRef() + line.size() + 1 > fileMaxRef()) {
-        // ротация: текущий файл уходит в <path>.1, запись начинается заново
+        // ротация (ADR-119): <файл> → .1, .1 → .2, …, самый старый удаляется.
+        // keep = 0 — архивов не держим, файл просто начинается заново.
         fileRef().close();
         const std::string path = filePathRef();
-        std::rename(path.c_str(), (path + ".1").c_str());
+        const int keep = fileKeepRef();
+        if (keep <= 0) {
+            std::remove(path.c_str());
+        } else {
+            std::remove((path + "." + std::to_string(keep)).c_str());
+            for (int i = keep - 1; i >= 1; --i) {
+                const std::string from = path + "." + std::to_string(i);
+                const std::string to = path + "." + std::to_string(i + 1);
+                std::rename(from.c_str(), to.c_str());
+            }
+            std::rename(path.c_str(), (path + ".1").c_str());
+        }
         fileRef().open(path, std::ios::app);
         fileBytesRef() = 0;
     }
@@ -133,7 +149,7 @@ std::mutex &minLevelMutex() {
 }
 } // namespace
 
-void setFile(const std::string &path, Level level, std::size_t maxBytes) {
+void setFile(const std::string &path, Level level, std::size_t maxBytes, int keep) {
     std::lock_guard<std::mutex> lock(fileMutex());
     if (fileRef().is_open()) fileRef().close();
     fileOnRef() = false;
@@ -146,6 +162,7 @@ void setFile(const std::string &path, Level level, std::size_t maxBytes) {
     filePathRef() = path;
     fileLevelRef() = level;
     fileMaxRef() = maxBytes;
+    fileKeepRef() = keep < 0 ? 0 : keep;
     fileRef().seekp(0, std::ios::end);
     const auto size = static_cast<std::size_t>(fileRef().tellp());
     fileBytesRef() = size < 0 ? 0 : size;

@@ -1081,9 +1081,15 @@ int main() {
                 if (!raw.empty()) maxBytes = static_cast<std::size_t>(std::stoull(raw));
             } catch (...) {
             }
+            int keep = 5;
+            try {
+                const std::string rawKeep = rep::envOr("REP_LOG_FILE_KEEP", "5");
+                if (!rawKeep.empty()) keep = std::stoi(rawKeep);
+            } catch (...) {
+            }
             rep::log::setFile(logFile,
                               rep::log::parseLevel(rep::envOr("REP_LOG_FILE_LEVEL", "debug")),
-                              maxBytes);
+                              maxBytes, keep);
         }
     }
 
