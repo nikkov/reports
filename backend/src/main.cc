@@ -825,9 +825,19 @@ using DatasetOk = std::function<void(const rep::DatasetRows &)>;
 using DatasetErr = std::function<void(int status, const std::string &code, const std::string &message)>;
 
 // Асинхронно исполняет набор. Для join рекурсивно грузит стороны (они не могут быть join).
+// Глубина цепочки зависимостей набора: REST→REST через dependsOn и объединения (ADR-118).
+static constexpr size_t kMaxDatasetDepth = 8;
+
 void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep::ParamBag &bag,
                       const orm::DbClientPtr &dataDb, rep::ConnRegistry &connRegistry,
-                      rep::RestCache &restCache, size_t maxRows, DatasetOk onOk, DatasetErr onErr) {
+                      rep::RestCache &restCache, size_t maxRows, DatasetOk onOk, DatasetErr onErr,
+                      size_t depth = 0) {
+    if (depth > kMaxDatasetDepth) {
+        onErr(422, "DATASET_DEPTH",
+              "цепочка наборов глубже " + std::to_string(kMaxDatasetDepth) +
+                  ": сократите зависимости (dependsOn/join)");
+        return;
+    }
     const auto it = tpl.datasets.find(key);
     if (it == tpl.datasets.end()) {
         onErr(422, "DATASET_NOT_FOUND", "в шаблоне нет набора '" + key + "'");
@@ -883,9 +893,9 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
             onErr(status, code, msg);
         };
         fetchDatasetRows(tpl, ds.join.left, bag, dataDb, connRegistry, restCache, maxRows,
-                         [take](const rep::DatasetRows &rows) { take(true, rows); }, fail);
+                         [take](const rep::DatasetRows &rows) { take(true, rows); }, fail, depth + 1);
         fetchDatasetRows(tpl, ds.join.right, bag, dataDb, connRegistry, restCache, maxRows,
-                         [take](const rep::DatasetRows &rows) { take(false, rows); }, fail);
+                         [take](const rep::DatasetRows &rows) { take(false, rows); }, fail, depth + 1);
         return;
     }
 
@@ -958,7 +968,8 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
                     },
                     [fail](int status, const std::string &code, const std::string &msg) {
                         fail(status, code, msg);
-                    });
+                    },
+                    depth + 1);
             }
             return;
         }

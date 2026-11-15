@@ -314,6 +314,13 @@ export default {
         "body": {
           "description": "шаблон тела POST: произвольный JSON с плейсхолдерами $набор.колонка (ADR-117)"
         },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "доп. заголовки набора: значения могут содержать плейсхолдеры $набор.колонка (ADR-118)"
+        },
         "dependsOn": {
           "type": "array",
           "maxItems": 8,

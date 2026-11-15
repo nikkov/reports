@@ -41,6 +41,7 @@ struct RestSpec {
     std::string path;                     // /api/regions
     std::map<std::string, std::string> query;
     Json::Value body;                     // шаблон тела для POST, с плейсхолдерами $набор.колонка
+    std::map<std::string, std::string> headers; // доп. заголовки набора, с теми же плейсхолдерами
     std::vector<std::string> dependsOn;   // наборы-источники значений для query/body
     std::string rowsPath;                 // items | data.rows | пусто — корень
     std::vector<RestColumn> columns;

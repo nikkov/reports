@@ -750,6 +750,60 @@ function checkGaugeZones(block, base, errors) {
       // ADR-117: плейсхолдеры $набор.колонка — только из объявленных dependsOn
       const declared = Array.isArray(deps) ? new Set(deps) : new Set()
       const seen = new Set()
+      // ADR-118: плейсхолдеры внутри строки (path, headers) — любое вхождение $набор.колонка
+      const checkInline = (text, where) => {
+        if (typeof text !== 'string' || !text.includes('$')) return
+        const re = /\$([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)/g
+        let found = false
+        let m
+        while ((m = re.exec(text)) !== null) {
+          found = true
+          const depName = m[1]
+          const column = m[2]
+          if (!declared.has(depName)) {
+            errors.push({
+              path: where,
+              message: 'плейсхолдер «$' + depName + '.' + column + '»: набор «' + depName +
+                '» не указан в rest.dependsOn'
+            })
+            continue
+          }
+          const cols = template.datasets?.[depName]?.rest?.columns
+          if (Array.isArray(cols) && !cols.some((c) => (c.as || c.field) === column)) {
+            errors.push({
+              path: where,
+              message: 'плейсхолдер «$' + depName + '.' + column + '»: в наборе «' + depName +
+                '» нет колонки «' + column + '»'
+            })
+          }
+          seen.add(depName)
+        }
+        if (!found) errors.push({ path: where, message: 'плейсхолдер: ожидается $набор.колонка' })
+      }
+      checkInline(rest.path, `datasets.${key}.rest.path`)
+      for (const [headerName, headerValue] of Object.entries(rest.headers || {})) {
+        checkInline(headerValue, `datasets.${key}.rest.headers.${headerName}`)
+      }
+      // ADR-118: цикл по dependsOn — REST→REST не должен возвращаться к себе
+      if (Array.isArray(deps) && deps.length) {
+        const reaches = (from, target, seenSets = new Set()) => {
+          if (from === target) return true
+          if (seenSets.has(from)) return false
+          seenSets.add(from)
+          const nested = template.datasets?.[from]?.rest?.dependsOn
+          if (!Array.isArray(nested)) return false
+          return nested.some((n) => reaches(n, target, seenSets))
+        }
+        for (const [i, dep] of deps.entries()) {
+          if (typeof dep === 'string' && reaches(dep, key)) {
+            errors.push({
+              path: `datasets.${key}.rest.dependsOn.${i}`,
+              message: 'цикл зависимостей: набор ссылается сам на себя через цепочку dependsOn'
+            })
+          }
+        }
+      }
+
       const walk = (value, path) => {
         if (typeof value === 'string') {
           const m = /^\$([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)$/.exec(value)

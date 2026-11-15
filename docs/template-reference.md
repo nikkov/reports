@@ -532,6 +532,27 @@ REP_CONN_FINANCE_PASSWORD=…   # из хранилища секретов, не
 - пример: `crm-filtered` — категории из PostgreSQL, цены из REST (`scripts/rest-demo.mjs`, POST
   `/api/prices`).
 
+
+#### Плейсхолдеры в пути и заголовках (ADR-118)
+
+`path` и `headers` набора тоже принимают `$набор.колонка`; значение берётся из **первой строки**
+набора, в пути — urlencode:
+
+```json
+"rest": {
+  "method": "GET",
+  "path": "/api/prices/$category.category",
+  "headers": { "X-Tenant": "$settings.tenant" },
+  "dependsOn": ["category", "settings"]
+}
+```
+
+- в одном значении может быть несколько плейсхолдеров и обычный текст;
+- заголовки набора перекрывают одноимённые заголовки источника (`connections.<ключ>.headers`);
+- цепочка `dependsOn` ограничена глубиной **8** (считаются и объединения): глубже — `422 DATASET_DEPTH`;
+- цикл по `dependsOn` (`A` зависит от `B`, `B` от `A`) отклоняется валидатором: `datasets.<key>.rest.dependsOn.<i>`;
+- пример: `crm-filter-path`.
+
 ### Раскладка блоков: сетка 12 колонок (ADR-96)
 
 Блоки лежат в сетке из 12 колонок, ширина задаётся `span`:

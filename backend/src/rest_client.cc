@@ -124,6 +124,20 @@ bool parseRestSpec(const Json::Value &rest, RestSpec &out, std::string &error) {
         error = "rest.method: допустимо GET или POST";
         return false;
     }
+    const Json::Value &hdrs = rest["headers"];
+    if (!hdrs.isNull()) {
+        if (!hdrs.isObject()) {
+            error = "rest.headers: нужен объект имя → значение";
+            return false;
+        }
+        for (auto it = hdrs.begin(); it != hdrs.end(); ++it) {
+            if (!it->isString()) {
+                error = "rest.headers: значения — строки (можно с $набор.колонка)";
+                return false;
+            }
+            out.headers[it.name()] = it->asString();
+        }
+    }
     out.body = rest["body"]; // шаблон с плейсхолдерами $набор.колонка (ADR-117)
     if (rest["body"].isNull() && out.method == "POST") {
         error = "rest.body: для POST нужен шаблон тела";
@@ -486,11 +500,77 @@ bool renderValue(const Json::Value &tpl, const std::map<std::string, DatasetRows
     return true;
 }
 
+
+// Подстановка $набор.колонка внутри строки (path, headers): ADR-118. Значение — первая строка
+// набора, для path — urlencode.
+std::string replaceInline(const std::string &text, const std::map<std::string, DatasetRows> &sources,
+                          bool urlencodeValues, std::string &error) {
+    std::string out;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t dollar = text.find('$', pos);
+        if (dollar == std::string::npos) {
+            out += text.substr(pos);
+            break;
+        }
+        out += text.substr(pos, dollar - pos);
+        size_t i = dollar + 1;
+        const size_t nameStart = i;
+        while (i < text.size() &&
+               (std::isalnum(static_cast<unsigned char>(text[i])) || text[i] == '_' || text[i] == '-')) {
+            i += 1;
+        }
+        const std::string dep = text.substr(nameStart, i - nameStart);
+        if (dep.empty() || i >= text.size() || text[i] != '.') {
+            out += '$';
+            pos = dollar + 1;
+            continue;
+        }
+        i += 1;
+        const size_t colStart = i;
+        while (i < text.size() &&
+               (std::isalnum(static_cast<unsigned char>(text[i])) || text[i] == '_' || text[i] == '.' ||
+                text[i] == '-')) {
+            i += 1;
+        }
+        const std::string col = text.substr(colStart, i - colStart);
+        const DatasetRows *src = findSource(sources, dep);
+        if (src == nullptr) {
+            error = "набор-источник «" + dep + "» не найден в dependsOn";
+            return {};
+        }
+        size_t colIdx = src->columns.size();
+        for (size_t c = 0; c < src->columns.size(); ++c) {
+            if (src->columns[c].name == col) colIdx = c;
+        }
+        if (colIdx == src->columns.size()) {
+            error = "в наборе «" + dep + "» нет колонки «" + col + "»";
+            return {};
+        }
+        const Json::Value value = cellValue(*src, 0, colIdx);
+        const std::string text2 = value.isString() ? value.asString() : jsonScalar(value);
+        out += urlencodeValues ? urlEncode(text2) : text2;
+        pos = i;
+    }
+    return out;
+}
+
 } // namespace
 
 bool renderRestSpec(const RestSpec &spec, const std::map<std::string, DatasetRows> &sources,
                     RestSpec &out, std::string &error) {
     out = spec;
+    // path: плейсхолдеры внутри строки, значение первой строки, urlencode (ADR-118)
+    if (spec.path.find('$') != std::string::npos) {
+        out.path = replaceInline(spec.path, sources, true, error);
+        if (!error.empty()) return false;
+    }
+    out.headers = spec.headers;
+    for (auto &kv : out.headers) {
+        if (kv.second.find('$') == std::string::npos) continue;
+        kv.second = replaceInline(kv.second, sources, false, error);
+        if (!error.empty()) return false;
+    }
     out.query.clear();
     for (const auto &kv : spec.query) {
         Json::Value tpl(kv.second);
@@ -527,6 +607,11 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
     }
     std::map<std::string, std::string> headers;
     size_t headersHash = 0;
+    // заголовки набора (ADR-118) перекрывают заголовки источника
+    for (const auto &kv : spec.headers) {
+        headers[kv.first] = kv.second;
+        headersHash ^= std::hash<std::string>{}(kv.first + ":" + kv.second) + 0x9e3779b97f4a7c15ULL;
+    }
     for (const auto &kv : conn.headers) {
         const std::string value = expandEnvValue(kv.second, conn.key, error);
         if (!error.empty()) {

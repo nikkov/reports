@@ -1102,6 +1102,83 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         }
                     }
                 }
+                // цикл по dependsOn (ADR-118): REST→REST не должен возвращаться к себе
+                if (deps.isArray() && !deps.empty()) {
+                    std::function<bool(const std::string &, const std::string &,
+                                       std::set<std::string> &)>
+                        reaches = [&](const std::string &from, const std::string &target,
+                                      std::set<std::string> &seen) -> bool {
+                        if (from == target) return true;
+                        if (!seen.insert(from).second) return false;
+                        const Json::Value &nested = root["datasets"][from]["rest"]["dependsOn"];
+                        if (!nested.isArray()) return false;
+                        for (const auto &n : nested) {
+                            const std::string name = asString(n);
+                            if (!name.empty() && reaches(name, target, seen)) return true;
+                        }
+                        return false;
+                    };
+                    for (Json::ArrayIndex i = 0; i < deps.size(); ++i) {
+                        const std::string dep = asString(deps[i]);
+                        if (dep.empty()) continue;
+                        std::set<std::string> seen;
+                        if (reaches(dep, key, seen)) {
+                            addError(r, path + ".rest.dependsOn." + std::to_string(i),
+                                     "цикл зависимостей: набор ссылается сам на себя через цепочку "
+                                     "dependsOn");
+                        }
+                    }
+                }
+
+                // ADR-118: плейсхолдеры внутри строки (path, headers) — любое вхождение
+                {
+                    std::function<void(const std::string &, const std::string &)> checkInline =
+                        [&](const std::string &text, const std::string &where) {
+                            if (text.find('$') == std::string::npos) return;
+                            size_t pos = 0;
+                            bool found = false;
+                            while ((pos = text.find('$', pos)) != std::string::npos) {
+                                pos += 1;
+                                const size_t start = pos;
+                                while (pos < text.size() &&
+                                       (std::isalnum(static_cast<unsigned char>(text[pos])) ||
+                                        text[pos] == '_' || text[pos] == '-')) {
+                                    pos += 1;
+                                }
+                                const std::string dep = text.substr(start, pos - start);
+                                if (pos < text.size() && text[pos] == '.' && !dep.empty()) {
+                                    pos += 1;
+                                    const size_t colStart = pos;
+                                    while (pos < text.size() &&
+                                           (std::isalnum(static_cast<unsigned char>(text[pos])) ||
+                                            text[pos] == '_' || text[pos] == '.' || text[pos] == '-')) {
+                                        pos += 1;
+                                    }
+                                    const std::string col = text.substr(colStart, pos - colStart);
+                                    if (!col.empty()) {
+                                        found = true;
+                                        if (!declaredDeps.count(dep)) {
+                                            addError(r, where,
+                                                     "плейсхолдер «$" + dep + "." + col +
+                                                         "»: набор «" + dep +
+                                                         "» не указан в rest.dependsOn");
+                                        }
+                                    }
+                                }
+                            }
+                            if (!found) {
+                                addError(r, where, "плейсхолдер: ожидается $набор.колонка");
+                            }
+                        };
+                    checkInline(asString(ds["rest"]["path"]), path + ".rest.path");
+                    const Json::Value &hdrs = ds["rest"]["headers"];
+                    if (hdrs.isObject()) {
+                        for (auto it = hdrs.begin(); it != hdrs.end(); ++it) {
+                            checkInline(asString(*it), path + ".rest.headers." + it.name());
+                        }
+                    }
+                }
+
                 // плейсхолдеры $набор.колонка: только из declaredDeps, формат — набор.колонка
                 const std::set<std::string> usedDeps = [&] {
                     std::set<std::string> used;

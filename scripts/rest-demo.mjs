@@ -46,6 +46,44 @@ function readJson(req) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`)
+  // GET с категорией в пути (ADR-118): проверка плейсхолдера в path и заголовка набора
+  if (url.pathname.startsWith('/api/prices/')) {
+    // путь может прийти как есть, urlencode или дважды закодированным — разбираем все варианты
+    const rawName = url.pathname.split('/').pop()
+    let category = rawName
+    for (let i = 0; i < 2; i += 1) {
+      try {
+        const decoded = decodeURIComponent(category)
+        if (decoded === category) break
+        category = decoded
+      } catch {
+        break
+      }
+    }
+    const row = prices[category]
+    if (!row) {
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: 'unknown category', category }))
+      return
+    }
+    requests += 1
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(
+      JSON.stringify({
+        items: [
+          {
+            category_id: row.id,
+            category,
+            price: row.price,
+            currency: row.currency,
+            tenant: req.headers['x-tenant'] || ''
+          }
+        ],
+        total: 1
+      })
+    )
+    return
+  }
   if (url.pathname === '/api/prices' && req.method === 'POST') {
     const body = await readJson(req)
     if (!body) {

@@ -3045,3 +3045,21 @@ test('REST: два шаблона тела — список значений и 
     expect(extra).toBeGreaterThan(0)
   }
 })
+
+// ADR-118: плейсхолдер в path и заголовок набора подставляются из наборов.
+test('REST: категория в пути и заголовок X-Tenant из набора', async ({ page, request }) => {
+  const res = await request.post('/api/report/data', {
+    data: { reportId: 'crm-filter-path', dataset: 'price', params: {} }
+  })
+  expect(res.ok()).toBeTruthy()
+  const body = normalizeDataset(await res.json())
+  expect(body.rowCount).toBe(1)
+  expect(body.rows[0].category).toBe('Мебель')
+  expect(body.rows[0].price).toBe(43000)
+  // заголовок собран из набора settings
+  expect(body.rows[0].tenant).toBe('demo-tenant')
+
+  await page.goto('/report.html?report=crm-filter-path')
+  await expect(page.locator('.meta')).toContainText('строк: 1')
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toContainText('Мебель')
+})
