@@ -896,21 +896,74 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
                   "у набора '" + key + "' источник '" + ds.connection + "' не объявлен как rest");
             return;
         }
-        rep::restFetch(
-            conn->second, ds.rest, restCache,
-            [maxRows, onOk, onErr](const rep::DatasetRows &rows) {
-                if (rows.rows.size() > maxRows) {
-                    onErr(422, "ROW_LIMIT",
-                          "REST-набор " + std::to_string(rows.rows.size()) + " строк > лимита " +
-                              std::to_string(maxRows));
+        // Общие колбэки для REST (с подстановками и без них).
+        auto restOk = [maxRows, onOk, onErr](const rep::DatasetRows &rows) {
+            if (rows.rows.size() > maxRows) {
+                onErr(422, "ROW_LIMIT",
+                      "REST-набор " + std::to_string(rows.rows.size()) + " строк > лимита " +
+                          std::to_string(maxRows));
+                return;
+            }
+            onOk(rows);
+        };
+        auto restFail = [onErr](const std::string &code, const std::string &message) {
+            const int status = code == "REST_TIMEOUT" ? 504 : (code == "REST_FORBIDDEN" ? 403 : 422);
+            onErr(status, code, message);
+        };
+
+        // ADR-117: значения query/body берутся из наборов dependsOn. Пустой источник — REST
+        // не вызываем, отдаём пустой набор с объявленными колонками.
+        if (!ds.rest.dependsOn.empty()) {
+            // копия источника: лямбда живёт дольше кадра обработчика, tpl/итератор туда не годятся
+            const rep::ConnSpec restConn = conn->second;
+            auto sources = std::make_shared<std::map<std::string, rep::DatasetRows>>();
+            auto remaining = std::make_shared<size_t>(ds.rest.dependsOn.size());
+            auto failed = std::make_shared<bool>(false);
+            auto proceed = [sources, remaining, failed, restOk, restFail, restConn, &restCache, ds]() {
+                if (*failed) return;
+                if (*remaining > 0 && --(*remaining) > 0) return;
+                for (const auto &dep : ds.rest.dependsOn) {
+                    const auto it = sources->find(dep);
+                    if (it == sources->end() || it->second.rows.empty()) {
+                        rep::DatasetRows empty;
+                        for (const auto &col : ds.rest.columns) {
+                            empty.columns.push_back(
+                                {col.as.empty() ? col.field : col.as, col.type, col.title});
+                        }
+                        std::fprintf(stderr, "rest: набор «%s» пуст — запрос не отправлен\n",
+                                     dep.c_str());
+                        restOk(empty);
+                        return;
+                    }
+                }
+                rep::RestSpec rendered;
+                std::string renderErr;
+                if (!rep::renderRestSpec(ds.rest, *sources, rendered, renderErr)) {
+                    restFail("REST_INVALID", renderErr);
                     return;
                 }
-                onOk(rows);
-            },
-            [onErr](const std::string &code, const std::string &message) {
-                const int status = code == "REST_TIMEOUT" ? 504 : (code == "REST_FORBIDDEN" ? 403 : 422);
-                onErr(status, code, message);
-            });
+                rep::restFetch(restConn, rendered, restCache, restOk, restFail);
+            };
+            auto fail = [failed, restFail](int, const std::string &code, const std::string &msg) {
+                if (*failed) return;
+                *failed = true;
+                restFail(code, msg);
+            };
+            for (const auto &dep : ds.rest.dependsOn) {
+                fetchDatasetRows(
+                    tpl, dep, bag, dataDb, connRegistry, restCache, maxRows,
+                    [sources, dep, proceed](const rep::DatasetRows &rows) {
+                        (*sources)[dep] = rows;
+                        proceed();
+                    },
+                    [fail](int status, const std::string &code, const std::string &msg) {
+                        fail(status, code, msg);
+                    });
+            }
+            return;
+        }
+
+        rep::restFetch(conn->second, ds.rest, restCache, restOk, restFail);
         return;
     }
 

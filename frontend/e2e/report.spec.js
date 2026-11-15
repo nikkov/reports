@@ -3006,3 +3006,20 @@ test('постраничный REST в режиме offset: страницы и�
   await expect(page.locator('.meta')).toContainText('строк: 2500')
   await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
 })
+
+// ADR-117: тело REST-запроса собирается из другого набора (SQL → REST POST).
+test('REST с подстановкой из набора: категории из БД уходят в тело POST', async ({ page, request }) => {
+  const res = await request.post('/api/report/data', {
+    data: { reportId: 'crm-filtered', dataset: 'prices', params: {} }
+  })
+  expect(res.ok()).toBeTruthy()
+  const body = normalizeDataset(await res.json())
+  expect(body.rowCount).toBe(4)
+  const electronics = body.rows.find((r) => r.category === 'Электроника')
+  expect(electronics.price).toBe(125000)
+  expect(electronics.currency).toBe('RUB')
+
+  await page.goto('/report.html?report=crm-filtered')
+  await expect(page.locator('.meta')).toContainText('строк: 4')
+  await expect(page.locator('.rt-table tbody tr.detail').first()).toBeVisible()
+})

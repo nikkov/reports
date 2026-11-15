@@ -37,8 +37,11 @@ struct RestPage {
 };
 
 struct RestSpec {
+    std::string method = "GET";           // GET | POST (ADR-117)
     std::string path;                     // /api/regions
     std::map<std::string, std::string> query;
+    Json::Value body;                     // шаблон тела для POST, с плейсхолдерами $набор.колонка
+    std::vector<std::string> dependsOn;   // наборы-источники значений для query/body
     std::string rowsPath;                 // items | data.rows | пусто — корень
     std::vector<RestColumn> columns;
     RestPage page;
@@ -46,6 +49,12 @@ struct RestSpec {
 
 // Разбор datasets.<key>.rest. false + текст ошибки (семантику дополнительно проверяет валидатор).
 bool parseRestSpec(const Json::Value &rest, RestSpec &out, std::string &error);
+
+// Подстановка значений наборов в query и body (ADR-117): `$набор.колонка` из первой строки;
+// массив с единственным объектом/скаляром, где есть плейсхолдеры, разворачивается по строкам
+// набора. Пустой набор-источник — пустой spec (REST не вызывается, onOk получает 0 строк).
+bool renderRestSpec(const RestSpec &spec, const std::map<std::string, DatasetRows> &sources,
+                    RestSpec &out, std::string &error);
 
 // Проверка хоста из baseUrl по списку разрешённых (host или host:port). Пустой список — запрещено всё.
 bool restHostAllowed(const std::string &baseUrl, const std::vector<std::string> &allowed,
