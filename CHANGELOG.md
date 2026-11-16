@@ -1,5 +1,19 @@
 # История версий
 
+## v2.13.1 — 2026-11-16
+
+Kerberos: работа с окружением только через env.cc (ADR-122).
+
+### Что было не так
+`negotiate.cc` сам вызывал `setenv`/`unsetenv` — статическая проверка Windows-совместимости
+(`scripts/check-windows.sh`) падала: платформенные вызовы должны жить в обёртках.
+
+### Что сделано
+- в `env.{h,cc}` добавлены `setEnvVar`/`unsetEnvVar`; `negotiate.cc` использует их.
+
+### Проверки
+`check-windows.sh` — пройден; ctest 131 кейс / 745 assertion.
+
 ## v2.13.0 — 2026-11-16
 
 Kerberos/SPNEGO для REST-источников (ADR-122).
