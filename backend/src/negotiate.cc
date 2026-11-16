@@ -60,6 +60,13 @@ std::string describe(OM_uint32 major, OM_uint32 minor) {
         }
         gss_release_buffer(&minStat, &msg);
     }
+    // Частые случаи объясняем по-человечески: иначе в логе и в ответе клиенту
+    // остаётся «No credentials were supplied», и непонятно, что делать (ADR-123).
+    if (major == GSS_S_NO_CRED || major == GSS_S_CREDENTIALS_EXPIRED) {
+        text += major == GSS_S_CREDENTIALS_EXPIRED
+                    ? " — тикет Kerberos истёк, обновите его: kinit <пользователь>@<REALM>"
+                    : " — нет тикета Kerberos, получите его: kinit <пользователь>@<REALM>";
+    }
     return text.empty() ? " ошибка GSSAPI" : text;
 }
 
@@ -147,6 +154,7 @@ bool NegotiateClient::start(const std::string &spn, const std::string &ccache,
     context_ = ctx;
     if (major != GSS_S_COMPLETE && major != GSS_S_CONTINUE_NEEDED) {
         error = "Kerberos: " + describe(major, minor);
+        if (!ccacheName.empty()) error += " (ccache: " + ccacheName + ")";
         return false;
     }
     complete_ = (major == GSS_S_COMPLETE);

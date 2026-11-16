@@ -1,5 +1,24 @@
 # История версий
 
+## v2.13.2 — 2026-11-16
+
+Подсказки при ошибках Kerberos и пример окружения (ADR-123).
+
+### Что было не так
+При отсутствующем/истёкшем тикете ответ был «No credentials were supplied…» без указания, что
+делать. В `.env.example` не было `CRM_BASE_URL`, `CRM_USER`, `CRM_PASSWORD`, `SPNEGO_BASE_URL` —
+на чистой машине отчёты `crm-*` падали с `REST_ERROR` (у нас из-за этого упало шесть e2e).
+
+### Что сделано
+- `negotiate.cc`: `GSS_S_NO_CRED`/`GSS_S_CREDENTIALS_EXPIRED` → «получите тикет: kinit …» /
+  «тикет истёк, обновите его», в сообщение добавлен путь ccache;
+- `.env.example`: блок переменных стенда (CRM_*, SPNEGO_BASE_URL) с пояснением про KRB5_*;
+- статус в `docs/plan/plan-rest-auth.md`, ADR-123.
+
+### Проверки
+Пустой ccache: `422 REST_AUTH`, текст «… — нет тикета Kerberos, получите его: kinit … (ccache: …)».
+Рабочий ccache: отчёт `crm-kerberos` возвращает `demo@REP.LOCAL`.
+
 ## v2.13.1 — 2026-11-16
 
 Kerberos: работа с окружением только через env.cc (ADR-122).
