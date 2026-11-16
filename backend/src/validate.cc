@@ -714,11 +714,7 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                     addError(r, base + ".password",
                              "пароль в шаблоне не хранится: укажите passwordEnv с именем переменной окружения");
                 }
-                if (kind == "rest") {
-                    if (asString(conn["baseUrl"]).empty()) {
-                        addError(r, base + ".baseUrl", "для rest-источника нужен baseUrl");
-                    }
-                    const Json::Value &auth = conn["auth"];
+                const Json::Value &auth = conn["auth"];
             if (!auth.isNull()) {
                 const std::string apath = "connections." + key + ".auth";
                 if (kind != "rest") {
@@ -738,6 +734,10 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         }
                     }
                 }
+                if (kind == "rest") {
+                    if (asString(conn["baseUrl"]).empty()) {
+                        addError(r, base + ".baseUrl", "для rest-источника нужен baseUrl");
+                    }
             }
                     const Json::Value &headers = conn["headers"];
                     if (!headers.isNull() && !headers.isObject()) {
