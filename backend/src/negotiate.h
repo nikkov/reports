@@ -35,4 +35,8 @@ bool negotiateAvailable();
 // Разбор base64 из challenge `WWW-Authenticate: Negotiate <токен>`.
 std::string base64Decode(const std::string &value);
 
+// Текст ошибки GSSAPI с подсказкой: при GSS_S_NO_CRED/GSS_S_CREDENTIALS_EXPIRED
+// дописывается «получите тикет: kinit …» / «тикет истёк» (ADR-123). Коды — OM_uint32.
+std::string kerbErrorText(unsigned major, unsigned minor);
+
 } // namespace rep

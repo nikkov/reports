@@ -1,5 +1,22 @@
 # История версий
 
+## v2.13.3 — 2026-11-16
+
+Тесты помощников Kerberos (ADR-124).
+
+### Что было не так
+`negotiate.cc` не был покрыт unit-тестами: разбор base64 и тексты подсказок проверялись только
+вручную. В `negotiate.h` вместо `#pragma once` стояла строка `*** once`.
+
+### Что сделано
+- `kerbErrorText(major, minor)` — публичная обёртка над `describe()`;
+- `tests/negotiate_test.cc`: 8 кейсов (base64 с padding/без, пробел-разделитель, мусорные символы,
+  подсказки `kinit` для `GSS_S_NO_CRED`/`GSS_S_CREDENTIALS_EXPIRED`, их отсутствие для `GSS_S_BAD_NAME`);
+- `#pragma once` в `negotiate.h`; ADR-124.
+
+### Проверки
+ctest 139 кейсов / 760 assertion; `check-windows.sh` — пройдено.
+
 ## v2.13.2 — 2026-11-16
 
 Подсказки при ошибках Kerberos и пример окружения (ADR-123).

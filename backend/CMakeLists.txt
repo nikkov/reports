@@ -101,6 +101,7 @@ add_executable(rep_tests
   tests/join_test.cc
   tests/env_test.cc
   tests/logging_test.cc
+  tests/negotiate_test.cc
   tests/rest_client_test.cc
   tests/dates_expr_test.cc
   tests/queries_test.cc

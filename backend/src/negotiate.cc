@@ -72,6 +72,9 @@ std::string describe(OM_uint32 major, OM_uint32 minor) {
 
 } // namespace
 
+// Публичная обёртка над describe(): тесты проверяют текст без живого KDC (ADR-123).
+std::string kerbErrorText(unsigned major, unsigned minor) { return describe(major, minor); }
+
 bool negotiateAvailable() { return true; }
 
 NegotiateClient::NegotiateClient() = default;
@@ -189,6 +192,8 @@ bool NegotiateClient::step(const std::string &challenge, std::string &token, boo
 }
 
 #else
+
+std::string kerbErrorText(unsigned, unsigned) { return "сервер собран без GSSAPI"; }
 
 bool negotiateAvailable() { return false; }
 
