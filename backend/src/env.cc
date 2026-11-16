@@ -12,6 +12,22 @@ std::string envOr(const std::string &name, const std::string &defaultValue) {
     return v;
 }
 
+void setEnvVar(const std::string &name, const std::string &value) {
+#ifdef _WIN32
+    _putenv_s(name.c_str(), value.c_str());
+#else
+    setenv(name.c_str(), value.c_str(), 1);
+#endif
+}
+
+void unsetEnvVar(const std::string &name) {
+#ifdef _WIN32
+    _putenv_s(name.c_str(), "");
+#else
+    unsetenv(name.c_str());
+#endif
+}
+
 static std::string trim(const std::string &s) {
     const auto b = s.find_first_not_of(" \t\r\n");
     if (b == std::string::npos) return {};

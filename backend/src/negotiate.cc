@@ -1,5 +1,7 @@
 #include "negotiate.h"
 
+#include "env.h"
+
 #include <cstring>
 #include <vector>
 
@@ -88,24 +90,16 @@ public:
             old_ = old;
         }
         if (!value.empty()) {
-#ifdef _WIN32
-            _putenv_s(name, value.c_str());
-#else
-            setenv(name, value.c_str(), 1);
-#endif
+            rep::setEnvVar(name, value);
         }
     }
     ~ScopedEnv() {
         if (!set_ && old_.empty() && !had_) return;
-#ifdef _WIN32
-        _putenv_s(name_, had_ ? old_.c_str() : "");
-#else
         if (had_) {
-            setenv(name_, old_.c_str(), 1);
+            rep::setEnvVar(name_, old_);
         } else {
-            unsetenv(name_);
+            rep::unsetEnvVar(name_);
         }
-#endif
     }
     void touch() { set_ = true; }
 
