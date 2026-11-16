@@ -640,6 +640,36 @@ function checkGaugeZones(block, base, errors) {
     if (conn?.kind === 'rest' && !conn.baseUrl) {
       errors.push({ path: `connections.${key}.baseUrl`, message: 'для rest-источника нужен baseUrl' })
     }
+    // BASIC-аутентификация REST (ADR-121): только имена переменных, пароля в шаблоне нет
+    if (conn?.auth !== undefined) {
+      const auth = conn.auth
+      if (conn.kind !== 'rest') {
+        errors.push({
+          path: `connections.${key}.auth`,
+          message: 'auth допустим только у источника kind: "rest"'
+        })
+      } else if (!auth || typeof auth !== 'object') {
+        errors.push({ path: `connections.${key}.auth`, message: 'нужен объект auth' })
+      } else {
+        if (auth.type !== 'basic') {
+          errors.push({
+            path: `connections.${key}.auth.type`,
+            message: 'поддерживается только type: "basic"'
+          })
+        }
+        for (const field of ['userEnv', 'passwordEnv']) {
+          const value = auth[field]
+          if (typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+            errors.push({
+              path: `connections.${key}.auth.${field}`,
+              message: `нужно имя переменной окружения (заглавные буквы, цифры, «_»), например CRM_${
+                field === 'userEnv' ? 'USER' : 'PASSWORD'
+              }`
+            })
+          }
+        }
+      }
+    }
     for (const [header, value] of Object.entries(conn?.headers || {})) {
       // секрет в шаблоне запрещён: только ${ИМЯ_ПЕРЕМЕННОЙ} (ADR-104)
       if (typeof value === 'string' && /(bearer\s+\S|token=|api[-_]?key|password|secret)/i.test(value) &&

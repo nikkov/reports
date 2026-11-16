@@ -3063,3 +3063,20 @@ test('REST: категория в пути и заголовок X-Tenant из �
   await expect(page.locator('.meta')).toContainText('строк: 1')
   await expect(page.locator('.rt-table tbody tr.detail').first()).toContainText('Мебель')
 })
+
+// ADR-121: демо-REST требует BASIC; отчёт отдаёт данные только с заголовком из окружения.
+test('REST BASIC: демо отвечает 401 без авторизации и 200 с ней', async ({ request }) => {
+  const url = 'http://127.0.0.1:8099/api/prices'
+  const body = { filter: { categories: ['Мебель'] } }
+  const anon = await request.post(url, { data: body })
+  expect(anon.status()).toBe(401)
+  expect(anon.headers()['www-authenticate']).toContain('Basic')
+
+  const authed = await request.post(url, {
+    data: body,
+    headers: { Authorization: 'Basic ' + Buffer.from('demo:demo-pass').toString('base64') }
+  })
+  expect(authed.ok()).toBeTruthy()
+  const json = await authed.json()
+  expect(json.items[0].category).toBe('Мебель')
+})

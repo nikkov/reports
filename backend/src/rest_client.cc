@@ -612,6 +612,22 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
         headers[kv.first] = kv.second;
         headersHash ^= std::hash<std::string>{}(kv.first + ":" + kv.second) + 0x9e3779b97f4a7c15ULL;
     }
+    // BASIC-аутентификация (ADR-121): логин и пароль — только из окружения, в шаблон не попадают.
+    // Значения не пишутся ни в логи, ни в сообщения об ошибках.
+    if (conn.authType == "basic") {
+        const std::string user = envOr(conn.authUserEnv, "");
+        const std::string password = envOr(conn.authPassEnv, "");
+        if (user.empty() || password.empty()) {
+            onErr("REST_AUTH", "источник " + conn.key + ": не заданы переменные окружения " +
+                                   (user.empty() ? conn.authUserEnv : conn.authPassEnv));
+            return;
+        }
+        headers["Authorization"] = "Basic " + base64Encode(user + ":" + password);
+    } else if (!conn.authType.empty()) {
+        onErr("REST_AUTH", "источник " + conn.key + ": неизвестный auth.type «" + conn.authType +
+                               "» (поддерживается только basic)");
+        return;
+    }
     for (const auto &kv : conn.headers) {
         const std::string value = expandEnvValue(kv.second, conn.key, error);
         if (!error.empty()) {

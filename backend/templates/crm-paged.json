@@ -15,7 +15,12 @@
       "headers": {
         "Accept": "application/json"
       },
-      "timeoutMs": 5000
+      "timeoutMs": 5000,
+      "auth": {
+        "type": "basic",
+        "userEnv": "CRM_USER",
+        "passwordEnv": "CRM_PASSWORD"
+      }
     }
   },
   "params": [],

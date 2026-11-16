@@ -30,7 +30,12 @@
         "Accept": "application/json"
       },
       "timeoutMs": 5000,
-      "cacheSeconds": 30
+      "cacheSeconds": 30,
+      "auth": {
+        "type": "basic",
+        "userEnv": "CRM_USER",
+        "passwordEnv": "CRM_PASSWORD"
+      }
     }
   },
   "params": [

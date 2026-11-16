@@ -615,6 +615,31 @@ export default {
         "tokenEnv": {
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "userEnv",
+            "passwordEnv"
+          ],
+          "description": "аутентификация REST-источника: BASIC, логин и пароль только из окружения (ADR-121)",
+          "properties": {
+            "type": {
+              "enum": [
+                "basic"
+              ]
+            },
+            "userEnv": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "passwordEnv": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            }
+          }
         }
       }
     },

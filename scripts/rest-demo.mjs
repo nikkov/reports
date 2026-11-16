@@ -8,6 +8,28 @@
 import http from 'node:http'
 
 const port = Number(process.argv[2] || process.env.REST_DEMO_PORT || 8099)
+// BASIC-аутентификация демо-сервиса (ADR-121): по умолчанию demo / demo-pass
+const AUTH_USER = process.env.CRM_USER || 'demo'
+const AUTH_PASS = process.env.CRM_PASSWORD || 'demo-pass'
+
+function basicOk(req) {
+  const header = req.headers.authorization || ''
+  if (!header.startsWith('Basic ')) return false
+  const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8')
+  const idx = decoded.indexOf(':')
+  if (idx < 0) return false
+  return decoded.slice(0, idx) === AUTH_USER && decoded.slice(idx + 1) === AUTH_PASS
+}
+
+function requireBasic(req, res) {
+  if (basicOk(req)) return true
+  res.writeHead(401, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'WWW-Authenticate': 'Basic realm="crm"'
+  })
+  res.end(JSON.stringify({ error: 'unauthorized' }))
+  return false
+}
 
 const regions = [
   { id: 1, name: 'Север', manager: 'Иванов А.', active: true },
@@ -48,6 +70,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`)
   // GET с категорией в пути (ADR-118): проверка плейсхолдера в path и заголовка набора
   if (url.pathname.startsWith('/api/prices/')) {
+    if (!requireBasic(req, res)) return
     // путь может прийти как есть, urlencode или дважды закодированным — разбираем все варианты
     const rawName = url.pathname.split('/').pop()
     let category = rawName
@@ -85,6 +108,7 @@ const server = http.createServer(async (req, res) => {
     return
   }
   if (url.pathname === '/api/prices' && req.method === 'POST') {
+    if (!requireBasic(req, res)) return
     const body = await readJson(req)
     if (!body) {
       res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })

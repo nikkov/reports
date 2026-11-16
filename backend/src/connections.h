@@ -44,9 +44,17 @@ struct ConnSpec {
     // rest (ADR-104)
     std::string baseUrl;
     std::map<std::string, std::string> headers; // значения могут быть ${ENV} (секреты — только так)
+    // BASIC-аутентификация REST (ADR-121): только имена переменных окружения, пароль в шаблоне
+    // запрещён. Пустые имена — аутентификация не используется.
+    std::string authType;      // "basic" | пусто
+    std::string authUserEnv;   // имя переменной с логином
+    std::string authPassEnv;   // имя переменной с паролем
     int timeoutMs = 5000;
     int cacheSeconds = 0;
 };
+
+// Base64 для BASIC-заголовка (ADR-121). Ошибок не возвращает: строка любой длины.
+std::string base64Encode(const std::string &value);
 
 // Подстановка ${NAME} в строковом поле источника (ADR-77). Незаданная переменная — ошибка.
 std::string expandEnvValue(const std::string &value, const std::string &key, std::string &error);

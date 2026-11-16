@@ -4728,6 +4728,223 @@
         "datasets.crm.rest.body.filter.categories.0.id",
         "datasets.crm.rest.body.filter.categories.0.name"
       ]
+    },
+    {
+      "name": "REST: BASIC без имени переменной логина",
+      "template": {
+        "version": 2,
+        "id": "parity-121",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}",
+            "auth": {
+              "type": "basic",
+              "userEnv": "",
+              "passwordEnv": "CRM_PASSWORD"
+            }
+          }
+        },
+        "datasets": {
+          "cats": {
+            "sql": "SELECT id, name FROM t"
+          },
+          "crm": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/prices",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "category",
+                  "type": "text"
+                },
+                {
+                  "field": "price",
+                  "type": "int"
+                }
+              ],
+              "method": "POST",
+              "dependsOn": [
+                "cats"
+              ],
+              "body": {
+                "filter": {
+                  "categories": [
+                    {
+                      "id": "$cats.id",
+                      "name": "$cats.name"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "crm",
+            "columns": [
+              {
+                "field": "category",
+                "title": "Категория"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "connections.crm.auth.userEnv"
+      ]
+    },
+    {
+      "name": "BASIC у postgres-источника запрещён",
+      "template": {
+        "version": 2,
+        "id": "parity-121",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}"
+          },
+          "main": {
+            "kind": "postgres",
+            "host": "h",
+            "user": "u",
+            "auth": {
+              "type": "basic",
+              "userEnv": "A",
+              "passwordEnv": "B"
+            }
+          }
+        },
+        "datasets": {
+          "cats": {
+            "sql": "SELECT id, name FROM t"
+          },
+          "crm": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/prices",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "category",
+                  "type": "text"
+                },
+                {
+                  "field": "price",
+                  "type": "int"
+                }
+              ],
+              "method": "POST",
+              "dependsOn": [
+                "cats"
+              ],
+              "body": {
+                "filter": {
+                  "categories": [
+                    {
+                      "id": "$cats.id",
+                      "name": "$cats.name"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "crm",
+            "columns": [
+              {
+                "field": "category",
+                "title": "Категория"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "connections.main.auth",
+        "connections.main.database",
+        "connections.main.passwordEnv"
+      ]
+    },
+    {
+      "name": "BASIC: неизвестный тип",
+      "template": {
+        "version": 2,
+        "id": "parity-121",
+        "title": "Цепочки",
+        "connections": {
+          "crm": {
+            "kind": "rest",
+            "baseUrl": "${CRM_URL}",
+            "auth": {
+              "type": "ntlm",
+              "userEnv": "CRM_USER",
+              "passwordEnv": "CRM_PASSWORD"
+            }
+          }
+        },
+        "datasets": {
+          "cats": {
+            "sql": "SELECT id, name FROM t"
+          },
+          "crm": {
+            "connection": "crm",
+            "rest": {
+              "path": "/api/prices",
+              "rowsPath": "items",
+              "columns": [
+                {
+                  "field": "category",
+                  "type": "text"
+                },
+                {
+                  "field": "price",
+                  "type": "int"
+                }
+              ],
+              "method": "POST",
+              "dependsOn": [
+                "cats"
+              ],
+              "body": {
+                "filter": {
+                  "categories": [
+                    {
+                      "id": "$cats.id",
+                      "name": "$cats.name"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "crm",
+            "columns": [
+              {
+                "field": "category",
+                "title": "Категория"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "connections.crm.auth.type"
+      ]
     }
   ]
 }

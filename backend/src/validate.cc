@@ -718,6 +718,27 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                     if (asString(conn["baseUrl"]).empty()) {
                         addError(r, base + ".baseUrl", "для rest-источника нужен baseUrl");
                     }
+                    const Json::Value &auth = conn["auth"];
+            if (!auth.isNull()) {
+                const std::string apath = "connections." + key + ".auth";
+                if (kind != "rest") {
+                    addError(r, apath, "auth допустим только у источника kind: \"rest\"");
+                } else if (!auth.isObject()) {
+                    addError(r, apath, "нужен объект auth");
+                } else {
+                    if (asString(auth["type"]) != "basic") {
+                        addError(r, apath + ".type", "поддерживается только type: \"basic\"");
+                    }
+                    for (const char *field : {"userEnv", "passwordEnv"}) {
+                        const std::string value = asString(auth[field]);
+                        static const std::regex envName("^[A-Za-z_][A-Za-z0-9_]*$");
+                        if (value.empty() || !std::regex_match(value, envName)) {
+                            addError(r, apath + "." + field,
+                                     "нужно имя переменной окружения (заглавные буквы, цифры, «_»)");
+                        }
+                    }
+                }
+            }
                     const Json::Value &headers = conn["headers"];
                     if (!headers.isNull() && !headers.isObject()) {
                         addError(r, base + ".headers", "headers должен быть объектом строк");

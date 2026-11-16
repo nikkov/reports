@@ -74,6 +74,12 @@ bool parseConnections(const Json::Value &connections, std::map<std::string, Conn
             spec.statementTimeoutMs = (*it)["statementTimeoutMs"].asInt();
         }
         spec.baseUrl = it->get("baseUrl", "").asString();
+        const Json::Value &auth = (*it)["auth"];
+        if (auth.isObject()) {
+            spec.authType = auth.get("type", "").asString();
+            spec.authUserEnv = auth.get("userEnv", "").asString();
+            spec.authPassEnv = auth.get("passwordEnv", "").asString();
+        }
         const Json::Value &hdrs = (*it)["headers"];
         if (hdrs.isObject()) {
             for (auto h = hdrs.begin(); h != hdrs.end(); ++h) {
@@ -129,6 +135,8 @@ std::string expandEnv(const std::string &value, const std::string &key, std::str
 }
 
 }  // namespace
+
+
 
 std::string expandEnvValue(const std::string &value, const std::string &key, std::string &error) {
     return expandEnv(value, key, error);
