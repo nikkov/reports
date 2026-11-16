@@ -620,16 +620,30 @@ export default {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "type",
-            "userEnv",
-            "passwordEnv"
+            "type"
           ],
           "description": "аутентификация REST-источника: BASIC, логин и пароль только из окружения (ADR-121)",
           "properties": {
             "type": {
               "enum": [
-                "basic"
+                "basic",
+                "kerberos"
               ]
+            },
+            "ccache": {
+              "type": "string",
+              "minLength": 1,
+              "description": "путь к ccache Kerberos (ADR-122); пусто — из окружения при вызове"
+            },
+            "krb5Config": {
+              "type": "string",
+              "minLength": 1,
+              "description": "путь к krb5.conf (ADR-122); пусто — системный"
+            },
+            "spn": {
+              "type": "string",
+              "minLength": 1,
+              "description": "SPN сервиса для Kerberos, например HTTP@crm.example; пусто — HTTP@<host> (ADR-122)"
             },
             "userEnv": {
               "type": "string",

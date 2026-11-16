@@ -1,0 +1,61 @@
+{
+  "version": 2,
+  "id": "crm-kerberos",
+  "title": "Kerberos: прозрачный вход в REST (SPNEGO)",
+  "description": "Источник проверяет Authorization: Negotiate через GSSAPI (ADR-122).",
+  "connections": {
+    "spnego": {
+      "kind": "rest",
+      "baseUrl": "${SPNEGO_BASE_URL}",
+      "auth": {
+        "type": "kerberos",
+        "spn": "HTTP@localhost",
+        "ccache": "/tmp/rep-krb/ccache",
+        "krb5Config": "/tmp/rep-krb/krb5.conf"
+      }
+    }
+  },
+  "datasets": {
+    "negotiated": {
+      "connection": "spnego",
+      "rest": {
+        "method": "GET",
+        "path": "/api/negotiated",
+        "rowsPath": "items",
+        "columns": [
+          {
+            "field": "tenant",
+            "type": "text",
+            "title": "Пользователь Kerberos"
+          },
+          {
+            "field": "value",
+            "type": "int",
+            "title": "Значение"
+          }
+        ]
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Прозрачная аутентификация Kerberos: сервер получает тикет и отправляет Authorization: Negotiate."
+    },
+    {
+      "type": "table",
+      "dataKey": "negotiated",
+      "grandTotal": false,
+      "columns": [
+        {
+          "field": "tenant",
+          "title": "Пользователь Kerberos"
+        },
+        {
+          "field": "value",
+          "title": "Значение"
+        }
+      ]
+    }
+  ]
+}

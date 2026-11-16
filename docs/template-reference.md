@@ -572,6 +572,30 @@ REP_CONN_FINANCE_PASSWORD=…   # из хранилища секретов, не
 - демо-сервис `scripts/rest-demo.mjs` требует BASIC (`demo` / `demo-pass`, переопределяется
   `CRM_USER`/`CRM_PASSWORD` в окружении демо).
 
+
+#### Kerberos/SPNEGO: прозрачная аутентификация (ADR-122)
+
+```json
+"connections": {
+  "spnego": { "kind": "rest", "baseUrl": "${SPNEGO_BASE_URL}",
+              "auth": { "type": "kerberos", "spn": "HTTP@localhost",
+                        "ccache": "/tmp/rep-krb/ccache",
+                        "krb5Config": "/tmp/rep-krb/krb5.conf" } }
+}
+```
+
+- сервер получает тикет через GSSAPI (`gss_init_sec_context`) и отправляет
+  `Authorization: Negotiate <токен>`; на `401` + `WWW-Authenticate: Negotiate` продолжает рукопожатие
+  (до 3 раундов), токены не логируются;
+- `spn` — `HTTP@host` (пусто — `HTTP@<host>` источника); `ccache`/`krb5Config` — пути к тикету и
+  конфигу: окружение меняется только на время вызова GSSAPI, иначе libpq пытается GSSAPI к PostgreSQL
+  и старт зависает;
+- работает только при сборке с GSSAPI (Linux): `cmake` находит `libgssapi_krb5`; иначе `422 REST_AUTH`;
+- локальная проверка: `./scripts/dev-kerberos.sh` (KDC без root, realm `REP.LOCAL`, SPNEGO на :8098)
+  и `./scripts/check-kerberos.sh` (отчёт `crm-kerberos` должен вернуть `demo@REP.LOCAL`);
+- ограничения: делегирования нет — сервер ходит под своей учёткой; керберос чувствителен к времени;
+  в CI инфраструктуры нет, поэтому проверка — ручной скрипт, а не e2e.
+
 ### Раскладка блоков: сетка 12 колонок (ADR-96)
 
 Блоки лежат в сетке из 12 колонок, ширина задаётся `span`:

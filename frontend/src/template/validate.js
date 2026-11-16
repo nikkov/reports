@@ -651,14 +651,25 @@ function checkGaugeZones(block, base, errors) {
       } else if (!auth || typeof auth !== 'object') {
         errors.push({ path: `connections.${key}.auth`, message: 'нужен объект auth' })
       } else {
-        if (auth.type !== 'basic') {
+        if (auth.type !== 'basic' && auth.type !== 'kerberos') {
           errors.push({
             path: `connections.${key}.auth.type`,
-            message: 'поддерживается только type: "basic"'
+            message: 'поддерживаются type: "basic" и "kerberos"'
           })
         }
-        for (const field of ['userEnv', 'passwordEnv']) {
+        const envFields = auth.type === 'kerberos' ? ['spn'] : ['userEnv', 'passwordEnv']
+        for (const field of envFields) {
           const value = auth[field]
+          if (field === 'spn') {
+            // SPN необязателен: пусто — сервер возьмёт HTTP@<host> источника
+            if (value !== undefined && (typeof value !== 'string' || !/^[A-Za-z]+@[^\s]+$/.test(value))) {
+              errors.push({
+                path: `connections.${key}.auth.spn`,
+                message: 'SPN задаётся как HTTP@host (или HTTP/host)'
+              })
+            }
+            continue
+          }
           if (typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
             errors.push({
               path: `connections.${key}.auth.${field}`,

@@ -79,6 +79,9 @@ bool parseConnections(const Json::Value &connections, std::map<std::string, Conn
             spec.authType = auth.get("type", "").asString();
             spec.authUserEnv = auth.get("userEnv", "").asString();
             spec.authPassEnv = auth.get("passwordEnv", "").asString();
+            spec.authSpn = auth.get("spn", "").asString();
+            spec.authCcache = auth.get("ccache", "").asString();
+            spec.authKrb5Config = auth.get("krb5Config", "").asString();
         }
         const Json::Value &hdrs = (*it)["headers"];
         if (hdrs.isObject()) {

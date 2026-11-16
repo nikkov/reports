@@ -1,5 +1,7 @@
 #include "rest_client.h"
 
+#include "negotiate.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -607,6 +609,8 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
     }
     std::map<std::string, std::string> headers;
     size_t headersHash = 0;
+    std::shared_ptr<rep::NegotiateClient> pendingNegotiate;
+    std::string pendingToken;
     // заголовки набора (ADR-118) перекрывают заголовки источника
     for (const auto &kv : spec.headers) {
         headers[kv.first] = kv.second;
@@ -623,9 +627,26 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
             return;
         }
         headers["Authorization"] = "Basic " + base64Encode(user + ":" + password);
+    } else if (conn.authType == "kerberos") {
+        if (!rep::negotiateAvailable()) {
+            onErr("REST_AUTH", "источник " + conn.key +
+                                   ": сервер собран без GSSAPI — Kerberos недоступен");
+            return;
+        }
+        const std::string spn = conn.authSpn.empty() ? ("HTTP@" + host) : conn.authSpn;
+        auto negotiate = std::make_shared<rep::NegotiateClient>();
+        std::string token;
+        std::string kerbErr;
+        if (!negotiate->start(spn, conn.authCcache, conn.authKrb5Config, token, kerbErr)) {
+            onErr("REST_AUTH", "источник " + conn.key + ": " + kerbErr);
+            return;
+        }
+        headers["Authorization"] = "Negotiate " + base64Encode(token);
+        pendingNegotiate = negotiate;
+        pendingToken = headers["Authorization"];
     } else if (!conn.authType.empty()) {
         onErr("REST_AUTH", "источник " + conn.key + ": неизвестный auth.type «" + conn.authType +
-                               "» (поддерживается только basic)");
+                               "» (поддерживается basic и kerberos)");
         return;
     }
     for (const auto &kv : conn.headers) {
@@ -653,6 +674,11 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
         DatasetRows acc;
         int donePages = 0; // сколько страниц уже собрано (0 — первая)
         std::function<void(int)> step;
+        // Kerberos (ADR-122): один контекст на набор, токены — между запросами
+        std::shared_ptr<rep::NegotiateClient> negotiate;
+        std::string authToken;   // base64 текущего токена Negotiate
+        int authRounds = 0;      // защита от бесконечного рукопожатия
+
         std::function<void(const DatasetRows &)> onOk;
         std::function<void(const std::string &, const std::string &)> onErr;
     };
@@ -667,6 +693,8 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
     ctx->cacheSeconds = conn.cacheSeconds;
     ctx->spec = spec;
     ctx->cache = &cache;
+    ctx->negotiate = pendingNegotiate;
+    ctx->authToken = pendingToken;
     ctx->onOk = onOk;
     ctx->onErr = onErr;
 
@@ -769,6 +797,29 @@ void restFetch(const ConnSpec &conn, const RestSpec &spec, RestCache &cache,
                     ctx->onErr("REST_INVALID", "источник " + ctx->key + ": редирект " +
                                                    std::to_string(status) + " запрещён");
                     return;
+                }
+                if (status == 401 && ctx->negotiate && ctx->authRounds < 3) {
+                    // Kerberos (ADR-122): второй и третий раунд рукопожатия
+                    const std::string www = resp->getHeader("www-authenticate");
+                    if (www.rfind("Negotiate", 0) == 0) {
+                        const std::string challenge = www.size() > 10 ? www.substr(10) : "";
+                        std::string token;
+                        bool complete = false;
+                        std::string kerbErr;
+                        if (!ctx->negotiate->step(rep::base64Decode(challenge), token, complete,
+                                                  kerbErr)) {
+                            ctx->onErr("REST_AUTH", "источник " + ctx->key + ": " + kerbErr);
+                            return;
+                        }
+                        ctx->authRounds += 1;
+                        if (!token.empty()) {
+                            ctx->headers["Authorization"] = "Negotiate " + base64Encode(token);
+                        }
+                        std::fprintf(stderr, "rest: %s — Kerberos, раунд %d\n", ctx->host.c_str(),
+                                     ctx->authRounds + 1);
+                        ctx->step(ctx->donePages);
+                        return;
+                    }
                 }
                 if (status < 200 || status >= 300) {
                     ctx->onErr("REST_ERROR", "источник " + ctx->key + ": сервер ответил " +

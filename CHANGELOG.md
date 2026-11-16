@@ -1,5 +1,23 @@
 # История версий
 
+## v2.13.0 — 2026-11-16
+
+Kerberos/SPNEGO для REST-источников (ADR-122).
+
+### Что сделано
+- `auth: {type: "kerberos", spn, ccache, krb5Config}`: GSSAPI-клиент (`negotiate.{h,cc}`),
+  `Authorization: Negotiate`, продолжение рукопожатия по `401` (до 3 раундов);
+- окружение `KRB5CCNAME`/`KRB5_CONFIG` ставится только на время GSSAPI-вызова — иначе libpq
+  пытается GSSAPI к PostgreSQL и старт зависает;
+- CMake: автопоиск `libgssapi_krb5`, без неё `422 REST_AUTH`;
+- пример `crm-kerberos`, учебный SPNEGO-сервис `scripts/rest-spnego-demo.py`,
+  инфраструктура `scripts/dev-kerberos.sh` и проверка `scripts/check-kerberos.sh`;
+- parity 115 фикстур (SPN неверного формата), документация в `template-reference.md`.
+
+### Проверки
+KDC `REP.LOCAL` на :10088, `kinit demo` → TGT; SPNEGO :8098 — 401 без токена, 200 с `Negotiate`;
+отчёт `crm-kerberos` — `demo@REP.LOCAL / 42`; `check-kerberos.sh` — успешно.
+
 ## v2.12.1 — 2026-11-16
 
 Проверка `auth` для postgres-источников (ADR-121).

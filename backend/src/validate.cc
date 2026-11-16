@@ -722,15 +722,26 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 } else if (!auth.isObject()) {
                     addError(r, apath, "нужен объект auth");
                 } else {
-                    if (asString(auth["type"]) != "basic") {
-                        addError(r, apath + ".type", "поддерживается только type: \"basic\"");
+                    const std::string authType = asString(auth["type"]);
+                    if (authType != "basic" && authType != "kerberos") {
+                        addError(r, apath + ".type",
+                                 "поддерживаются type: \"basic\" и \"kerberos\"");
                     }
-                    for (const char *field : {"userEnv", "passwordEnv"}) {
-                        const std::string value = asString(auth[field]);
-                        static const std::regex envName("^[A-Za-z_][A-Za-z0-9_]*$");
-                        if (value.empty() || !std::regex_match(value, envName)) {
-                            addError(r, apath + "." + field,
-                                     "нужно имя переменной окружения (заглавные буквы, цифры, «_»)");
+                    if (authType == "kerberos") {
+                        // SPN необязателен: пусто — HTTP@<host> источника; задан — HTTP@host
+                        const std::string spn = asString(auth["spn"]);
+                        static const std::regex spnName("^[A-Za-z]+@[^\\s]+$");
+                        if (!spn.empty() && !std::regex_match(spn, spnName)) {
+                            addError(r, apath + ".spn", "SPN задаётся как HTTP@host (или HTTP/host)");
+                        }
+                    } else {
+                        for (const char *field : {"userEnv", "passwordEnv"}) {
+                            const std::string value = asString(auth[field]);
+                            static const std::regex envName("^[A-Za-z_][A-Za-z0-9_]*$");
+                            if (value.empty() || !std::regex_match(value, envName)) {
+                                addError(r, apath + "." + field,
+                                         "нужно имя переменной окружения (заглавные буквы, цифры, «_»)");
+                            }
                         }
                     }
                 }

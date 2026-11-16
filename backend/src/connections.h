@@ -49,6 +49,9 @@ struct ConnSpec {
     std::string authType;      // "basic" | пусто
     std::string authUserEnv;   // имя переменной с логином
     std::string authPassEnv;   // имя переменной с паролем
+    std::string authSpn;       // Kerberos SPN, например HTTP@crm.example; пусто — HTTP@<host>
+    std::string authCcache;    // путь к ccache для Kerberos (пусто — из окружения при вызове)
+    std::string authKrb5Config; // путь к krb5.conf (пусто — системный)
     int timeoutMs = 5000;
     int cacheSeconds = 0;
 };

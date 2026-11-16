@@ -32,6 +32,7 @@ add_library(rep_core STATIC
   src/dataset.cc
   src/join.cc
   src/logging.cc
+  src/negotiate.cc
   src/rest_client.cc
   src/smtp.cc
   src/subscriptions.cc
@@ -46,6 +47,21 @@ add_library(rep_core STATIC
 )
 target_include_directories(rep_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(rep_core PUBLIC Drogon::Drogon OpenSSL::SSL OpenSSL::Crypto)
+
+# Kerberos/SPNEGO для REST-источников (ADR-122): только если система даёт GSSAPI.
+# На Windows механизм не поддержан (там NTLM/SSPI — отдельная задача, см. plan-rest-auth.md).
+if(UNIX AND NOT APPLE)
+  find_library(GSSAPI_LIBRARY NAMES gssapi_krb5 gssapi)
+  find_path(GSSAPI_INCLUDE_DIR NAMES gssapi/gssapi.h)
+  if(GSSAPI_LIBRARY AND GSSAPI_INCLUDE_DIR)
+    target_compile_definitions(rep_core PUBLIC REP_HAVE_GSSAPI=1)
+    target_include_directories(rep_core PUBLIC ${GSSAPI_INCLUDE_DIR})
+    target_link_libraries(rep_core PUBLIC ${GSSAPI_LIBRARY})
+    message(STATUS "GSSAPI найден: ${GSSAPI_LIBRARY}")
+  else()
+    message(STATUS "GSSAPI не найден: Kerberos-аутентификация REST выключена")
+  endif()
+endif()
 
 # Платформенные различия собраны в src/net.*: остальной код их не знает.
 if(WIN32)
