@@ -3127,3 +3127,42 @@ test('сбой источника: 503 с причиной PostgreSQL, запи�
 
   await request.delete(`/api/reports/${id}`)
 })
+
+test('черновик с ошибками сохраняется, но не показывается и не публикуется (ADR-131)', async ({ request }) => {
+  const id = 'draft-broken-e2e'
+  const base = {
+    version: 2,
+    id,
+    title: 'Черновик с ошибкой e2e',
+    params: [],
+    datasets: { s: { sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }]
+  }
+  await request.delete(`/api/reports/${id}`)
+  expect((await request.post('/api/reports', { data: { id, body: base } })).ok()).toBeTruthy()
+
+  // ошибка в шаблоне: span вне 1…12 — сохранение всё равно проходит
+  const broken = { ...base, blocks: [{ ...base.blocks[0], span: 99 }] }
+  const saved = await request.put(`/api/admin/reports/${id}/draft`, { data: { body: broken } })
+  expect(saved.ok()).toBeTruthy()
+  const savedBody = await saved.json()
+  expect(savedBody.valid).toBe(false)
+  expect(String(savedBody.errors)).toContain('span')
+
+  // автор видит свой текст, чтобы продолжить правку
+  expect((await request.get(`/api/admin/reports/${id}/draft`)).ok()).toBeTruthy()
+
+  // данные и публикация запрещены
+  const data = await request.post('/api/report/data', { data: { reportId: id, dataset: 's', params: {}, draft: true } })
+  expect(data.status()).toBe(422)
+  expect((await data.json()).error.code).toBe('TEMPLATE_INVALID')
+  expect((await request.post(`/api/admin/reports/${id}/publish`)).status()).toBe(422)
+
+  // исправленный черновик снова работает
+  const fixed = await request.put(`/api/admin/reports/${id}/draft`, { data: { body: base } })
+  expect((await fixed.json()).valid).toBe(true)
+  expect((await request.post('/api/report/data', { data: { reportId: id, dataset: 's', params: {}, draft: true } })).ok()).toBeTruthy()
+  expect((await request.post(`/api/admin/reports/${id}/publish`)).ok()).toBeTruthy()
+
+  await request.delete(`/api/reports/${id}`)
+})

@@ -1339,6 +1339,8 @@ int main() {
     // не ходят в БД синхронно и не дублируют логику.
     std::map<std::string, TemplateInfo> draftsParsed;
     std::map<std::string, std::string> draftsRaw;
+    // Черновик с ошибками хранится и показывается редактору, но исполнять его нельзя (ADR-131).
+    std::map<std::string, std::string> draftsErrors;
 
     if (templatesSource == "files") {
         if (fs::is_directory(templatesDir)) {
@@ -1380,13 +1382,16 @@ int main() {
                 const std::string id = row["id"].as<std::string>();
                 const std::string draft = row["draft"].as<std::string>();
                 TemplateInfo info;
+                draftsRaw[id] = draft;
                 if (!parseTemplate(draft, id, info)) {
+                    // Черновик с ошибками хранится и редактируется, но не исполняется (ADR-131)
                     REP_LOG_WARN(ChangeTemplate, "") << "черновик в БД не разобран: " << id;
+                    draftsErrors[id] = "шаблон не разбирается: проверьте JSON и обязательные поля";
                     continue;
                 }
                 info.id = id;
                 draftsParsed[id] = info;
-                draftsRaw[id] = draft;
+                draftsErrors[id] = "";
             }
             if (!draftsParsed.empty()) LOG_INFO << "черновиков: " << draftsParsed.size();
         } catch (const std::exception &e) {
@@ -1617,13 +1622,22 @@ int main() {
     // Единый выбор шаблона (черновик или опубликованный) и набора данных. Пять обработчиков
     // раньше держали по копии этого кода, из-за чего при правках один набор менялся, а другой
     // оставался со старой проверкой (дефект /text в 2.0.0) — теперь выбор один на всех.
-    auto resolveDataset = [&templates, &draftsParsed, &templatesMutex](
+    auto resolveDataset = [&templates, &draftsParsed, &draftsRaw, &draftsErrors, &templatesMutex](
                               const Json::Value &body, bool wantDraft, ResolvedDataset &out) {
         std::lock_guard<std::mutex> lock(templatesMutex);
         const std::string reportId = body.get("reportId", "").asString();
         const TemplateInfo *tpl = nullptr;
         TemplateInfo draftCopy;
         if (wantDraft) {
+            // Черновик сохранён, но содержит ошибки: показывать данные нельзя (ADR-131)
+            const auto eit = draftsErrors.find(reportId);
+            if (eit != draftsErrors.end() && !eit->second.empty() &&
+                draftsRaw.find(reportId) != draftsRaw.end()) {
+                out.status = 422;
+                out.code = "TEMPLATE_INVALID";
+                out.message = "черновик содержит ошибки: " + eit->second;
+                return false;
+            }
             const auto dit = draftsParsed.find(reportId);
             if (dit == draftsParsed.end()) {
                 out.status = 404;
@@ -2200,7 +2214,8 @@ int main() {
     // PUT /api/admin/reports/{id}/draft — сохранить черновик (валидируется, в память не идёт)
     app().registerHandler(
         "/api/admin/reports/{id}/draft",
-        [db, adminEnabled, &validateTemplate, &draftsParsed, &draftsRaw, &templatesMutex](
+        [db, adminEnabled, &validateTemplate, &draftsParsed, &draftsRaw, &draftsErrors,
+         &templatesMutex](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
                            const std::string &id) {
             if (!adminEnabled) {
@@ -2217,29 +2232,36 @@ int main() {
             Json::StreamWriterBuilder wb;
             wb["indentation"] = "";
             const std::string raw = Json::writeString(wb, tpl);
+            // Черновик сохраняется всегда, даже с ошибками (ADR-131): автор может оставить
+            // работу на середине. Ошибки возвращаются в ответе, а исполнение запрещено.
             std::string err;
-            if (!validateTemplate(raw, id, err)) {
-                sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID", err);
-                return;
-            }
+            const bool valid = validateTemplate(raw, id, err);
             runQuery(
                 db, "UPDATE report_templates SET draft = $2::jsonb, draft_updated_at = now() WHERE id = $1",
                 {id, raw},
-                [cb, id, raw, &draftsParsed, &draftsRaw, &templatesMutex](const orm::Result &updated) {
+                [cb, id, raw, valid, err, &draftsParsed, &draftsRaw, &draftsErrors, &templatesMutex](
+                    const orm::Result &updated) {
                     if (updated.affectedRows() == 0) {
                         sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
                         return;
                     }
-                    // черновик сразу доступен для просмотра (ADR-82)
-                    TemplateInfo info;
-                    if (parseTemplate(raw, id, info)) {
+                    {
                         std::lock_guard<std::mutex> lock(templatesMutex);
-                        draftsParsed[id] = info;
                         draftsRaw[id] = raw;
+                        draftsErrors[id] = valid ? std::string() : err;
+                        if (valid) {
+                            TemplateInfo info;
+                            if (parseTemplate(raw, id, info)) draftsParsed[id] = info;
+                        } else {
+                            // исполнять нечего: данные и публикация вернут 422 (ADR-131)
+                            draftsParsed.erase(id);
+                        }
                     }
                     Json::Value out;
                     out["id"] = id;
                     out["draft"] = true;
+                    out["valid"] = valid;
+                    if (!valid) out["errors"] = err;
                     cb(jsonResponse(out));
                 },
                 [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "DRAFT_FAILED", describeError(e)); });

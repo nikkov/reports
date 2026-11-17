@@ -654,11 +654,17 @@ async function saveDraftOnly() {
   saving.value = true
   setStatus('Сохранение черновика…')
   try {
-    await api.saveDraft(currentId.value, body)
+    const saved = await api.saveDraft(currentId.value, body)
     hasDraft.value = true
     draftAt.value = new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
     await loadList()
-    setStatus('черновик сохранён — отчёт пока не изменился')
+    if (saved && saved.valid === false) {
+      // черновик с ошибками хранится, но данные и публикация по нему запрещены (ADR-131)
+      setStatus('черновик сохранён с ошибками: ' + (saved.errors || 'есть ошибки') +
+        ' — просмотр и публикация недоступны', 'err')
+    } else {
+      setStatus('черновик сохранён — отчёт пока не изменился')
+    }
   } catch (e) {
     setStatus('не сохранено: ' + e.message, 'err')
   } finally {
