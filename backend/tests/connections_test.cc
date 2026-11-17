@@ -189,13 +189,16 @@ TEST_CASE("connections: ключ default отдаёт пул сервера") {
 TEST_CASE("connections: недоступный источник запоминается на 30 секунд") {
     rep::ConnRegistry registry;
     std::string error;
+    const std::string dsn = "host=127.0.0.1 dbname=nope user=u";
     // без отметки источник не считается упавшим
-    REQUIRE_FALSE(registry.failed("main", error));
+    REQUIRE_FALSE(registry.failed(dsn, error));
     REQUIRE(error.empty());
 
-    registry.markFailed("main", "источник 'main': база данных не существует");
-    REQUIRE(registry.failed("main", error));
+    registry.markFailed(dsn, "источник 'main': база данных не существует");
+    REQUIRE(registry.failed(dsn, error));
     REQUIRE(error.find("не существует") != std::string::npos);
+    // другой DSN с тем же именем источника не отравлен: карантин по строке подключения
+    REQUIRE_FALSE(registry.failed("host=127.0.0.1 dbname=other user=u", error));
 
     // resolve отвечает сразу, не создавая клиента и не дожидаясь connect_timeout
     rep::ConnSpec spec;
@@ -204,7 +207,12 @@ TEST_CASE("connections: недоступный источник запомина
     spec.host = "127.0.0.1";
     spec.database = "nope";
     spec.user = "u";
-    spec.passwordEnv = "PATH";
+    spec.passwordEnv = "PATH"; // любая существующая переменная: нужен непустой пароль
+    std::string dsnError;
+    const std::string realDsn = rep::ConnRegistry::dsnFor(spec, dsnError);
+    REQUIRE_FALSE(realDsn.empty());
+    registry.markFailed(realDsn, "источник 'main': база данных \"nope\" не существует");
+
     std::map<std::string, rep::ConnSpec> connections{{"main", spec}};
     std::string resolveError;
     const auto client = registry.resolve(connections, "main", nullptr, resolveError);
@@ -212,11 +220,11 @@ TEST_CASE("connections: недоступный источник запомина
     REQUIRE(resolveError.find("не существует") != std::string::npos);
 }
 
-TEST_CASE("connections: ключ default не попадает в список упавших") {
+TEST_CASE("connections: пустой ключ не попадает в список упавших") {
     rep::ConnRegistry registry;
-    registry.markFailed("default", "ошибка");
+    registry.markFailed("", "ошибка");
     std::string error;
-    REQUIRE_FALSE(registry.failed("default", error));
+    REQUIRE_FALSE(registry.failed("", error));
 }
 
 TEST_CASE("connections: срок карантина задан и положителен") {

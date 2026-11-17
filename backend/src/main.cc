@@ -32,6 +32,7 @@
 #include "cache.h"
 #include "aggregate.h"
 #include "connections.h"
+#include "pg_probe.h"
 #include "csv_export.h"
 #include "dataset.h"
 #include "smtp.h"
@@ -1003,12 +1004,6 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
         onErr(422, "INVALID_PARAMS", err);
         return;
     }
-    std::string connError;
-    auto client = connRegistry.resolve(tpl.connections, ds.connection, dataDb, connError);
-    if (!client) {
-        onErr(422, "CONNECTION_ERROR", connError);
-        return;
-    }
     // Внешний источник: ограничиваем ожидание и запоминаем сбой, иначе запрос висит
     // бесконечно, а drogon повторяет подключение (ADR-125)
     const bool externalSource = !ds.connection.empty() && ds.connection != "default";
@@ -1021,6 +1016,23 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
         } catch (const std::exception &) {
         }
     }
+
+    // DSN — ключ карантина и проверки: имя источника общее у разных шаблонов (ADR-126)
+    std::string sourceDsn;
+    if (externalSource) {
+        const auto specIt = tpl.connections.find(sourceKey);
+        std::string dsnError;
+        sourceDsn = specIt == tpl.connections.end()
+                        ? std::string()
+                        : rep::ConnRegistry::dsnFor(specIt->second, dsnError);
+        if (sourceDsn.empty()) {
+            onErr(422, "CONNECTION_ERROR", dsnError);
+            return;
+        }
+    }
+
+    auto runWithClient = [query, maxRows, onOk, onErr, externalSource, sourceKey, sourceDsn,
+                          &connRegistry, queryTimeoutMs](const orm::DbClientPtr &client) {
     runQuery(
         client, query.sql, query.values,
         [maxRows, onOk, onErr](const orm::Result &res) {
@@ -1034,7 +1046,7 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
             rowsFromSqlResult(res, rows);
             onOk(rows);
         },
-        [onErr, &connRegistry, externalSource, sourceKey, queryTimeoutMs](
+        [onErr, &connRegistry, externalSource, sourceKey, sourceDsn](
             const std::exception_ptr &eptr) {
             const std::string msg = describeError(eptr);
             if (externalSource) {
@@ -1044,7 +1056,7 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
                                          " (повтор через " +
                                          std::to_string(rep::ConnRegistry::kFailureCooldownSeconds) +
                                          " с)";
-                connRegistry.markFailed(sourceKey, text);
+                connRegistry.markFailed(sourceDsn, text);
                 if (msg.find("statement timeout") != std::string::npos ||
                     msg.find("canceling statement") != std::string::npos ||
                     msg.find("не ответил за") != std::string::npos) {
@@ -1071,6 +1083,45 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
             onErr(500, "QUERY_FAILED", msg);
         },
         queryTimeoutMs);
+    };
+
+    // Первый запрос к внешнему источнику: одна проверка соединения и точная причина отказа
+    // (ADR-126). Без неё drogon повторяет подключение и запрос висит до общего таймаута.
+    if (externalSource && !connRegistry.probed(sourceDsn)) {
+        auto connections = tpl.connections;
+        std::thread([sourceDsn, sourceKey, &connRegistry, connections, dataDb, runWithClient,
+                     onErr]() {
+            const rep::ProbeResult probe = rep::probeConnection(sourceDsn);
+            drogon::app().getLoop()->queueInLoop([probe, sourceDsn, sourceKey, &connRegistry,
+                                                  connections, dataDb, runWithClient, onErr]() {
+                if (!probe.ok) {
+                    const std::string text =
+                        "источник '" + sourceKey + "': " + probe.error + " (повтор через " +
+                        std::to_string(rep::ConnRegistry::kFailureCooldownSeconds) + " с)";
+                    connRegistry.markFailed(sourceDsn, text);
+                    onErr(503, "DB_UNAVAILABLE", text);
+                    return;
+                }
+                connRegistry.markProbed(sourceDsn);
+                std::string resolveError;
+                auto client = connRegistry.resolve(connections, sourceKey, dataDb, resolveError);
+                if (!client) {
+                    onErr(422, "CONNECTION_ERROR", resolveError);
+                    return;
+                }
+                runWithClient(client);
+            });
+        }).detach();
+        return;
+    }
+
+    std::string connError;
+    auto client = connRegistry.resolve(tpl.connections, ds.connection, dataDb, connError);
+    if (!client) {
+        onErr(422, "CONNECTION_ERROR", connError);
+        return;
+    }
+    runWithClient(client);
 }
 
 }  // namespace

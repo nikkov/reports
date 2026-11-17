@@ -28,6 +28,7 @@ add_library(rep_core STATIC
   src/auth.cc
   src/base_path.cc
   src/connections.cc
+  src/pg_probe.cc
   src/csv_export.cc
   src/dataset.cc
   src/join.cc
@@ -53,7 +54,13 @@ target_link_libraries(rep_core PUBLIC Drogon::Drogon OpenSSL::SSL OpenSSL::Crypt
 if(UNIX AND NOT APPLE)
   find_library(GSSAPI_LIBRARY NAMES gssapi_krb5 gssapi)
   find_path(GSSAPI_INCLUDE_DIR NAMES gssapi/gssapi.h)
-  if(GSSAPI_LIBRARY AND GSSAPI_INCLUDE_DIR)
+  if(LIBPQ_LIBRARY AND LIBPQ_INCLUDE_DIR)
+  target_include_directories(rep_core PUBLIC ${LIBPQ_INCLUDE_DIR})
+  target_link_libraries(rep_core PUBLIC ${LIBPQ_LIBRARY})
+  message(STATUS "libpq для проверки источника: ${LIBPQ_LIBRARY}")
+endif()
+
+if(GSSAPI_LIBRARY AND GSSAPI_INCLUDE_DIR)
     target_compile_definitions(rep_core PUBLIC REP_HAVE_GSSAPI=1)
     target_include_directories(rep_core PUBLIC ${GSSAPI_INCLUDE_DIR})
     target_link_libraries(rep_core PUBLIC ${GSSAPI_LIBRARY})

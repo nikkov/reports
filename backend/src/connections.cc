@@ -226,7 +226,7 @@ orm::DbClientPtr ConnRegistry::resolve(const std::map<std::string, ConnSpec> &co
 
     std::lock_guard<std::mutex> lock(mutex_);
     // Источник недавно падал — не тратим connect_timeout на каждую попытку
-    const auto bad = failed_.find(key);
+    const auto bad = failed_.find(dsn);
     if (bad != failed_.end()) {
         if (std::chrono::steady_clock::now() < bad->second.first) {
             error = bad->second.second;
@@ -250,27 +250,40 @@ orm::DbClientPtr ConnRegistry::resolve(const std::map<std::string, ConnSpec> &co
     return client;
 }
 
-void ConnRegistry::markFailed(const std::string &key, const std::string &error) {
-    if (key.empty() || key == "default") return;
+void ConnRegistry::markFailed(const std::string &dsn, const std::string &error) {
+    if (dsn.empty()) return;
     std::lock_guard<std::mutex> lock(mutex_);
-    failed_[key] = {std::chrono::steady_clock::now() + std::chrono::seconds(kFailureCooldownSeconds),
+    failed_[dsn] = {std::chrono::steady_clock::now() + std::chrono::seconds(kFailureCooldownSeconds),
                     error};
     // Клиент с мёртвым соединением выбрасываем: drogon иначе бесконечно переподключается
     // и пишет в журнал по строке каждые несколько миллисекунд
-    const auto dsnIt = keyDsn_.find(key);
-    if (dsnIt != keyDsn_.end()) {
-        cache_.erase(dsnIt->second);
-        keyDsn_.erase(dsnIt);
+    cache_.erase(dsn);
+    for (auto it = keyDsn_.begin(); it != keyDsn_.end();) {
+        if (it->second == dsn) {
+            it = keyDsn_.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
-bool ConnRegistry::failed(const std::string &key, std::string &error) const {
+bool ConnRegistry::failed(const std::string &dsn, std::string &error) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto it = failed_.find(key);
+    const auto it = failed_.find(dsn);
     if (it == failed_.end()) return false;
     if (std::chrono::steady_clock::now() >= it->second.first) return false;
     error = it->second.second;
     return true;
+}
+
+bool ConnRegistry::probed(const std::string &dsn) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return probed_.count(dsn) != 0;
+}
+
+void ConnRegistry::markProbed(const std::string &dsn) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    probed_.insert(dsn);
 }
 
 size_t ConnRegistry::size() {

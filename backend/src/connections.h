@@ -20,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <chrono>
+#include <set>
 #include <mutex>
 #include <string>
 
@@ -91,14 +92,21 @@ public:
     // Источник не отвечает (нет базы, неверный пароль, хост недоступен): запоминаем ошибку
     // на kFailureCooldownSeconds и отвечаем сразу, не дожидаясь connect_timeout и не
     // создавая клиента, который drogon будет переподключать бесконечно (ADR-125).
-    void markFailed(const std::string &key, const std::string &error);
-    bool failed(const std::string &key, std::string &error) const;
+    // Ключ — DSN, а не имя источника: у двух шаблонов источник «main» может вести в разные
+    // базы, и карантин одного не должен ломать другой (ADR-126).
+    void markFailed(const std::string &dsn, const std::string &error);
+    bool failed(const std::string &dsn, std::string &error) const;
+
+    // Источник уже успешно проверен один раз: дальше запросы идут без проверки (ADR-126).
+    bool probed(const std::string &dsn) const;
+    void markProbed(const std::string &dsn);
 
 private:
     mutable std::mutex mutex_;
     std::map<std::string, orm::DbClientPtr> cache_;
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, std::string>> failed_;
     std::map<std::string, std::string> keyDsn_;
+    std::set<std::string> probed_;
 };
 
 }  // namespace rep
