@@ -255,7 +255,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
+import { EditorView, keymap } from '@codemirror/view'
+import { indentWithTab } from '@codemirror/commands'
 import { json, jsonParseLinter } from '@codemirror/lang-json'
 import { lintGutter, linter } from '@codemirror/lint'
 import { API_BASE, api } from '../api/client.js'
@@ -1005,6 +1006,8 @@ onMounted(() => {
       doc: '',
       extensions: [
         basicSetup,
+        // Tab внутри редактора: отступ (и Shift+Tab — обратно), а не уход фокуса в браузере (ADR-133)
+        keymap.of([indentWithTab]),
         json(),
         lintGutter(),
         // пустой редактор не должен сразу краснеть: линтуем только непустой текст
