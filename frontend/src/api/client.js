@@ -54,6 +54,12 @@ export const api = {
   health: () => request('/api/health'),
   // снятие карантина внешних источников (ADR-130): после правки шаблона не ждём 30 с
   resetDatasources: () => request('/api/admin/datasources/reset', { method: 'POST' }),
+  // проверка SQL набора без сохранения черновика (ADR-136)
+  checkSql: (sql, { params = {}, connection = '', connections = {} } = {}) =>
+    request('/api/admin/datasets/check', {
+      method: 'POST',
+      body: JSON.stringify({ sql, params, connection, connections })
+    }),
   reports: () => request('/api/reports'),
   template: (id) => request(`/api/reports/${encodeURIComponent(id)}`),
   // справочник параметра: SQL живёт в шаблоне, адрес — отчёт + имя параметра (ADR-24)

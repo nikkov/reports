@@ -1852,6 +1852,98 @@ int main() {
         },
         {Post});
 
+    // Проверка SQL набора без сохранения черновика (ADR-136): запрос выполняется под ролью
+    // только-чтения с LIMIT 21 и таймаутом, автор видит ошибку или первые строки
+    app().registerHandler(
+        "/api/admin/datasets/check",
+        [db, &connRegistry, &templates, adminGuard](const HttpRequestPtr &req,
+                                                    std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req);
+            if (!adminGuard(cb)) return;
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string sqlText = (*body).get("sql", "").asString();
+            if (sqlText.empty()) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен sql: текст запроса");
+                return;
+            }
+            std::string guardError;
+            if (!rep::isReadOnlySql(sqlText, guardError)) {
+                sendError(cb, k422UnprocessableEntity, "SQL_FORBIDDEN", guardError);
+                return;
+            }
+            rep::ParamBag bag;
+            const Json::Value &params = (*body)["params"];
+            if (params.isObject()) {
+                for (const auto &name : params.getMemberNames()) {
+                    bag.set(name, params[name].isString() ? params[name].asString()
+                                                          : cellText(params[name]));
+                }
+            }
+            rep::DatasetQuery query;
+            std::string compileError;
+            if (!rep::compileDataset(sqlText, {}, bag, query, compileError)) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", compileError);
+                return;
+            }
+            const std::string wrapped = "SELECT * FROM (" + query.sql + ") AS rep_check LIMIT 21";
+            const std::string connection = (*body).get("connection", "").asString();
+            // Соединения берём из тела: черновик ещё не сохранён, а проверить нужно именно его.
+            // Пароли не передаются — шаблон ссылается на переменные окружения (ADR-76).
+            std::map<std::string, rep::ConnSpec> connections;
+            std::string connsError;
+            if ((*body)["connections"].isObject() &&
+                !rep::parseConnections((*body)["connections"], connections, connsError)) {
+                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", connsError);
+                return;
+            }
+            std::string connError;
+            auto client = connRegistry.resolve(connections, connection, db, connError);
+            if (!client) {
+                sendError(cb, k422UnprocessableEntity, "CONNECTION_ERROR", connError);
+                return;
+            }
+            const auto started = std::chrono::steady_clock::now();
+            runQuery(
+                client, wrapped, query.values,
+                [cb, started](const orm::Result &res) {
+                    rep::DatasetRows rows;
+                    rowsFromSqlResult(res, rows);
+                    const bool truncated = rows.rows.size() > 20;
+                    if (truncated) rows.rows.resize(20);
+                    Json::Value out;
+                    Json::Value cols(Json::arrayValue);
+                    for (const auto &c : rows.columns) {
+                        Json::Value item;
+                        item["name"] = c.name;
+                        item["type"] = c.type;
+                        cols.append(item);
+                    }
+                    Json::Value data(Json::arrayValue);
+                    for (const auto &r : rows.rows) {
+                        Json::Value row(Json::arrayValue);
+                        for (const auto &cell : r) row.append(cell);
+                        data.append(row);
+                    }
+                    out["columns"] = cols;
+                    out["rows"] = data;
+                    out["truncated"] = truncated;
+                    out["tookMs"] = static_cast<Json::UInt64>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - started)
+                            .count());
+                    cb(jsonResponse(out));
+                },
+                [cb](const std::exception_ptr &e) {
+                    sendError(cb, k422UnprocessableEntity, "QUERY_FAILED", describeError(e));
+                },
+                5000);
+        },
+        {Post});
+
     app().registerHandler(
         "/api/admin/reports",
         [db, adminEnabled](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {

@@ -189,7 +189,29 @@
             <button class="btn primary" type="button" :disabled="!sqlKey || !canEdit" @click="applySql">
               Применить SQL в шаблон
             </button>
+            <button class="btn" type="button" :disabled="!sqlKey || sqlChecking" @click="checkSqlNow">
+              {{ sqlChecking ? 'Проверяю…' : 'Проверить SQL' }}
+            </button>
             <span v-if="sqlNote" class="muted">{{ sqlNote }}</span>
+          </div>
+          <div v-if="sqlCheck" class="sql-check">
+            <p v-if="sqlCheck.error" class="banner err">{{ sqlCheck.error }}</p>
+            <template v-else>
+              <p class="muted">
+                строк: {{ sqlCheck.rows.length }}{{ sqlCheck.truncated ? ' (показаны первые 20)' : '' }}
+                · {{ sqlCheck.tookMs }} мс
+              </p>
+              <table class="sql-check-table">
+                <thead>
+                  <tr><th v-for="c in sqlCheck.columns" :key="c.name">{{ c.name }}</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, i) in sqlCheck.rows" :key="i">
+                    <td v-for="(cell, j) in row" :key="j">{{ cell }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
           </div>
         </div>
       </section>
@@ -384,6 +406,8 @@ const sqlDatasets = ref([])
 const sqlNote = ref('')
 const sqlHint = ref('')
 const sqlHost = ref(null)
+const sqlCheck = ref(null)
+const sqlChecking = ref(false)
 const sqlHeight = ref(260)
 let sqlView = null
 let resizeState = null
@@ -498,6 +522,25 @@ async function toggleSqlPanel() {
   await nextTick()
   initSqlEditor()
   refreshSqlDatasets()
+}
+
+// Проверка запроса без сохранения: сервер выполнит его с LIMIT 21 под ролью только-чтения
+async function checkSqlNow() {
+  if (!sqlView || sqlChecking.value) return
+  const tpl = parseTemplateText()
+  const ds = (tpl && tpl.datasets && tpl.datasets[sqlKey.value]) || {}
+  sqlChecking.value = true
+  sqlCheck.value = null
+  try {
+    sqlCheck.value = await api.checkSql(sqlView.state.doc.toString(), {
+      connections: (tpl && tpl.connections) || {},
+      connection: ds.connection || ''
+    })
+  } catch (e) {
+    sqlCheck.value = { error: e.message }
+  } finally {
+    sqlChecking.value = false
+  }
 }
 
 function applySql() {
@@ -1705,6 +1748,27 @@ body.resizing-vertical {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   overflow: auto;
+}
+.sql-check {
+  margin-top: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+.sql-check-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.sql-check-table th,
+.sql-check-table td {
+  border: 1px solid #e5e7eb;
+  padding: 2px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+.sql-check-table th {
+  background: #f8fafc;
+  position: sticky;
+  top: 0;
 }
 .sql-actions {
   display: flex;
