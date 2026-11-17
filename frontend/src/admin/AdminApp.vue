@@ -477,6 +477,7 @@ function refreshSqlDatasets() {
 function pickDataset(key) {
   const ds = sqlDatasets.value.find((d) => d.key === key)
   sqlKey.value = key
+  sqlCheck.value = null // другой набор — прежний результат неактуален
   setSqlDoc(ds ? ds.sql : '')
   const info = sqlInfo(ds ? ds.sql : '')
   sqlHint.value = ds && ds.kind !== 'sql'
@@ -505,6 +506,10 @@ function initSqlEditor() {
         basicSetup,
         keymap.of([indentWithTab]),
         sqlLanguage,
+        EditorView.updateListener.of((update) => {
+          // текст изменился — показанный результат проверки уже не соответствует запросу
+          if (update.docChanged) sqlCheck.value = null
+        }),
         EditorView.lineWrapping,
         EditorView.theme({ '&': { height: '100%', fontSize: '13px' } })
       ]
@@ -544,6 +549,7 @@ async function checkSqlNow() {
 }
 
 function applySql() {
+  sqlCheck.value = null
   const tpl = parseTemplateText()
   if (!tpl) {
     sqlNote.value = 'JSON не разбирается — исправьте его в редакторе слева'
@@ -781,6 +787,7 @@ async function select(id) {
   if (sqlOpen.value) {
     sqlKey.value = ''
     sqlNote.value = ''
+    sqlCheck.value = null // результат проверки относится к прошлому шаблону (ADR-137)
     await nextTick()
     if (sqlHost.value && (!sqlView || !document.body.contains(sqlView.dom))) {
       initSqlEditor()
