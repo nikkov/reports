@@ -159,7 +159,16 @@
       </section>
 
       <div ref="editorHost" class="editor" :class="{ empty: !canEdit }"></div>
-      <section v-if="sqlOpen" class="sql-panel">
+      <div
+        v-if="sqlOpen"
+        class="sql-resizer"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Изменить высоту панели SQL"
+        title="Потяните, чтобы изменить высоту"
+        @pointerdown="startSqlResize"
+      />
+      <section v-if="sqlOpen" class="sql-panel" :style="{ height: sqlHeight + 'px' }">
         <div class="sql-list">
           <button
             v-for="d in sqlDatasets"
@@ -375,7 +384,45 @@ const sqlDatasets = ref([])
 const sqlNote = ref('')
 const sqlHint = ref('')
 const sqlHost = ref(null)
+const sqlHeight = ref(260)
 let sqlView = null
+let resizeState = null
+
+const SQL_HEIGHT_KEY = 'rep.admin.sqlHeight'
+
+// Высота панели запоминается между сессиями: у автора свой удобный размер (ADR-135)
+try {
+  const saved = Number(localStorage.getItem(SQL_HEIGHT_KEY))
+  if (Number.isFinite(saved) && saved >= 140 && saved <= 700) sqlHeight.value = saved
+} catch {
+  // localStorage может быть недоступен (приватный режим) — молча оставляем значение по умолчанию
+}
+
+function startSqlResize(event) {
+  event.preventDefault()
+  resizeState = { startY: event.clientY, startHeight: sqlHeight.value }
+  window.addEventListener('pointermove', onSqlResize)
+  window.addEventListener('pointerup', stopSqlResize)
+  document.body.classList.add('resizing-vertical')
+}
+
+function onSqlResize(event) {
+  if (!resizeState) return
+  const next = resizeState.startHeight + (resizeState.startY - event.clientY)
+  sqlHeight.value = Math.min(700, Math.max(140, Math.round(next)))
+}
+
+function stopSqlResize() {
+  window.removeEventListener('pointermove', onSqlResize)
+  window.removeEventListener('pointerup', stopSqlResize)
+  document.body.classList.remove('resizing-vertical')
+  resizeState = null
+  try {
+    localStorage.setItem(SQL_HEIGHT_KEY, String(sqlHeight.value))
+  } catch {
+    // без сохранения: высота просто не запомнится
+  }
+}
 
 function parseTemplateText() {
   try {
@@ -414,7 +461,17 @@ function pickDataset(key) {
   sqlNote.value = ''
 }
 
+function destroySqlEditor() {
+  if (sqlView) {
+    sqlView.destroy()
+    sqlView = null
+  }
+}
+
 function initSqlEditor() {
+  // Панель скрывали (v-if) — узел пересоздан, старый редактор держит отвязанный DOM:
+  // без пересоздания окно SQL остаётся пустым до перезагрузки страницы (ADR-135)
+  if (sqlView && !document.body.contains(sqlView.dom)) destroySqlEditor()
   if (sqlView || !sqlHost.value) return
   sqlView = new EditorView({
     parent: sqlHost.value,
@@ -434,7 +491,10 @@ function initSqlEditor() {
 
 async function toggleSqlPanel() {
   sqlOpen.value = !sqlOpen.value
-  if (!sqlOpen.value) return
+  if (!sqlOpen.value) {
+    destroySqlEditor()
+    return
+  }
   await nextTick()
   initSqlEditor()
   refreshSqlDatasets()
@@ -674,6 +734,16 @@ async function loadTemplate(id, force = false) {
 async function select(id) {
   if (id === currentId.value) return
   await loadTemplate(id)
+  // Панель SQL показывает наборы прошлого шаблона, если её не обновить (ADR-135)
+  if (sqlOpen.value) {
+    sqlKey.value = ''
+    sqlNote.value = ''
+    await nextTick()
+    if (sqlHost.value && (!sqlView || !document.body.contains(sqlView.dom))) {
+      initSqlEditor()
+    }
+    refreshSqlDatasets()
+  }
 }
 
 // Параметры шаблона и их запросы: администратору нужно видеть SQL справочников,
@@ -1563,7 +1633,37 @@ h1 {
   color: #a05a00;
 }
 
+.sql-resizer {
+  flex: 0 0 auto;
+  height: 6px;
+  margin: 6px 0 0;
+  cursor: row-resize;
+  border-top: 1px solid transparent;
+  position: relative;
+}
+.sql-resizer::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 46px;
+  height: 2px;
+  margin-left: -23px;
+  border-radius: 2px;
+  background: #d1d5db;
+}
+.sql-resizer:hover::after,
+body.resizing-vertical .sql-resizer::after {
+  background: #2563eb;
+}
+body.resizing-vertical {
+  user-select: none;
+  cursor: row-resize;
+}
 .sql-panel {
+  flex: 0 0 auto;
+  min-height: 140px;
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: 210px 1fr;
   gap: 8px;
