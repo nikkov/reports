@@ -158,5 +158,15 @@ if command -v psql >/dev/null 2>&1; then
   fi
 fi
 
+# Kerberos-проверка (ADR-122): нужен работающий KDC и SPNEGO-сервис, которых в CI нет,
+# поэтому шаг необязательный — при отсутствии инфраструктуры печатается «пропуск».
+step "Kerberos: прозрачная аутентификация (необязательно)"
+if curl -s -m 2 -o /dev/null "http://localhost:8098/api/negotiated" 2>/dev/null &&
+   [ -f /tmp/rep-krb/ccache ]; then
+  "$ROOT/scripts/check-kerberos.sh" || fail "Kerberos-проверка не прошла"
+else
+  echo "пропуск: нет SPNEGO на :8098 или тикета /tmp/rep-krb/ccache (поднять: ./scripts/dev-kerberos.sh)"
+fi
+
 echo
 echo "ALL CHECKS PASSED"

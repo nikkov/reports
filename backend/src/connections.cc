@@ -233,6 +233,9 @@ orm::DbClientPtr ConnRegistry::resolve(const std::map<std::string, ConnSpec> &co
             return nullptr;
         }
         failed_.erase(bad);
+        // карантин истёк: снимаем и признак «проверен», чтобы следующая попытка сделала
+        // проверку соединения, а не ждала 6 секунд таймаута (ADR-128)
+        probed_.erase(dsn);
     }
     const auto cached = cache_.find(dsn);
     if (cached != cache_.end()) return cached->second;

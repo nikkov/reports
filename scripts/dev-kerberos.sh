@@ -65,10 +65,16 @@ EOF
 export KRB5_CONFIG="$DIR/krb5.conf" KRB5_KDC_PROFILE="$DIR/kdc.conf"
 
 if [ ! -f "$DIR/principal" ]; then
-  /usr/sbin/kdb5_util create -s -r "$REALM" -P master-pass >/dev/null
-  /usr/sbin/kadmin.local -r "$REALM" -q "addprinc -randkey HTTP/localhost@$REALM" >/dev/null
-  /usr/sbin/kadmin.local -r "$REALM" -q "ktadd -k $DIR/http.keytab HTTP/localhost@$REALM" >/dev/null
-  /usr/sbin/kadmin.local -r "$REALM" -q "addprinc -pw demo-pass demo@$REALM" >/dev/null
+  echo "шаг: создаю базу принципалов (может занять до минуты)"
+  # timeout обязателен: kdb5_util/kadmin.local умеют ждать ввод там, где его нет,
+  # и скрипт висел бы без единой строки вывода
+  timeout 60 /usr/sbin/kdb5_util create -s -r "$REALM" -P master-pass >/dev/null || {
+    echo "kdb5_util не создал базу $REALM за 60 с" >&2
+    exit 3
+  }
+  timeout 30 /usr/sbin/kadmin.local -r "$REALM" -q "addprinc -randkey HTTP/localhost@$REALM" >/dev/null
+  timeout 30 /usr/sbin/kadmin.local -r "$REALM" -q "ktadd -k $DIR/http.keytab HTTP/localhost@$REALM" >/dev/null
+  timeout 30 /usr/sbin/kadmin.local -r "$REALM" -q "addprinc -pw demo-pass demo@$REALM" >/dev/null
   chmod 600 "$DIR/http.keytab"
   echo "KDC создан в $DIR"
 fi
@@ -81,7 +87,8 @@ else
   sleep 1
 fi
 
-echo demo-pass | kinit "demo@$REALM" >/dev/null 2>&1 || true
+echo "шаг: получаю тикет demo@$REALM"
+timeout 30 bash -c "echo demo-pass | kinit \"demo@$REALM\"" >/dev/null 2>&1 || true
 klist -s || { echo "kinit не получил тикет" >&2; exit 3; }
 
 if [ -f "$DIR/spnego.pid" ] && kill -0 "$(cat "$DIR/spnego.pid")" 2>/dev/null; then

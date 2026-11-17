@@ -55,6 +55,10 @@ using namespace drogon;
 
 namespace {
 
+// Логин запроса, который обрабатывается в этом потоке. sendError не получает req
+// (181 вызов), а в журнале нужно видеть, кто получил ошибку (ADR-128).
+thread_local std::string currentActor;
+
 Json::Value errorBody(const std::string &code, const std::string &message) {
     Json::Value body;
     body["error"]["code"] = code;
@@ -82,7 +86,7 @@ void sendError(const std::function<void(const HttpResponsePtr &)> &cb, HttpStatu
     } else if (numeric == 401) {
         level = rep::log::Level::Debug;
     }
-    rep::log::event(level, rep::log::Action::Other, "",
+    rep::log::event(level, rep::log::Action::Other, currentActor,
                     "ошибка API " + std::to_string(numeric) + " " + code + ": " + message);
     cb(jsonResponse(errorBody(code, message), status));
 }
@@ -2434,6 +2438,9 @@ int main() {
         REP_LOG_INFO(Other, "") << "префикс приложения: " << basePath << "/";
         app().registerPreRoutingAdvice(
             [basePath](const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
+                // каждый запрос начинается с чистого логина: иначе ошибка анонимного запроса
+                // досталась бы предыдущему пользователю из этого потока
+                currentActor.clear();
                 const std::string path = req->path();
                 if (path == "/" || path == basePath) {
                     auto redirect = HttpResponse::newRedirectionResponse(basePath + "/");
@@ -2496,6 +2503,7 @@ int main() {
                             req->attributes()->insert("session_role", role);
                             req->attributes()->insert("session_login", login);
                             req->attributes()->insert("session_source", std::string("proxy"));
+                            currentActor = login;
                             next();
                         });
                     return;
@@ -2523,6 +2531,7 @@ int main() {
                         }
                         req->attributes()->insert("session_role", role);
                         req->attributes()->insert("session_login", res[0]["login"].as<std::string>());
+                        currentActor = res[0]["login"].as<std::string>();
                         next();
                     },
                     [&unauthorized, respond](const std::exception_ptr &) {
@@ -3149,6 +3158,7 @@ int main() {
          &restCache, &resolveDataset](
             const HttpRequestPtr &req,
                                                        std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // ошибки этого запроса в журнале — с логином
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -5006,6 +5016,7 @@ const std::string from = req->getParameter("from");
         [dataDb, &registry, &templates, &templatesMutex, maxRows, &resultCache, &templatesVersion,
          &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed, &restCache, &resolveDataset](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // ошибки этого запроса в журнале — с логином
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
