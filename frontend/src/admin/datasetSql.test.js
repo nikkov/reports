@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { listDatasets, setDatasetSql, sqlInfo } from './datasetSql.js'
+import { listDatasets, listSqlDatasets, setDatasetSql, sqlInfo } from './datasetSql.js'
 
 const template = {
   id: 'demo',
@@ -57,5 +57,18 @@ describe('datasetSql: сведения о запросе', () => {
     expect(sqlInfo('SELECT 1\nFROM t').multiline).toBe(true)
     expect(sqlInfo('').lines).toBe(1)
     expect(sqlInfo(undefined).chars).toBe(0)
+  })
+})
+
+describe('datasetSql: наборы для SQL-панели', () => {
+  it('REST и join-источники не показываются', () => {
+    const list = listSqlDatasets(template)
+    expect(list.map((d) => d.key)).toEqual(['orders'])
+    expect(list.every((d) => d.kind === 'sql')).toBe(true)
+  })
+
+  it('шаблон без наборов даёт пустой список', () => {
+    expect(listSqlDatasets({})).toEqual([])
+    expect(listSqlDatasets(null)).toEqual([])
   })
 })

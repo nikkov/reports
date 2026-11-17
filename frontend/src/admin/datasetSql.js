@@ -13,6 +13,12 @@ export function listDatasets(template) {
   })
 }
 
+// Наборы для SQL-панели: REST и join-источники не показываем — в них нет поля sql,
+// и редактировать нечего (ADR-138).
+export function listSqlDatasets(template) {
+  return listDatasets(template).filter((d) => d.kind === 'sql')
+}
+
 // Записать SQL набора в шаблон. Остальные поля набора и остальные наборы не меняются.
 // Возвращает новый объект: исходный шаблон редактора не мутируем.
 export function setDatasetSql(template, key, sql) {

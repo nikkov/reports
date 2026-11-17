@@ -180,7 +180,7 @@
           >
             {{ d.key }}<span class="muted"> · {{ d.kind }}</span>
           </button>
-          <p v-if="!sqlDatasets.length" class="muted">в шаблоне нет наборов данных</p>
+          <p v-if="!sqlDatasets.length" class="muted">в шаблоне нет SQL-наборов (REST не редактируется)</p>
         </div>
         <div class="sql-side">
           <div ref="sqlHost" class="sql-editor"></div>
@@ -317,7 +317,7 @@ import { EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { StreamLanguage } from '@codemirror/language'
-import { listDatasets, setDatasetSql, sqlInfo } from './datasetSql.js'
+import { listSqlDatasets, setDatasetSql, sqlInfo } from './datasetSql.js'
 import { json, jsonParseLinter } from '@codemirror/lang-json'
 import { lintGutter, linter } from '@codemirror/lint'
 import { API_BASE, api } from '../api/client.js'
@@ -463,7 +463,7 @@ function setSqlDoc(value) {
 
 function refreshSqlDatasets() {
   const tpl = parseTemplateText()
-  sqlDatasets.value = listDatasets(tpl)
+  sqlDatasets.value = listSqlDatasets(tpl)
   const current = sqlDatasets.value.find((d) => d.key === sqlKey.value)
   if (current) {
     setSqlDoc(current.sql)
