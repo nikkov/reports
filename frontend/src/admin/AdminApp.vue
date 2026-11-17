@@ -1635,8 +1635,8 @@ h1 {
 
 .sql-resizer {
   flex: 0 0 auto;
-  height: 6px;
-  margin: 6px 0 0;
+  height: 4px;
+  margin: 4px 0 0;
   cursor: row-resize;
   border-top: 1px solid transparent;
   position: relative;
@@ -1645,10 +1645,10 @@ h1 {
   content: '';
   position: absolute;
   left: 50%;
-  top: 2px;
-  width: 46px;
+  top: 1px;
+  width: 22px;
   height: 2px;
-  margin-left: -23px;
+  margin-left: -11px;
   border-radius: 2px;
   background: #d1d5db;
 }
