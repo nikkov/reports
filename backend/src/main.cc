@@ -73,6 +73,17 @@ HttpResponsePtr jsonResponse(const Json::Value &body, HttpStatusCode status = k2
 
 void sendError(const std::function<void(const HttpResponsePtr &)> &cb, HttpStatusCode status,
                const std::string &code, const std::string &message) {
+    // Каждая ошибка API попадает в журнал (ADR-127): 5xx — error, остальные — warning,
+    // 401 — debug (нет сессии — обычное дело при первом открытии страницы)
+    const int numeric = static_cast<int>(status);
+    rep::log::Level level = rep::log::Level::Warning;
+    if (numeric >= 500) {
+        level = rep::log::Level::Error;
+    } else if (numeric == 401) {
+        level = rep::log::Level::Debug;
+    }
+    rep::log::event(level, rep::log::Action::Other, "",
+                    "ошибка API " + std::to_string(numeric) + " " + code + ": " + message);
     cb(jsonResponse(errorBody(code, message), status));
 }
 
@@ -1098,6 +1109,17 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
                     const std::string text =
                         "источник '" + sourceKey + "': " + probe.error + " (повтор через " +
                         std::to_string(rep::ConnRegistry::kFailureCooldownSeconds) + " с)";
+                    // Проверка идёт до drogon, поэтому его сообщение о сбое подключения уже не
+                    // появится — фиксируем причину сами, без пароля в тексте (ADR-127)
+                    Json::Value ctx;
+                    ctx["source"] = sourceKey;
+                    const auto specIt = connections.find(sourceKey);
+                    if (specIt != connections.end()) {
+                        ctx["host"] = specIt->second.host;
+                        ctx["database"] = specIt->second.database;
+                    }
+                    rep::log::event(rep::log::Level::Error, rep::log::Action::Other, "",
+                                    "источник не подключается: " + probe.error, ctx);
                     connRegistry.markFailed(sourceDsn, text);
                     onErr(503, "DB_UNAVAILABLE", text);
                     return;
