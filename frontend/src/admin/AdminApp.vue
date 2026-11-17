@@ -1635,8 +1635,11 @@ h1 {
 
 .sql-resizer {
   flex: 0 0 auto;
-  height: 4px;
-  margin: 4px 0 0;
+  /* gap родителя (10px) сверху и снизу съедал место у редакторов: перекрываем его,
+     оставляя только 12px полосы для захвата мышью */
+  height: 12px;
+  /* снизу gap даёт на 8px больше, чем сверху: перекрываем и его */
+  margin: -10px 0 -18px;
   cursor: row-resize;
   border-top: 1px solid transparent;
   position: relative;
@@ -1645,7 +1648,7 @@ h1 {
   content: '';
   position: absolute;
   left: 50%;
-  top: 1px;
+  top: 5px;
   width: 22px;
   height: 2px;
   margin-left: -11px;
