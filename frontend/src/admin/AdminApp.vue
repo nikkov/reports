@@ -69,6 +69,9 @@
         </div>
         <div class="actions">
           <button class="btn" :disabled="!canEdit" @click="runValidate">Проверить</button>
+          <button class="btn" :disabled="!canEdit" @click="toggleSqlPanel">
+            {{ sqlOpen ? 'Скрыть SQL' : 'Наборы данных (SQL)' }}
+          </button>
           <button v-if="!currentId" class="btn primary" :disabled="!canEdit || saving" @click="save">
             {{ saving ? 'Сохранение…' : 'Создать' }}
           </button>
@@ -156,6 +159,31 @@
       </section>
 
       <div ref="editorHost" class="editor" :class="{ empty: !canEdit }"></div>
+      <section v-if="sqlOpen" class="sql-panel">
+        <div class="sql-list">
+          <button
+            v-for="d in sqlDatasets"
+            :key="d.key"
+            type="button"
+            class="sql-item"
+            :class="{ active: d.key === sqlKey }"
+            @click="pickDataset(d.key)"
+          >
+            {{ d.key }}<span class="muted"> · {{ d.kind }}</span>
+          </button>
+          <p v-if="!sqlDatasets.length" class="muted">в шаблоне нет наборов данных</p>
+        </div>
+        <div class="sql-side">
+          <div ref="sqlHost" class="sql-editor"></div>
+          <p class="muted">{{ sqlHint }}</p>
+          <div class="sql-actions">
+            <button class="btn primary" type="button" :disabled="!sqlKey || !canEdit" @click="applySql">
+              Применить SQL в шаблон
+            </button>
+            <span v-if="sqlNote" class="muted">{{ sqlNote }}</span>
+          </div>
+        </div>
+      </section>
 
       <section v-if="historyOpen" class="history">
         <div class="history-head">
@@ -257,6 +285,8 @@ import { basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
+import { StreamLanguage } from '@codemirror/language'
+import { listDatasets, setDatasetSql, sqlInfo } from './datasetSql.js'
 import { json, jsonParseLinter } from '@codemirror/lang-json'
 import { lintGutter, linter } from '@codemirror/lint'
 import { API_BASE, api } from '../api/client.js'
@@ -297,7 +327,136 @@ const savedByteSize = ref(null)
 
 const status = ref('')
 const statusKind = ref('info')
+// Мини-подсветка SQL: ключевые слова, строки, комментарии, числа. Отдельный пакет
+// @codemirror/lang-sql не используется: подсветки ключевых слов достаточно (ADR-134).
+const SQL_KEYWORDS = new Set([
+  'select', 'from', 'where', 'group', 'by', 'order', 'having', 'limit', 'offset', 'join', 'left',
+  'right', 'inner', 'outer', 'full', 'on', 'as', 'and', 'or', 'not', 'in', 'is', 'null', 'case',
+  'when', 'then', 'else', 'end', 'union', 'all', 'distinct', 'with', 'insert', 'update', 'delete',
+  'into', 'values', 'set', 'create', 'table', 'view', 'between', 'like', 'exists', 'asc', 'desc'
+])
+const SQL_FUNCS = new Set(['count', 'sum', 'avg', 'min', 'max', 'coalesce', 'now', 'date_trunc', 'cast'])
+
+const sqlLanguage = StreamLanguage.define({
+  token(stream) {
+    if (stream.eatSpace()) return null
+    if (stream.match('--')) {
+      stream.skipToEnd()
+      return 'comment'
+    }
+    if (stream.match('/*')) {
+      while (!stream.eol()) {
+        if (stream.match('*/')) return 'comment'
+        stream.next()
+      }
+      return 'comment'
+    }
+    if (stream.match(/'([^']|'')*'/)) return 'string'
+    if (stream.match(/"(?:[^"]|"")*"/)) return 'string'
+    if (stream.match(/\d+(\.\d+)?/)) return 'number'
+    if (stream.match(/[a-zA-Z_][\w$]*/)) {
+      const word = stream.current().toLowerCase()
+      if (SQL_KEYWORDS.has(word)) return 'keyword'
+      if (SQL_FUNCS.has(word)) return 'typeName'
+      return 'variableName'
+    }
+    if (stream.match(/[(),;.*+\-\/<>!=|:]+/)) return 'operator'
+    stream.next()
+    return null
+  }
+})
+
 const errors = ref([])
+
+// === Панель «Наборы данных»: многострочный SQL (ADR-134) ===
+const sqlOpen = ref(false)
+const sqlKey = ref('')
+const sqlDatasets = ref([])
+const sqlNote = ref('')
+const sqlHint = ref('')
+const sqlHost = ref(null)
+let sqlView = null
+
+function parseTemplateText() {
+  try {
+    return JSON.parse(text.value)
+  } catch {
+    return null
+  }
+}
+
+function setSqlDoc(value) {
+  if (!sqlView) return
+  sqlView.dispatch({ changes: { from: 0, to: sqlView.state.doc.length, insert: value || '' } })
+}
+
+function refreshSqlDatasets() {
+  const tpl = parseTemplateText()
+  sqlDatasets.value = listDatasets(tpl)
+  const current = sqlDatasets.value.find((d) => d.key === sqlKey.value)
+  if (current) {
+    setSqlDoc(current.sql)
+    const info = sqlInfo(current.sql)
+    sqlHint.value = `строк: ${info.lines}, символов: ${info.chars}`
+  } else if (sqlDatasets.value.length) {
+    pickDataset(sqlDatasets.value[0].key)
+  }
+}
+
+function pickDataset(key) {
+  const ds = sqlDatasets.value.find((d) => d.key === key)
+  sqlKey.value = key
+  setSqlDoc(ds ? ds.sql : '')
+  const info = sqlInfo(ds ? ds.sql : '')
+  sqlHint.value = ds && ds.kind !== 'sql'
+    ? `набор типа ${ds.kind}: поле sql не используется`
+    : `строк: ${info.lines}, символов: ${info.chars}`
+  sqlNote.value = ''
+}
+
+function initSqlEditor() {
+  if (sqlView || !sqlHost.value) return
+  sqlView = new EditorView({
+    parent: sqlHost.value,
+    state: EditorState.create({
+      doc: '',
+      extensions: [
+        basicSetup,
+        keymap.of([indentWithTab]),
+        sqlLanguage,
+        EditorView.lineWrapping,
+        EditorView.theme({ '&': { height: '100%', fontSize: '13px' } })
+      ]
+    })
+  })
+  refreshSqlDatasets()
+}
+
+async function toggleSqlPanel() {
+  sqlOpen.value = !sqlOpen.value
+  if (!sqlOpen.value) return
+  await nextTick()
+  initSqlEditor()
+  refreshSqlDatasets()
+}
+
+function applySql() {
+  const tpl = parseTemplateText()
+  if (!tpl) {
+    sqlNote.value = 'JSON не разбирается — исправьте его в редакторе слева'
+    return
+  }
+  if (!sqlView) return
+  const sql = sqlView.state.doc.toString()
+  const next = setDatasetSql(tpl, sqlKey.value, sql)
+  const pretty = JSON.stringify(next, null, 2)
+  setDoc(pretty)
+  text.value = pretty
+  errors.value = []
+  const info = sqlInfo(sql)
+  sqlHint.value = `строк: ${info.lines}, символов: ${info.chars}`
+  sqlNote.value = `SQL набора «${sqlKey.value}» перенесён в шаблон (${info.lines} строк)`
+}
 
 // Показать место ошибки в тексте: ищем последний сегмент пути (blocks.0.span → "span")
 // и ставим туда курсор — редактор сам прокручивает документ (ADR-132).
@@ -1404,6 +1563,52 @@ h1 {
   color: #a05a00;
 }
 
+.sql-panel {
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  gap: 8px;
+  height: 260px;
+  margin-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+}
+.sql-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sql-item {
+  text-align: left;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font: inherit;
+}
+.sql-item.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.sql-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sql-editor {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: auto;
+}
+.sql-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
 .problems {
   flex: 0 0 auto;
   background: #fff;
