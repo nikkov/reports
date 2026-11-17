@@ -1860,6 +1860,7 @@ int main() {
         "/api/reports",
         [db, adminEnabled, maxTemplateBytes, &validateTemplate, &prepareTemplate, &applyTemplateInMemory](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена: запустите сервис с REP_ADMIN=1");
                 return;
@@ -2599,6 +2600,7 @@ int main() {
         "/api/auth/login",
         [db, authMode, sessionTtlHours](const HttpRequestPtr &req,
                                         std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (authMode == rep::AuthMode::Off) {
                 sendError(cb, k404NotFound, "AUTH_DISABLED", "аутентификация выключена (REP_AUTH=0)");
                 return;
@@ -2667,6 +2669,7 @@ int main() {
     app().registerHandler(
         "/api/auth/logout",
         [db, authMode](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (authMode == rep::AuthMode::Proxy) {
                 sendError(cb, k400BadRequest, "AUTH_ON_PROXY", "выход выполняет реверс-прокси");
                 return;
@@ -2695,6 +2698,7 @@ int main() {
     app().registerHandler(
         "/api/auth/me",
         [db, authMode, proxyHeader](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (authMode == rep::AuthMode::Off) {
                 Json::Value out;
                 out["auth"] = false;
@@ -2768,6 +2772,7 @@ int main() {
          &restCache, maxRows, &resolveDataset](
             const HttpRequestPtr &req,
                                               std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -3030,6 +3035,7 @@ int main() {
         [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftAllowed, &restCache,
          maxRows, &resolveDataset](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -3627,6 +3633,7 @@ int main() {
     app().registerHandler(
         "/api/report/export.xlsx",
         [buildXlsx, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -3679,6 +3686,7 @@ int main() {
     app().registerHandler(
         "/api/report/export.csv",
         [&buildCsv, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -3738,6 +3746,7 @@ int main() {
         "/api/admin/users",
         [adminEnabled, userJson, rolesByUser, saveUserRoles, reloadAccessRoles](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -4039,6 +4048,7 @@ int main() {
         "/api/admin/access-roles",
         [adminEnabled, reloadAccessRoles](const HttpRequestPtr &req,
                                           std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -4324,6 +4334,7 @@ int main() {
         "/api/admin/subscriptions",
         [adminEnabled, &templates, &templatesMutex, subscriptionSelect, jsonSubscriptions,
          validateSubscription](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -4508,6 +4519,7 @@ int main() {
     app().registerHandler(
         "/api/admin/audit",
         [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -4596,6 +4608,7 @@ const std::string from = req->getParameter("from");
     app().registerHandler(
         "/api/admin/audit/export.csv",
         [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -4708,6 +4721,7 @@ const std::string from = req->getParameter("from");
     app().registerHandler(
         "/api/report/events",
         [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             const std::string reportId = req->getParameter("report");
             if (reportId.empty()) {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен параметр report");
@@ -4933,6 +4947,7 @@ const std::string from = req->getParameter("from");
             const HttpRequestPtr &req,
                                                  std::function<void(const HttpResponsePtr &)> &&cb,
                                                  const std::string &reportId, const std::string &param) {
+            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
             // draft=1 — справочники считаются по черновику (ADR-82)
             const bool wantDraft = req->getParameter("draft") == "1";
             if (wantDraft && !draftAllowed(req)) {
