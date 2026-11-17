@@ -2214,7 +2214,7 @@ int main() {
     // PUT /api/admin/reports/{id}/draft — сохранить черновик (валидируется, в память не идёт)
     app().registerHandler(
         "/api/admin/reports/{id}/draft",
-        [db, adminEnabled, &validateTemplate, &draftsParsed, &draftsRaw, &draftsErrors,
+        [db, adminEnabled, &validateTemplateFull, &draftsParsed, &draftsRaw, &draftsErrors,
          &templatesMutex](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
                            const std::string &id) {
@@ -2234,12 +2234,25 @@ int main() {
             const std::string raw = Json::writeString(wb, tpl);
             // Черновик сохраняется всегда, даже с ошибками (ADR-131): автор может оставить
             // работу на середине. Ошибки возвращаются в ответе, а исполнение запрещено.
-            std::string err;
-            const bool valid = validateTemplate(raw, id, err);
+            // Полный список ошибок: автор видит все сразу, а не правит по одной (ADR-132)
+            const auto checked = validateTemplateFull(raw, id);
+            const bool valid = checked.ok();
+            Json::Value errorList(Json::arrayValue);
+            std::string firstError;
+            for (const auto &e : checked.errors) {
+                Json::Value item;
+                item["path"] = e.path;
+                item["message"] = e.message;
+                errorList.append(item);
+                if (firstError.empty()) {
+                    firstError = e.path == "(корень)" ? e.message : e.path + ": " + e.message;
+                }
+            }
             runQuery(
                 db, "UPDATE report_templates SET draft = $2::jsonb, draft_updated_at = now() WHERE id = $1",
                 {id, raw},
-                [cb, id, raw, valid, err, &draftsParsed, &draftsRaw, &draftsErrors, &templatesMutex](
+                [cb, id, raw, valid, firstError, errorList, &draftsParsed, &draftsRaw, &draftsErrors,
+                 &templatesMutex](
                     const orm::Result &updated) {
                     if (updated.affectedRows() == 0) {
                         sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
@@ -2248,7 +2261,7 @@ int main() {
                     {
                         std::lock_guard<std::mutex> lock(templatesMutex);
                         draftsRaw[id] = raw;
-                        draftsErrors[id] = valid ? std::string() : err;
+                        draftsErrors[id] = valid ? std::string() : firstError;
                         if (valid) {
                             TemplateInfo info;
                             if (parseTemplate(raw, id, info)) draftsParsed[id] = info;
@@ -2261,7 +2274,7 @@ int main() {
                     out["id"] = id;
                     out["draft"] = true;
                     out["valid"] = valid;
-                    if (!valid) out["errors"] = err;
+                    if (!valid) out["errors"] = errorList;
                     cb(jsonResponse(out));
                 },
                 [cb](const std::exception_ptr &e) { sendError(cb, k500InternalServerError, "DRAFT_FAILED", describeError(e)); });
@@ -4795,15 +4808,19 @@ const std::string from = req->getParameter("from");
 
     app().registerHandler(
         "/api/health",
-        [db, maxRows, authMode, logRetentionDays, &dbRo](const HttpRequestPtr &,
-                                                         std::function<void(const HttpResponsePtr &)> &&cb) {
+        [db, maxRows, authMode, logRetentionDays, &dbRo, &connRegistry](
+            const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
             runQuery(
                 db,
                 "SELECT current_user AS role, "
                 "(SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS is_super", {},
-                [cb, maxRows, authMode, logRetentionDays, &dbRo](const orm::Result &res) {
+                [cb, maxRows, authMode, logRetentionDays, &dbRo, &connRegistry](const orm::Result &res) {
                     Json::Value body;
                     body["status"] = "ok";
+                    // сколько внешних источников сейчас в карантине (ADR-132): дежурному
+                    // не нужно читать журнал, чтобы заметить сбой
+                    body["datasourcesInQuarantine"] =
+                        static_cast<Json::UInt64>(connRegistry.failedCount());
                     body["schemaVersion"] = rep::kCurrentTemplateVersion;
                     body["db"] = !res.empty();
                     // под какой ролью работает сервер: в эксплуатации это reporting_srv,

@@ -3147,7 +3147,9 @@ test('черновик с ошибками сохраняется, но не п�
   expect(saved.ok()).toBeTruthy()
   const savedBody = await saved.json()
   expect(savedBody.valid).toBe(false)
-  expect(String(savedBody.errors)).toContain('span')
+  // полный список ошибок массивом: автор видит все сразу (ADR-132)
+  expect(Array.isArray(savedBody.errors)).toBe(true)
+  expect(savedBody.errors.some((e) => String(e.path).includes('span'))).toBe(true)
 
   // автор видит свой текст, чтобы продолжить правку
   expect((await request.get(`/api/admin/reports/${id}/draft`)).ok()).toBeTruthy()

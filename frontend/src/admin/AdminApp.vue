@@ -297,6 +297,22 @@ const savedByteSize = ref(null)
 const status = ref('')
 const statusKind = ref('info')
 const errors = ref([])
+
+// Показать место ошибки в тексте: ищем последний сегмент пути (blocks.0.span → "span")
+// и ставим туда курсор — редактор сам прокручивает документ (ADR-132).
+function focusProblem(problem) {
+  if (!problem || !view) return
+  const key = String(problem.path || '').split('.').filter(Boolean).pop()
+  if (!key) return
+  const doc = view.state.doc.toString()
+  const at = doc.indexOf('"' + key + '"')
+  if (at < 0) return
+  view.dispatch({
+    selection: { anchor: at, head: at + key.length + 2 },
+    scrollIntoView: true
+  })
+  view.focus()
+}
 const warnings = ref([])
 const saving = ref(false)
 const publishing = ref(false)
@@ -660,8 +676,13 @@ async function saveDraftOnly() {
     await loadList()
     if (saved && saved.valid === false) {
       // черновик с ошибками хранится, но данные и публикация по нему запрещены (ADR-131)
-      setStatus('черновик сохранён с ошибками: ' + (saved.errors || 'есть ошибки') +
-        ' — просмотр и публикация недоступны', 'err')
+      // сервер вернул полный список — показываем все, а не по одной (ADR-132)
+      const list = Array.isArray(saved.errors)
+        ? saved.errors
+        : [{ path: '(шаблон)', message: String(saved.errors || 'есть ошибки') }]
+      errors.value = list
+      focusProblem(list[0])
+      setStatus('черновик сохранён с ошибками: ' + list.length + ' — просмотр и публикация недоступны', 'err')
     } else {
       setStatus('черновик сохранён — отчёт пока не изменился')
     }
