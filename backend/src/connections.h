@@ -19,6 +19,7 @@
 
 #include <map>
 #include <memory>
+#include <chrono>
 #include <mutex>
 #include <string>
 
@@ -72,6 +73,10 @@ bool parseConnections(const Json::Value &connections, std::map<std::string, Conn
 // шаблонов без блока connections не меняется.
 class ConnRegistry {
 public:
+    // Сколько секунд помним, что источник недоступен (ADR-125).
+    static constexpr int kFailureCooldownSeconds = 30;
+
+public:
     // Возвращает nullptr и заполняет error, если источник недоступен: неизвестный ключ,
     // зарезервированный REST, отсутствующая переменная окружения с паролем, сбой клиента.
     orm::DbClientPtr resolve(const std::map<std::string, ConnSpec> &connections,
@@ -83,9 +88,17 @@ public:
 
     size_t size();
 
+    // Источник не отвечает (нет базы, неверный пароль, хост недоступен): запоминаем ошибку
+    // на kFailureCooldownSeconds и отвечаем сразу, не дожидаясь connect_timeout и не
+    // создавая клиента, который drogon будет переподключать бесконечно (ADR-125).
+    void markFailed(const std::string &key, const std::string &error);
+    bool failed(const std::string &key, std::string &error) const;
+
 private:
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::map<std::string, orm::DbClientPtr> cache_;
+    std::map<std::string, std::pair<std::chrono::steady_clock::time_point, std::string>> failed_;
+    std::map<std::string, std::string> keyDsn_;
 };
 
 }  // namespace rep

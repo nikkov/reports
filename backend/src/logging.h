@@ -81,6 +81,11 @@ std::string formatJson(const Event &event, const std::string &ts);
 // Приёмник (БД, файл, SIEM). Вызывается после записи в stdout; может быть пустым.
 using Sink = std::function<void(const Event &, const std::string &ts)>;
 void setSink(Sink sink);
+
+// Перехват логов drogon/trantor: их сообщения (в том числе «Pg connection failed»)
+// по умолчанию идут только в stdout, поэтому сбой источника не попадал ни в файл,
+// ни в журнал (ADR-125). Ставится на старте; уровень пересылки — по REP_LOG_LEVEL.
+void installFrameworkSink(Level minLevel = Level::Info);
 Sink sink();
 
 // Записать событие: JSON в stdout и передача приёмнику. Потокобезопасно.

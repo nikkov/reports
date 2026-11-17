@@ -185,3 +185,42 @@ TEST_CASE("connections: ключ default отдаёт пул сервера") {
     REQUIRE(err.empty());
     REQUIRE(registry.size() == 0);
 }
+
+TEST_CASE("connections: недоступный источник запоминается на 30 секунд") {
+    rep::ConnRegistry registry;
+    std::string error;
+    // без отметки источник не считается упавшим
+    REQUIRE_FALSE(registry.failed("main", error));
+    REQUIRE(error.empty());
+
+    registry.markFailed("main", "источник 'main': база данных не существует");
+    REQUIRE(registry.failed("main", error));
+    REQUIRE(error.find("не существует") != std::string::npos);
+
+    // resolve отвечает сразу, не создавая клиента и не дожидаясь connect_timeout
+    rep::ConnSpec spec;
+    spec.key = "main";
+    spec.kind = "postgres";
+    spec.host = "127.0.0.1";
+    spec.database = "nope";
+    spec.user = "u";
+    spec.passwordEnv = "PATH";
+    std::map<std::string, rep::ConnSpec> connections{{"main", spec}};
+    std::string resolveError;
+    const auto client = registry.resolve(connections, "main", nullptr, resolveError);
+    REQUIRE(client == nullptr);
+    REQUIRE(resolveError.find("не существует") != std::string::npos);
+}
+
+TEST_CASE("connections: ключ default не попадает в список упавших") {
+    rep::ConnRegistry registry;
+    registry.markFailed("default", "ошибка");
+    std::string error;
+    REQUIRE_FALSE(registry.failed("default", error));
+}
+
+TEST_CASE("connections: срок карантина задан и положителен") {
+    // 30 секунд — компромисс: пользователь не ждёт connect_timeout снова, но исправленный
+    // источник подхватывается без перезапуска сервера
+    REQUIRE(rep::ConnRegistry::kFailureCooldownSeconds == 30);
+}

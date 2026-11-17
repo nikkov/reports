@@ -511,15 +511,33 @@ bool loadTemplateFile(const fs::path &file, TemplateInfo &out) {
     return parseTemplate(ss.str(), file.stem().string(), out);
 }
 
+// timeoutMs > 0 — через это время запрос считается зависшим и отвечает ошибкой (ADR-125).
+// Нужен для внешних источников: если база не существует, drogon бесконечно переподключается,
+// колбэки не вызываются, и запрос пользователя висит без ответа.
 void runQuery(const orm::DbClientPtr &db, const std::string &sql,
               const std::vector<std::string> &values,
               std::function<void(const orm::Result &)> onOk,
-              std::function<void(const std::exception_ptr &)> onErr) {
+              std::function<void(const std::exception_ptr &)> onErr,
+              int timeoutMs = 0) {
     auto binder = *db << sql;
     for (const auto &v : values) binder << v;
     binder << orm::Mode::NonBlocking;
-    binder >> std::move(onOk);
-    binder >> std::move(onErr);
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    if (timeoutMs > 0) {
+        drogon::app().getLoop()->runAfter(
+            static_cast<double>(timeoutMs) / 1000.0, [done, onErr, timeoutMs]() {
+                if (done->exchange(true)) return;
+                onErr(std::make_exception_ptr(std::runtime_error(
+                    "источник не ответил за " + std::to_string(timeoutMs) +
+                    " мс: проверьте host, port и database соединения, а также доступность сервера")));
+            });
+    }
+    binder >> [done, onOk](const orm::Result &res) {
+        if (!done->exchange(true)) onOk(res);
+    };
+    binder >> [done, onErr](const std::exception_ptr &e) {
+        if (!done->exchange(true)) onErr(e);
+    };
     binder.exec();
 }
 
@@ -991,6 +1009,18 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
         onErr(422, "CONNECTION_ERROR", connError);
         return;
     }
+    // Внешний источник: ограничиваем ожидание и запоминаем сбой, иначе запрос висит
+    // бесконечно, а drogon повторяет подключение (ADR-125)
+    const bool externalSource = !ds.connection.empty() && ds.connection != "default";
+    const std::string sourceKey = ds.connection;
+    int queryTimeoutMs = 0;
+    if (externalSource) {
+        queryTimeoutMs = 6000;
+        try {
+            queryTimeoutMs = std::max(1000, std::stoi(rep::envOr("REP_DATASET_TIMEOUT_MS", "6000")));
+        } catch (const std::exception &) {
+        }
+    }
     runQuery(
         client, query.sql, query.values,
         [maxRows, onOk, onErr](const orm::Result &res) {
@@ -1004,8 +1034,26 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
             rowsFromSqlResult(res, rows);
             onOk(rows);
         },
-        [onErr](const std::exception_ptr &eptr) {
+        [onErr, &connRegistry, externalSource, sourceKey, queryTimeoutMs](
+            const std::exception_ptr &eptr) {
             const std::string msg = describeError(eptr);
+            if (externalSource) {
+                // Любой сбой внешнего источника — повод не ждать его снова 30 секунд:
+                // иначе каждый запрос отчёта будет висеть connect_timeout
+                const std::string text = "источник '" + sourceKey + "': " + msg +
+                                         " (повтор через " +
+                                         std::to_string(rep::ConnRegistry::kFailureCooldownSeconds) +
+                                         " с)";
+                connRegistry.markFailed(sourceKey, text);
+                if (msg.find("statement timeout") != std::string::npos ||
+                    msg.find("canceling statement") != std::string::npos ||
+                    msg.find("не ответил за") != std::string::npos) {
+                    onErr(504, "SQL_TIMEOUT", text);
+                } else {
+                    onErr(503, "DB_UNAVAILABLE", text);
+                }
+                return;
+            }
             if (msg.find("statement timeout") != std::string::npos ||
                 msg.find("canceling statement") != std::string::npos) {
                 onErr(504, "SQL_TIMEOUT", msg);
@@ -1021,7 +1069,8 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
                 return;
             }
             onErr(500, "QUERY_FAILED", msg);
-        });
+        },
+        queryTimeoutMs);
 }
 
 }  // namespace
@@ -1069,7 +1118,11 @@ int main() {
     rep::loadDotEnv(rep::envOr("REP_ENV_FILE", "backend/.env"));
 
     // Минимальный уровень записи (REP_LOG_LEVEL, по умолчанию info)
-    rep::log::setMinLevel(rep::log::parseLevel(rep::envOr("REP_LOG_LEVEL", "info")));
+    const rep::log::Level minLevel = rep::log::parseLevel(rep::envOr("REP_LOG_LEVEL", "info"));
+    rep::log::setMinLevel(minLevel);
+    // Логи самого drogon (в том числе «Pg connection failed») идут в общий журнал: без этого
+    // сбой источника был виден лишь в консоли, которого у службы нет (ADR-125)
+    rep::log::installFrameworkSink(minLevel);
 
     // Файловый приёмник (REP_LOG_FILE): JSON-строки, отдельный порог и ротация по размеру
     {

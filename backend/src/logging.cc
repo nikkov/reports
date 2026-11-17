@@ -1,5 +1,7 @@
 #include "logging.h"
 
+#include <trantor/utils/Logger.h>
+
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -256,3 +258,92 @@ void event(Level level, Action action, const std::string &user, const std::strin
 
 } // namespace log
 } // namespace rep
+
+namespace rep {
+namespace log {
+
+namespace {
+
+// Строка drogon: «20261117 05:30:05.548295 UTC 14093 ERROR !!!Pg connection failed: ...».
+Level trantorLevel(const std::string &line) {
+    if (line.find(" FATAL ") != std::string::npos || line.find(" ERROR ") != std::string::npos)
+        return Level::Error;
+    if (line.find(" WARN ") != std::string::npos) return Level::Warning;
+    if (line.find(" DEBUG ") != std::string::npos) return Level::Debug;
+    if (line.find(" TRACE ") != std::string::npos) return Level::Trace;
+    return Level::Info;
+}
+
+std::string trantorText(const std::string &line) {
+    // отрезаем дату, время, PID и уровень: в нашем JSON они уже есть отдельно
+    static const char *levels[] = {" FATAL ", " ERROR ", " WARN ", " INFO ", " DEBUG ", " TRACE "};
+    size_t best = std::string::npos;
+    for (const char *l : levels) {
+        const size_t p = line.find(l);
+        if (p != std::string::npos && (best == std::string::npos || p < best)) best = p;
+    }
+    if (best == std::string::npos) return line;
+    const size_t start = line.find(' ', best + 1);
+    return start == std::string::npos ? line : line.substr(start + 1);
+}
+
+// Приёмник drogon может быть вызван из потока, где мы сами пишем в лог (sink аудита
+// ходит в PostgreSQL): защищаемся от рекурсии.
+thread_local bool insideFrameworkSink = false;
+
+// drogon при недоступной базе пишет одну и ту же строку десятки раз в секунду.
+// Склеиваем повторы: пишем не чаще раза в 5 секунд и указываем, сколько подавлено (ADR-125).
+// Состояние общее для потоков: drogon пишет из разных, и при thread_local повторы
+// не склеивались бы (ADR-125)
+std::mutex frameworkMutex;
+std::string lastFrameworkText;
+std::chrono::steady_clock::time_point lastFrameworkAt;
+int suppressedFrameworkLines = 0;
+
+}  // namespace
+
+void installFrameworkSink(Level minLevel) {
+    switch (minLevel) {
+        case Level::Trace: trantor::Logger::setLogLevel(trantor::Logger::kTrace); break;
+        case Level::Debug: trantor::Logger::setLogLevel(trantor::Logger::kDebug); break;
+        case Level::Info: trantor::Logger::setLogLevel(trantor::Logger::kInfo); break;
+        case Level::Warning: trantor::Logger::setLogLevel(trantor::Logger::kWarn); break;
+        case Level::Error: trantor::Logger::setLogLevel(trantor::Logger::kError); break;
+    }
+    trantor::Logger::setOutputFunction(
+        [](const char *msg, const uint64_t len) {
+            if (insideFrameworkSink) return;
+            insideFrameworkSink = true;
+            std::string line(msg ? std::string(msg, len) : std::string());
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+            if (!line.empty()) {
+                const std::string text = trantorText(line);
+                const auto now = std::chrono::steady_clock::now();
+                std::string message;
+                bool write = false;
+                {
+                    std::lock_guard<std::mutex> lock(frameworkMutex);
+                    if (text == lastFrameworkText &&
+                        now - lastFrameworkAt < std::chrono::seconds(5)) {
+                        ++suppressedFrameworkLines;
+                    } else {
+                        message = "drogon: " + text;
+                        if (suppressedFrameworkLines > 0) {
+                            message += " (повторов подавлено: " +
+                                       std::to_string(suppressedFrameworkLines) + ")";
+                            suppressedFrameworkLines = 0;
+                        }
+                        lastFrameworkText = text;
+                        lastFrameworkAt = now;
+                        write = true;
+                    }
+                }
+                if (write) event(trantorLevel(line), Action::Other, "", message);
+            }
+            insideFrameworkSink = false;
+        },
+        []() { std::cout.flush(); });
+}
+
+}  // namespace log
+}  // namespace rep
