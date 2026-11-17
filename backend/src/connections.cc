@@ -289,6 +289,19 @@ void ConnRegistry::markProbed(const std::string &dsn) {
     probed_.insert(dsn);
 }
 
+size_t ConnRegistry::clearFailures() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const size_t count = failed_.size();
+    failed_.clear();
+    probed_.clear();
+    return count;
+}
+
+size_t ConnRegistry::failedCount() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return failed_.size();
+}
+
 size_t ConnRegistry::size() {
     std::lock_guard<std::mutex> lock(mutex_);
     return cache_.size();

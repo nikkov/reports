@@ -1823,6 +1823,21 @@ int main() {
         },
         {Get});
 
+    // Сброс карантина внешних источников: после правки шаблона или починки базы
+    // не нужно ждать 30 секунд или перезапускать сервер (ADR-130)
+    app().registerHandler(
+        "/api/admin/datasources/reset",
+        [&connRegistry](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req);
+            const size_t cleared = connRegistry.clearFailures();
+            rep::log::event(rep::log::Level::Info, rep::log::Action::Other, currentActor,
+                            "сброшен карантин источников: " + std::to_string(cleared));
+            Json::Value out;
+            out["cleared"] = static_cast<Json::UInt64>(cleared);
+            cb(jsonResponse(out));
+        },
+        {Post});
+
     app().registerHandler(
         "/api/admin/reports",
         [db, adminEnabled](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb) {
@@ -2333,6 +2348,9 @@ int main() {
 
     // --- Аутентификация и роли (ADR-34) -------------------------------------
     auto unauthorized = [](const std::string &msg) {
+        // 401 в журнале уровня debug: нет сессии — обычное дело при первом открытии (ADR-130)
+        rep::log::event(rep::log::Level::Debug, rep::log::Action::Other, currentActor,
+                        "ошибка API 401 UNAUTHORIZED: " + msg);
         auto resp = HttpResponse::newHttpResponse();
         Json::Value body;
         body["error"]["code"] = "UNAUTHORIZED";
@@ -2345,6 +2363,9 @@ int main() {
         return resp;
     };
     auto forbidden = [](const std::string &msg) {
+        // 403 пишется с логином: в этот момент он уже известен (ADR-130)
+        rep::log::event(rep::log::Level::Warning, rep::log::Action::Other, currentActor,
+                        "ошибка API 403 FORBIDDEN: " + msg);
         auto resp = HttpResponse::newHttpResponse();
         Json::Value body;
         body["error"]["code"] = "FORBIDDEN";
@@ -2504,7 +2525,7 @@ int main() {
                             req->attributes()->insert("session_role", role);
                             req->attributes()->insert("session_login", login);
                             req->attributes()->insert("session_source", std::string("proxy"));
-                            currentActor = login;
+                            currentActor = login; // 403 из advice тоже должен знать логин
                             next();
                         });
                     return;

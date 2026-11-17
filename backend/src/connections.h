@@ -101,6 +101,11 @@ public:
     bool probed(const std::string &dsn) const;
     void markProbed(const std::string &dsn);
 
+    // Снять карантин и признаки проверки: следующая попытка снова проверит соединение.
+    // Нужно после исправления шаблона или «оживления» источника (ADR-130).
+    size_t clearFailures();
+    size_t failedCount() const;
+
 private:
     mutable std::mutex mutex_;
     std::map<std::string, orm::DbClientPtr> cache_;

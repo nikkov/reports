@@ -7,6 +7,10 @@
       <a class="subs-link" href="subscriptions.html">Рассылка отчётов →</a>
       <a class="subs-link" href="users.html">Пользователи →</a>
       <a class="subs-link" href="audit.html">Журнал действий →</a>
+      <button class="subs-link" type="button" :disabled="sourcesBusy" @click="resetSources">
+        {{ sourcesBusy ? 'Проверяю источники…' : 'Проверить источники данных' }}
+      </button>
+      <p v-if="sourcesNote" class="muted">{{ sourcesNote }}</p>
           <p class="brand-sub">Администрирование · JSON + CodeMirror</p>
         </div>
         <button class="btn primary" @click="openCreate">Создать</button>
@@ -262,6 +266,25 @@ const ID_RE = /^[a-z][a-z0-9-]*$/
 
 const reports = ref([])
 const query = ref('')
+const sourcesBusy = ref(false)
+const sourcesNote = ref('')
+
+// Карантин внешнего источника живёт 30 с; кнопка снимает его сразу после правки шаблона (ADR-130)
+async function resetSources() {
+  sourcesBusy.value = true
+  sourcesNote.value = ''
+  try {
+    const data = await api.resetDatasources()
+    sourcesNote.value = data && data.cleared
+      ? `карантин снят, источников было: ${data.cleared}`
+      : 'карантина не было — все источники проверяются заново при следующем запросе'
+  } catch (e) {
+    sourcesNote.value = `не удалось снять карантин: ${e.message}`
+  } finally {
+    sourcesBusy.value = false
+  }
+}
+
 const listLoading = ref(true)
 const listError = ref('')
 

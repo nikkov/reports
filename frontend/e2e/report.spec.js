@@ -3080,3 +3080,50 @@ test('REST BASIC: демо отвечает 401 без авторизации и
   const json = await authed.json()
   expect(json.items[0].category).toBe('Мебель')
 })
+
+test('сбой источника: 503 с причиной PostgreSQL, запись в журнале и сброс карантина (ADR-126/130)', async ({ request }) => {
+  const id = 'bad-source-e2e'
+  const body = {
+    version: 2,
+    id,
+    title: 'Сбой источника e2e',
+    params: [],
+    connections: {
+      broken: {
+        kind: 'postgres',
+        host: '127.0.0.1',
+        port: '5432',
+        database: 'no_such_db_e2e',
+        user: process.env.REP_RO_DB_USER || 'reporting_ro',
+        passwordEnv: 'REP_RO_DB_PASSWORD',
+        connectTimeout: 3
+      }
+    },
+    datasets: { s: { connection: 'broken', sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }]
+  }
+  await request.delete(`/api/reports/${id}`)
+  expect((await request.post('/api/reports', { data: { id, body } })).ok()).toBeTruthy()
+  await request.post('/api/admin/datasources/reset')
+
+  // запрос не должен висеть: причина приходит от PostgreSQL, а не по таймауту
+  const started = Date.now()
+  const res = await request.post('/api/report/data', { data: { reportId: id, dataset: 's', params: {} } })
+  const costMs = Date.now() - started
+  expect(res.status()).toBe(503)
+  const error = (await res.json()).error
+  expect(error.code).toBe('DB_UNAVAILABLE')
+  expect(error.message).toContain('no_such_db_e2e')
+  expect(costMs).toBeLessThan(3000)
+
+  // причина зафиксирована в журнале (ADR-127)
+  const audit = await (await request.get('/api/admin/audit?level=error&limit=50')).json()
+  const messages = (audit.items || []).map((r) => (r.details && r.details.message) || '')
+  expect(messages.some((m) => m.includes('no_such_db_e2e'))).toBeTruthy()
+
+  // карантин снимается без перезапуска сервера
+  const reset = await (await request.post('/api/admin/datasources/reset')).json()
+  expect(typeof reset.cleared).toBe('number')
+
+  await request.delete(`/api/reports/${id}`)
+})

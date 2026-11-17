@@ -52,6 +52,8 @@ import { normalizeDataset } from './normalize.js'
 
 export const api = {
   health: () => request('/api/health'),
+  // снятие карантина внешних источников (ADR-130): после правки шаблона не ждём 30 с
+  resetDatasources: () => request('/api/admin/datasources/reset', { method: 'POST' }),
   reports: () => request('/api/reports'),
   template: (id) => request(`/api/reports/${encodeURIComponent(id)}`),
   // справочник параметра: SQL живёт в шаблоне, адрес — отчёт + имя параметра (ADR-24)
