@@ -54,7 +54,8 @@
                   href="#"
                   :title="drill.label || 'Открыть детали'"
                   @click.stop.prevent="emit('drill', { row, spec: drill })"
-                >{{ cellTextOf(cell) }}</a>
+                ><template v-for="(part, pi) in cellParts(cell)" :key="pi"><mark v-if="part.hit" class="find-hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></a>
+                <template v-else-if="searchTerm"><template v-for="(part, pi) in cellParts(cell)" :key="pi"><mark v-if="part.hit" class="find-hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></template>
                 <template v-else>{{ cellTextOf(cell) }}</template>
               </td>
             </template>
@@ -137,6 +138,28 @@ function cellTextOf(cell) {
   return cell.plain ? String(cell.text ?? '') : pretty(cell.text)
 }
 
+// --- Подсветка совпадений поиска (ADR-144) ---
+// Текст ячейки разбивается на части: совпадения оборачиваются в <mark>, остальное — текстом.
+function cellParts(cell) {
+  const text = cellTextOf(cell)
+  const term = (props.searchTerm || '').trim()
+  if (!term || !text) return [{ text, hit: false }]
+  const lowerText = text.toLowerCase()
+  const lowerTerm = term.toLowerCase()
+  const parts = []
+  let from = 0
+  for (;;) {
+    const at = lowerText.indexOf(lowerTerm, from)
+    if (at < 0) break
+    if (at > from) parts.push({ text: text.slice(from, at), hit: false })
+    parts.push({ text: text.slice(at, at + term.length), hit: true })
+    from = at + term.length
+  }
+  if (!parts.length) return [{ text, hit: false }]
+  if (from < text.length) parts.push({ text: text.slice(from), hit: false })
+  return parts
+}
+
 // --- Подсказка с полным текстом ячейки (ADR-139) ---
 // Показываем только если текст не помещается: иначе подсказка повторяла бы то, что видно.
 const cellTip = reactive({ visible: false, text: '', x: 0, y: 0 })
@@ -180,6 +203,11 @@ const props = defineProps({
   overscan: { type: Number, default: 8 },
   // печать: включаем печатный слой (ADR-28), экран остаётся виртуализированным
   printMode: { type: Boolean, default: false },
+  // поиск по всему набору (ADR-144): термин подсвечивается в видимых ячейках,
+  // searchRow — индекс строки активного совпадения, к ней прокручиваемся
+  searchTerm: { type: String, default: '' },
+  searchRow: { type: Number, default: -1 },
+  searchCol: { type: Number, default: -1 },
   // drill-through (ADR-29): описание перехода из подытога в другой отчёт
   drill: { type: Object, default: null },
   // печать: рендерим весь отчёт, без окна виртуализации (ADR-28)
@@ -331,6 +359,18 @@ function lowerBound(arr, value) {
 // шапка липкая и «съедает» столько же, сколько занимает в потоке. Прибавка её высоты
 // здесь давала сдвиг на строку вниз: подпись группы уезжала, а строка под ней оставалась
 // с пустой групповой колонкой.
+// Активация совпадения: прокрутка к строке, даже если она далеко за окном (ADR-144)
+watch(
+  () => props.searchRow,
+  (row) => {
+    if (row === undefined || row === null || row < 0 || !scroller.value) return
+    const off = offsets.value[row] || 0
+    const half = Math.max(0, (scroller.value.clientHeight || 0) / 2 - 40)
+    scroller.value.scrollTop = Math.max(0, off - half)
+    scrollTop.value = scroller.value.scrollTop
+  }
+)
+
 const anchor = computed(() => scrollTop.value)
 
 // Окно начинается со строки, которая пересекает верх окна, а не со следующей за ней.
@@ -753,6 +793,12 @@ function cellsAt(index) {
 </script>
 
 <style scoped>
+.find-hit {
+  background: #fde68a;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
 .cell-tip {
   position: fixed;
   z-index: 3000;

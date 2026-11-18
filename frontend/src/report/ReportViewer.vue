@@ -78,6 +78,9 @@
           :styles="stylesFor(block)"
           :print-mode="printMode"
           :load-group="(pathKey, spec) => loadGroupDetails(block, pathKey, spec)"
+          :search-term="search.term"
+          :search-row="searchRowFor(index)"
+          :search-col="searchColFor(index)"
           @drill="onDrill"
         />
 
@@ -120,79 +123,61 @@ const template = ref(null)
 const rows = ref([])
 const paramValues = reactive({})
 
-// --- Поиск по тексту отчёта (ADR-143) ---
-// Ищем в ячейках всех табличных блоков, оборачиваем совпадения в <mark>, повторное нажатие
-// «Найти» переходит к следующему. Виртуализация держит в DOM окно строк, поэтому поиск идёт
-// по отрисованным строкам — про это честно написано в ограничениях ADR.
-const searchState = { term: '', hits: [], index: -1 }
+// --- Поиск по всему набору данных (ADR-144) ---
+// Раньше искали по DOM и находили только отрисованные строки. Теперь совпадения собираются
+// по модели всех табличных блоков, а таблица подсвечивает видимые ячейки и прокручивается
+// к строке активного совпадения.
+const search = reactive({ term: '', matches: [], index: -1 })
 
-function clearSearchMarks() {
-  document.querySelectorAll('mark.find-hit').forEach((mark) => {
-    const parent = mark.parentNode
-    if (!parent) return
-    parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
-    parent.normalize()
-  })
-  searchState.hits = []
-  searchState.index = -1
-  searchState.term = ''
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function highlightInReport(term) {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const re = new RegExp(escaped, 'gi')
-  const cells = document.querySelectorAll('.blocks .rt-table td, .blocks .rt-table th')
-  const hits = []
-  for (const cell of cells) {
-    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
-    const nodes = []
-    while (walker.nextNode()) nodes.push(walker.currentNode)
-    for (const node of nodes) {
-      const text = node.nodeValue || ''
-      re.lastIndex = 0
-      if (!re.test(text)) continue
-      re.lastIndex = 0
-      const frag = document.createDocumentFragment()
-      let last = 0
-      let match
-      while ((match = re.exec(text)) !== null) {
-        frag.appendChild(document.createTextNode(text.slice(last, match.index)))
-        const mark = document.createElement('mark')
-        mark.className = 'find-hit'
-        mark.textContent = match[0]
-        frag.appendChild(mark)
-        hits.push(mark)
-        last = match.index + match[0].length
-      }
-      frag.appendChild(document.createTextNode(text.slice(last)))
-      node.parentNode.replaceChild(frag, node)
-    }
-  }
-  return hits
+function collectMatches(term) {
+  const re = new RegExp(escapeRegExp(term), 'i')
+  const found = []
+  const blocks = (template.value && template.value.blocks) || []
+  blocks.forEach((block, blockIndex) => {
+    if (block.type !== 'table') return
+    const columns = block.columns || []
+    const rows = rowsFor(block) || []
+    rows.forEach((row, rowIndex) => {
+      columns.forEach((column, colIndex) => {
+        const value = row ? row[column.field] : undefined
+        if (value === undefined || value === null) return
+        if (re.test(String(value))) found.push({ block: blockIndex, row: rowIndex, col: colIndex })
+      })
+    })
+  })
+  return found
+}
+
+function searchRowFor(blockIndex) {
+  const match = search.matches[search.index]
+  return match && match.block === blockIndex ? match.row : -1
+}
+
+function searchColFor(blockIndex) {
+  const match = search.matches[search.index]
+  return match && match.block === blockIndex ? match.col : -1
 }
 
 function searchInReport(rawTerm) {
   const term = String(rawTerm || '').trim()
   if (!term) {
-    clearSearchMarks()
+    search.term = ''
+    search.matches = []
+    search.index = -1
     return
   }
-  // тот же запрос при повторном нажатии — идём к следующему вхождению
-  if (term === searchState.term && searchState.hits.length) {
-    searchState.hits[searchState.index]?.classList.remove('active')
-    searchState.index = (searchState.index + 1) % searchState.hits.length
-    const next = searchState.hits[searchState.index]
-    next.classList.add('active')
-    next.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  // тот же запрос при повторном нажатии — следующее вхождение по кругу
+  if (term === search.term && search.matches.length) {
+    search.index = (search.index + 1) % search.matches.length
     return
   }
-  clearSearchMarks()
-  searchState.term = term
-  searchState.hits = highlightInReport(term)
-  if (!searchState.hits.length) return
-  searchState.index = 0
-  searchState.hits[0].classList.add('active')
-  searchState.hits[0].scrollIntoView({ block: 'center', behavior: 'smooth' })
+  search.term = term
+  search.matches = collectMatches(term)
+  search.index = search.matches.length ? 0 : -1
 }
 const paramLabels = ref({})
 const loading = ref(false)

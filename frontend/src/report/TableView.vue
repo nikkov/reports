@@ -34,6 +34,9 @@
     :virtual="virtual"
     :print-mode="printMode"
     :drill="block.drill || null"
+    :search-term="searchTerm"
+    :search-row="searchRow"
+    :search-col="searchCol"
     @drill="emit('drill', $event)"
     :rows="view.rows"
     :columns="columns"
@@ -51,6 +54,9 @@
     :virtual="virtual"
     :print-mode="printMode"
     :drill="block.drill || null"
+    :search-term="searchTerm"
+    :search-row="searchRow"
+    :search-col="searchCol"
     @drill="emit('drill', $event)"
     :rows="view.rows"
     :columns="columns"
@@ -86,7 +92,11 @@ const props = defineProps({
   loadGroup: { type: Function, default: null },
   // печать: весь отчёт без виртуализации (ADR-28)
   virtual: { type: Boolean, default: true },
-  printMode: { type: Boolean, default: false }
+  printMode: { type: Boolean, default: false },
+  // поиск по всему набору: термин и активная строка (ADR-144)
+  searchTerm: { type: String, default: '' },
+  searchRow: { type: Number, default: -1 },
+  searchCol: { type: Number, default: -1 }
 })
 
 import { columnFormat, formatCell } from './format.js'
