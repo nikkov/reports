@@ -19,10 +19,22 @@
       </ul>
           <p class="brand-sub">Администрирование · JSON + CodeMirror</p>
         </div>
+        <button class="btn" type="button" @click="toggleDeleted">
+          {{ showDeleted ? 'Скрыть удалённые' : 'Удалённые' }}
+        </button>
         <button class="btn primary" @click="openCreate">Создать</button>
       </div>
 
       <input v-model="query" class="search" type="search" placeholder="Поиск по id или названию" />
+
+      <div v-if="showDeleted" class="deleted-box">
+        <p v-if="!deletedList.length" class="muted">удалённых шаблонов нет</p>
+        <div v-for="d in deletedList" :key="d.id" class="deleted-item">
+          <code>{{ d.id }}</code>
+          <span class="dim">{{ d.title }}</span>
+          <button type="button" class="src-reset" @click="restoreOne(d.id)">Восстановить</button>
+        </div>
+      </div>
 
       <p v-if="listLoading" class="muted">загрузка…</p>
       <p v-else-if="listError" class="banner err">{{ listError }}</p>
@@ -350,6 +362,36 @@ const ID_RE = /^[a-z][a-z0-9-]*$/
 
 const reports = ref([])
 const query = ref('')
+// Удалённые шаблоны (ADR-151): мягкое удаление можно отменить
+const showDeleted = ref(false)
+const deletedList = ref([])
+
+async function toggleDeleted() {
+  showDeleted.value = !showDeleted.value
+  if (showDeleted.value) await loadDeleted()
+}
+
+async function loadDeleted() {
+  try {
+    const data = await api.deletedReports()
+    deletedList.value = (data && data.items) || []
+  } catch (e) {
+    deletedList.value = []
+    setStatus('не удалось получить удалённые: ' + e.message, 'err')
+  }
+}
+
+async function restoreOne(id) {
+  try {
+    await api.restoreReport(id)
+    await loadDeleted()
+    await loadList()
+    setStatus(`шаблон восстановлен: ${id}`)
+  } catch (e) {
+    setStatus('не восстановлено: ' + e.message, 'err')
+  }
+}
+
 const sourcesBusy = ref(false)
 const sourcesNote = ref('')
 const sourcesFailed = ref([])
@@ -1929,6 +1971,22 @@ body.resizing-horizontal {
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+}
+.deleted-box {
+  margin: 6px 0;
+  padding: 6px;
+  border: 1px dashed #e5e7eb;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.deleted-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.deleted-item code {
+  font-weight: 600;
 }
 .sources-failed {
   list-style: none;

@@ -1577,7 +1577,7 @@ int main() {
     if (subscriptionLeaseSeconds > 3600) subscriptionLeaseSeconds = 3600;
     const int sessionTtlHours = std::stoi(rep::envOr("REP_SESSION_TTL_HOURS", "12"));
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
-    std::recursive_mutex templatesMutex; // диагностика ADR-150
+    std::recursive_mutex templatesMutex;
 
     // Публичный отчёт (ADR-103): открывается по прямой ссылке без входа. Флаг `public`
     // в шаблоне важнее accessRoles. Ниже — определение отчёта по запросу и его публичности;
@@ -1842,6 +1842,82 @@ int main() {
             cb(resp);
         },
         {Get});
+
+    // Удалённые шаблоны (ADR-151): видим, что лежит с is_delete = true, и можем вернуть
+    app().registerHandler(
+        "/api/admin/reports/deleted",
+        [db, adminEnabled](const HttpRequestPtr &req,
+                           std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req);
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            runQuery(
+                db, "SELECT id, title, updated_at FROM report_templates WHERE is_delete = true ORDER BY id", {},
+                [cb](const orm::Result &res) {
+                    Json::Value items(Json::arrayValue);
+                    for (const auto &row : res) {
+                        Json::Value item;
+                        item["id"] = row["id"].as<std::string>();
+                        item["title"] = row["title"].as<std::string>();
+                        item["updatedAt"] = row["updated_at"].as<std::string>();
+                        items.append(item);
+                    }
+                    Json::Value out;
+                    out["items"] = items;
+                    cb(jsonResponse(out));
+                },
+                [cb](const std::exception_ptr &e) {
+                    sendError(cb, k500InternalServerError, "QUERY_FAILED", describeError(e));
+                });
+        },
+        {Get});
+
+    // Восстановление удалённого шаблона: снимаем is_delete и возвращаем в память
+    app().registerHandler(
+        "/api/admin/reports/{id}/restore",
+        [db, adminEnabled, &applyTemplateInMemory](const HttpRequestPtr &req,
+                                                   std::function<void(const HttpResponsePtr &)> &&cb,
+                                                   const std::string &id) {
+            currentActor = actorOf(req);
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            const std::string restoreActor = requestActor(req);
+            const std::string restoreIp = requestIp(req);
+            runQuery(
+                db, "SELECT title, body::text AS body FROM report_templates WHERE id = $1 AND is_delete = true",
+                {id},
+                [cb, db, id, &applyTemplateInMemory, restoreActor, restoreIp](const orm::Result &res) {
+                    if (res.empty()) {
+                        sendError(cb, k404NotFound, "NOT_DELETED", "отчёт '" + id + "' не найден среди удалённых");
+                        return;
+                    }
+                    const std::string title = res[0]["title"].as<std::string>();
+                    const std::string body = res[0]["body"].as<std::string>();
+                    runQuery(
+                        db, "UPDATE report_templates SET is_delete = false, updated_at = now() WHERE id = $1",
+                        {id},
+                        [cb, id, title, body, &applyTemplateInMemory, restoreActor, restoreIp](
+                            const orm::Result &) {
+                            applyTemplateInMemory(id, body, title);
+                            auditEvent(restoreActor, "template.restore", "report", id, "{}", restoreIp);
+                            Json::Value out;
+                            out["id"] = id;
+                            out["restored"] = true;
+                            cb(jsonResponse(out));
+                        },
+                        [cb](const std::exception_ptr &e) {
+                            sendError(cb, k500InternalServerError, "RESTORE_FAILED", describeError(e));
+                        });
+                },
+                [cb](const std::exception_ptr &e) {
+                    sendError(cb, k500InternalServerError, "RESTORE_FAILED", describeError(e));
+                });
+        },
+        {Post});
 
     // Список источников в карантине: админ видит, что именно не подключилось (ADR-148)
     app().registerHandler(
@@ -2162,13 +2238,17 @@ int main() {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
             }
+            // Логин и ip читаем до асинхронной задачи: в колбэке запрос уже уничтожен
+            // (ADR-110), обращение к req->attributes() висло/падало (ADR-150)
+            const std::string deleteActor = requestActor(req);
+            const std::string deleteIp = requestIp(req);
             runQuery(
                 db,
                 "INSERT INTO report_templates_history (report_id, title, body) "
                 "SELECT id, title, body FROM report_templates WHERE id = $1",
                 {id},
-                [cb, db, id, &dropTemplateFromMemory, &draftsParsed, &draftsRaw, &templatesMutex, req](
-                    const orm::Result &) {
+                [cb, db, id, &dropTemplateFromMemory, &draftsParsed, &draftsRaw, &templatesMutex,
+                 deleteActor, deleteIp](const orm::Result &) {
                     {
                         std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                         draftsParsed.erase(id);
@@ -2178,9 +2258,10 @@ int main() {
                         db, "UPDATE report_templates SET is_delete = true, draft = NULL, "
                     "draft_updated_at = NULL WHERE id = $1",
                 {id},
-                        [cb, id, &dropTemplateFromMemory, req](const orm::Result &del) {
+                        [cb, id, &dropTemplateFromMemory, deleteActor, deleteIp](
+                            const orm::Result &del) {
                             dropTemplateFromMemory(id);
-                            auditEvent(requestActor(req), "template.delete", "report", id, "{}", requestIp(req));
+                            auditEvent(deleteActor, "template.delete", "report", id, "{}", deleteIp);
                             Json::Value out;
                             out["id"] = id;
                             out["deleted"] = del.affectedRows() > 0;

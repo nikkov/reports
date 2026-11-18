@@ -56,6 +56,10 @@ export const api = {
   resetDatasources: () => request('/api/admin/datasources/reset', { method: 'POST' }),
   // список источников в карантине и сброс одного из них (ADR-148)
   datasources: () => request('/api/admin/datasources'),
+  // удалённые шаблоны: мягкое удаление можно отменить (ADR-151)
+  deletedReports: () => request('/api/admin/reports/deleted'),
+  restoreReport: (id) =>
+    request(`/api/admin/reports/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
   resetDatasource: (label) =>
     request('/api/admin/datasources/reset', { method: 'POST', body: JSON.stringify({ label }) }),
   // проверка SQL набора без сохранения черновика (ADR-136)

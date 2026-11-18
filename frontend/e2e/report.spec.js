@@ -3212,3 +3212,34 @@ test('мягкое удаление: шаблон остаётся в БД, но
 
   await request.delete(`/api/reports/${id}`)
 })
+
+test('восстановление удалённого шаблона из админки (ADR-151)', async ({ request }) => {
+  const id = 'restore-e2e'
+  const body = {
+    version: 2,
+    id,
+    title: 'Восстановление e2e',
+    params: [],
+    datasets: { s: { sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }]
+  }
+  await request.post(`/api/reports/${id}`)
+  await request.delete(`/api/reports/${id}`)
+  expect((await request.post('/api/reports', { data: { id, body } })).ok()).toBeTruthy()
+  expect((await request.delete(`/api/reports/${id}`)).ok()).toBeTruthy()
+
+  // удалённый виден в списке удалённых и не виден в каталоге
+  const deleted = await (await request.get('/api/admin/reports/deleted')).json()
+  expect((deleted.items || []).some((r) => r.id === id)).toBe(true)
+  expect((await request.get('/api/reports')).ok()).toBeTruthy()
+
+  // восстановление возвращает шаблон в каталог и делает его доступным
+  expect((await request.post(`/api/admin/reports/${id}/restore`)).ok()).toBeTruthy()
+  const list = await (await request.get('/api/reports')).json()
+  expect(list.some((r) => r.id === id)).toBe(true)
+  expect((await request.get(`/api/reports/${id}`)).ok()).toBeTruthy()
+  const after = await (await request.get('/api/admin/reports/deleted')).json()
+  expect((after.items || []).some((r) => r.id === id)).toBe(false)
+
+  await request.delete(`/api/reports/${id}`)
+})

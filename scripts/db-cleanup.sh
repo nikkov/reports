@@ -12,6 +12,9 @@
 # а не мусор; шаблоны и пользователей скрипт не трогает вообще.
 set -euo pipefail
 
+# Мягко удалённые шаблоны от e2e-тестов реально удаляем: иначе они копятся в «Удалённых» (ADR-151)
+psql -tAc "DELETE FROM reports.report_templates WHERE is_delete = true AND id LIKE '%-e2e'" >/dev/null 2>&1 || true
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 . "$ROOT/scripts/env.sh"
