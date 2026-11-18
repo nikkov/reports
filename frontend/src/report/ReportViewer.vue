@@ -198,13 +198,13 @@ function searchInReport(rawTerm) {
       return
     }
     search.index += 1
-    search.message = ''
+    search.message = `${search.index + 1} из ${search.matches.length}`
     return
   }
   search.term = term
   search.matches = collectMatches(term)
   search.index = search.matches.length ? 0 : -1
-  search.message = search.matches.length ? '' : 'Строка не найдена'
+  search.message = search.matches.length ? `1 из ${search.matches.length}` : 'Строка не найдена'
 }
 const paramLabels = ref({})
 const loading = ref(false)

@@ -86,7 +86,7 @@
         @keydown.enter.prevent="emitSearch"
       />
       <button type="button" class="search-btn" @click="emitSearch">Найти</button>
-      <span v-if="searchMessage" class="search-msg">{{ searchMessage }}</span>
+      <span v-if="searchMessage" class="search-msg" role="alert">{{ searchMessage }}</span>
     </div>
   </form>
 </template>

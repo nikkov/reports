@@ -54,6 +54,10 @@ export const api = {
   health: () => request('/api/health'),
   // снятие карантина внешних источников (ADR-130): после правки шаблона не ждём 30 с
   resetDatasources: () => request('/api/admin/datasources/reset', { method: 'POST' }),
+  // список источников в карантине и сброс одного из них (ADR-148)
+  datasources: () => request('/api/admin/datasources'),
+  resetDatasource: (label) =>
+    request('/api/admin/datasources/reset', { method: 'POST', body: JSON.stringify({ label }) }),
   // проверка SQL набора без сохранения черновика (ADR-136)
   checkSql: (sql, { params = {}, connection = '', connections = {} } = {}) =>
     request('/api/admin/datasets/check', {

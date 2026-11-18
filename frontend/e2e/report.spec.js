@@ -584,9 +584,16 @@ test('все шаблоны из списка открываются и отда
     await expect(page.locator('.meta')).toContainText('строк')
     // Отчёт считается живым, если показал либо строки таблицы, либо диаграмму:
     // у отчёта из одних диаграмм таблицы может не быть вовсе (sales-flow, ADR-56).
-    const cells = await page.locator('.rt-table tbody tr:not(.spacer) td').count()
-    const charts = await page.locator('.chart-box canvas').count()
-    expect(cells + charts).toBeGreaterThan(0)
+    // таблица виртуализирована и рисуется после появления .meta — ждём отрисовку,
+    // иначе тест падал через раз на быстром прогоне (ADR-147)
+    await expect
+      .poll(
+        async () =>
+          (await page.locator('.rt-table tbody tr:not(.spacer) td').count()) +
+          (await page.locator('.chart-box canvas').count()),
+        { timeout: 10000, message: `отчёт ${r.id}: ни таблицы, ни диаграммы` }
+      )
+      .toBeGreaterThan(0)
   }
 })
 

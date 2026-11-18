@@ -253,11 +253,13 @@ orm::DbClientPtr ConnRegistry::resolve(const std::map<std::string, ConnSpec> &co
     return client;
 }
 
-void ConnRegistry::markFailed(const std::string &dsn, const std::string &error) {
+void ConnRegistry::markFailed(const std::string &dsn, const std::string &error,
+                              const std::string &label) {
     if (dsn.empty()) return;
     std::lock_guard<std::mutex> lock(mutex_);
     failed_[dsn] = {std::chrono::steady_clock::now() + std::chrono::seconds(kFailureCooldownSeconds),
                     error};
+    failedLabel_[dsn] = label;
     // Клиент с мёртвым соединением выбрасываем: drogon иначе бесконечно переподключается
     // и пишет в журнал по строке каждые несколько миллисекунд
     cache_.erase(dsn);
@@ -295,6 +297,37 @@ size_t ConnRegistry::clearFailures() {
     failed_.clear();
     probed_.clear();
     return count;
+}
+
+std::vector<ConnRegistry::Failure> ConnRegistry::failures() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<Failure> out;
+    out.reserve(failed_.size());
+    for (const auto &[dsn, entry] : failed_) {
+        if (now >= entry.first) continue;
+        const auto label = failedLabel_.find(dsn);
+        out.push_back({label == failedLabel_.end() ? std::string("источник") : label->second,
+                       entry.second});
+    }
+    return out;
+}
+
+bool ConnRegistry::clearFailure(const std::string &label) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    bool cleared = false;
+    for (auto it = failed_.begin(); it != failed_.end();) {
+        const auto lbl = failedLabel_.find(it->first);
+        if (lbl != failedLabel_.end() && lbl->second == label) {
+            probed_.erase(it->first);
+            failedLabel_.erase(lbl);
+            it = failed_.erase(it);
+            cleared = true;
+        } else {
+            ++it;
+        }
+    }
+    return cleared;
 }
 
 size_t ConnRegistry::failedCount() const {

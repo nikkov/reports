@@ -1071,7 +1071,7 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
                                          " (повтор через " +
                                          std::to_string(rep::ConnRegistry::kFailureCooldownSeconds) +
                                          " с)";
-                connRegistry.markFailed(sourceDsn, text);
+                connRegistry.markFailed(sourceDsn, text, sourceKey);
                 if (msg.find("statement timeout") != std::string::npos ||
                     msg.find("canceling statement") != std::string::npos ||
                     msg.find("не ответил за") != std::string::npos) {
@@ -1124,7 +1124,11 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
                     }
                     rep::log::event(rep::log::Level::Error, rep::log::Action::Other, "",
                                     "источник не подключается: " + probe.error, ctx);
-                    connRegistry.markFailed(sourceDsn, text);
+                    std::string label = sourceKey;
+                    if (specIt != connections.end()) {
+                        label += " · " + specIt->second.host + "/" + specIt->second.database;
+                    }
+                    connRegistry.markFailed(sourceDsn, text, label);
                     onErr(503, "DB_UNAVAILABLE", text);
                     return;
                 }
@@ -1837,12 +1841,42 @@ int main() {
         },
         {Get});
 
+    // Список источников в карантине: админ видит, что именно не подключилось (ADR-148)
+    app().registerHandler(
+        "/api/admin/datasources",
+        [&connRegistry](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req);
+            Json::Value out;
+            Json::Value items(Json::arrayValue);
+            for (const auto &failure : connRegistry.failures()) {
+                Json::Value item;
+                item["label"] = failure.label;
+                item["error"] = failure.error;
+                items.append(item);
+            }
+            out["items"] = items;
+            cb(jsonResponse(out));
+        },
+        {Get});
+
     // Сброс карантина внешних источников: после правки шаблона или починки базы
-    // не нужно ждать 30 секунд или перезапускать сервер (ADR-130)
+    // не нужно ждать 30 секунд или перезапускать сервер (ADR-130).
+    // {label} — снять карантин с одного источника (ADR-148)
     app().registerHandler(
         "/api/admin/datasources/reset",
         [&connRegistry](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             currentActor = actorOf(req);
+            const auto body = req->getJsonObject();
+            const std::string label = body && body->isObject() ? (*body).get("label", "").asString() : "";
+            if (!label.empty()) {
+                const bool clearedOne = connRegistry.clearFailure(label);
+                rep::log::event(rep::log::Level::Info, rep::log::Action::Other, currentActor,
+                                "сброшен карантин источника: " + label);
+                Json::Value one;
+                one["cleared"] = clearedOne ? 1 : 0;
+                cb(jsonResponse(one));
+                return;
+            }
             const size_t cleared = connRegistry.clearFailures();
             rep::log::event(rep::log::Level::Info, rep::log::Action::Other, currentActor,
                             "сброшен карантин источников: " + std::to_string(cleared));

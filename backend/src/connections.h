@@ -21,6 +21,7 @@
 #include <memory>
 #include <chrono>
 #include <set>
+#include <vector>
 #include <mutex>
 #include <string>
 
@@ -94,7 +95,10 @@ public:
     // создавая клиента, который drogon будет переподключать бесконечно (ADR-125).
     // Ключ — DSN, а не имя источника: у двух шаблонов источник «main» может вести в разные
     // базы, и карантин одного не должен ломать другой (ADR-126).
-    void markFailed(const std::string &dsn, const std::string &error);
+    // label — человекочитаемое имя источника без пароля («main · 127.0.0.1/reporting»),
+    // по нему админ снимает карантин с одного источника (ADR-148)
+    void markFailed(const std::string &dsn, const std::string &error,
+                    const std::string &label = "");
     bool failed(const std::string &dsn, std::string &error) const;
 
     // Источник уже успешно проверен один раз: дальше запросы идут без проверки (ADR-126).
@@ -106,11 +110,20 @@ public:
     size_t clearFailures();
     size_t failedCount() const;
 
+    // Источники в карантине: label и текст ошибки (без DSN — в нём пароль)
+    struct Failure {
+        std::string label;
+        std::string error;
+    };
+    std::vector<Failure> failures() const;
+    bool clearFailure(const std::string &label);
+
 private:
     mutable std::mutex mutex_;
     std::map<std::string, orm::DbClientPtr> cache_;
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, std::string>> failed_;
     std::map<std::string, std::string> keyDsn_;
+    std::map<std::string, std::string> failedLabel_; // dsn → label
     std::set<std::string> probed_;
 };
 

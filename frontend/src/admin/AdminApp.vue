@@ -11,6 +11,12 @@
         {{ sourcesBusy ? 'Проверяю источники…' : 'Проверить источники данных' }}
       </button>
       <p v-if="sourcesNote" class="muted">{{ sourcesNote }}</p>
+      <ul v-if="sourcesFailed.length" class="sources-failed">
+        <li v-for="item in sourcesFailed" :key="item.label">
+          <span class="src-label" :title="item.error">{{ item.label }}</span>
+          <button type="button" class="src-reset" @click="resetOneSource(item.label)">Сбросить</button>
+        </li>
+      </ul>
           <p class="brand-sub">Администрирование · JSON + CodeMirror</p>
         </div>
         <button class="btn primary" @click="openCreate">Создать</button>
@@ -346,6 +352,27 @@ const reports = ref([])
 const query = ref('')
 const sourcesBusy = ref(false)
 const sourcesNote = ref('')
+const sourcesFailed = ref([])
+
+async function loadSources() {
+  try {
+    const data = await api.datasources()
+    sourcesFailed.value = (data && data.items) || []
+  } catch {
+    sourcesFailed.value = []
+  }
+}
+
+// Снять карантин с одного источника, не трогая остальные (ADR-148)
+async function resetOneSource(label) {
+  try {
+    const res = await api.resetDatasource(label)
+    sourcesNote.value = res && res.cleared ? `карантин снят: ${label}` : `источник не был в карантине: ${label}`
+  } catch (e) {
+    sourcesNote.value = `не удалось снять карантин: ${e.message}`
+  }
+  await loadSources()
+}
 
 // Карантин внешнего источника живёт 30 с; кнопка снимает его сразу после правки шаблона (ADR-130)
 async function resetSources() {
@@ -353,6 +380,7 @@ async function resetSources() {
   sourcesNote.value = ''
   try {
     const data = await api.resetDatasources()
+    await loadSources()
     sourcesNote.value = data && data.cleared
       ? `карантин снят, источников было: ${data.cleared}`
       : 'карантина не было — все источники проверяются заново при следующем запросе'
@@ -1355,6 +1383,7 @@ function onBeforeUnload(e) {
 }
 
 onMounted(() => {
+  loadSources()
   view = new EditorView({
     parent: editorHost.value,
     state: EditorState.create({
@@ -1900,6 +1929,32 @@ body.resizing-horizontal {
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+}
+.sources-failed {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+.sources-failed li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.src-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b91c1c;
+}
+.src-reset {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 5px;
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
 }
 .param-row {
   display: flex;
