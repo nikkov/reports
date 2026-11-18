@@ -108,31 +108,24 @@
       </div>
 
       <section v-if="paramQueries.length" class="params">
-        <h3>Параметры и их запросы <span class="dim">({{ paramQueries.length }})</span></h3>
-        <div v-for="p in paramQueries" :key="p.name" class="param">
-          <div class="param-head">
-            <code class="pname">{{ p.name }}</code>
-            <span class="ptitle">{{ p.label || '—' }}</span>
-            <span class="tag">{{ p.type }}</span>
-            <span class="tag kind">{{ p.kind }}</span>
-            <span v-if="p.multiple" class="tag">мультивыбор</span>
-            <span v-if="p.dependsOn" class="tag">зависит от {{ p.dependsOn }}</span>
-            <span v-if="p.dataset" class="tag" :title="'SQL и соединение — в datasets.' + p.dataset">
-              набор: {{ p.dataset }}
-            </span>
-            <span v-if="p.connection" class="tag">источник: {{ p.connection }}</span>
-            <span
-              v-if="p.guardOk !== null"
-              class="tag"
-              :class="p.guardOk ? 'ok' : 'bad'"
-              :title="p.guardOk ? 'SQL проходит серверную проверку' : 'SQL не пройдёт серверную проверку: только SELECT/WITH'"
-            >{{ p.guardOk ? 'SELECT ok' : 'guard: не SELECT' }}</span>
-          </div>
-          <pre v-if="p.sql" class="psql">{{ p.sql }}</pre>
-          <p v-else class="dim small">
-            SQL не задан — параметр берёт значение из контрола ({{ p.kind }}).
-          </p>
-        </div>
+        <h3>Параметры <span class="dim">({{ paramQueries.length }})</span></h3>
+        <!-- Одна строка на параметр, без SQL: запросы справочников теперь в панели «Наборы
+             данных (SQL)». Клик переводит курсор к этому параметру в шаблоне (ADR-141). -->
+        <button
+          v-for="p in paramQueries"
+          :key="p.name"
+          type="button"
+          class="param-row"
+          title="Перейти к параметру в шаблоне"
+          @click="focusParam(p.name)"
+        >
+          <code class="pname">{{ p.name }}</code>
+          <span class="ptitle">{{ p.label || '—' }}</span>
+          <span class="tag">{{ p.type }}</span>
+          <span v-if="p.multiple" class="tag">мультивыбор</span>
+          <span v-if="p.dependsOn" class="tag">зависит от {{ p.dependsOn }}</span>
+          <span v-if="p.dataset" class="tag">набор: {{ p.dataset }}</span>
+        </button>
       </section>
 
       <section v-if="errors.length || warnings.length" class="problems">
@@ -601,6 +594,26 @@ function applySql() {
 
 // Показать место ошибки в тексте: ищем последний сегмент пути (blocks.0.span → "span")
 // и ставим туда курсор — редактор сам прокручивает документ (ADR-132).
+// Переход к параметру в тексте шаблона: ищем "name": "<имя>" внутри params (ADR-141).
+function focusParam(name) {
+  if (!view || !name) return
+  const doc = view.state.doc.toString()
+  const paramsAt = doc.indexOf('"params"')
+  const needle = `"name": "${name}"`
+  const spaced = `"name": "${name}"`
+  let at = paramsAt >= 0 ? doc.indexOf(needle, paramsAt) : -1
+  if (at < 0) at = doc.indexOf(spaced)
+  if (at < 0) {
+    // шаблон мог быть отформатирован иначе — ищем имя параметра как значение ключа name
+    const re = new RegExp('"name"\\s*:\\s*"' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"')
+    const m = re.exec(paramsAt >= 0 ? doc.slice(paramsAt) : doc)
+    if (!m) return
+    at = (paramsAt >= 0 ? paramsAt : 0) + m.index
+  }
+  view.dispatch({ selection: { anchor: at, head: at + needle.length }, scrollIntoView: true })
+  view.focus()
+}
+
 function focusProblem(problem) {
   if (!problem || !view) return
   const key = String(problem.path || '').split('.').filter(Boolean).pop()
@@ -836,29 +849,14 @@ const paramQueries = computed(() => {
     const datasets = tpl.datasets || {}
     return (tpl.params || []).map((p) => {
       const src = p?.source || {}
-      // справочник — это набор данных (ADR-78): SQL и соединение показываем из datasets
-      const dataset = src.dataset || ''
-      const ds = dataset ? datasets[dataset] : null
-      const sql = src.sql || (ds && ds.sql) || ''
-      const connection = (ds && ds.connection) || ''
-      const kind = src.kind || p?.type || ''
-      const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
-      const guardOk = !sql
-        ? null
-        : (normalized.startsWith('select') || normalized.startsWith('with')) &&
-          !/[;]|--|\/\*/.test(sql) &&
-          !/\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|merge|call)\b/.test(normalized)
       return {
         name: p.name || '',
         label: p.label || '',
         type: p.type || '',
-        kind,
         multiple: !!p.multiple,
         dependsOn: src.dependsOn || '',
-        dataset,
-        connection,
-        sql,
-        guardOk
+        // SQL справочника живёт в datasets и редактируется в панели «Наборы данных (SQL)»
+        dataset: src.dataset || ''
       }
     })
   } catch {
@@ -1833,6 +1831,27 @@ body.resizing-vertical {
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+}
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.param-row:hover {
+  border-color: #2563eb;
+  background: #f8fbff;
+}
+.param-row .pname {
+  font-weight: 600;
 }
 .problems {
   flex: 0 0 auto;
