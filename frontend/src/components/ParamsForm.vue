@@ -86,6 +86,7 @@
         @keydown.enter.prevent="emitSearch"
       />
       <button type="button" class="search-btn" @click="emitSearch">Найти</button>
+      <span v-if="searchMessage" class="search-msg">{{ searchMessage }}</span>
     </div>
   </form>
 </template>
@@ -106,6 +107,8 @@ function emitSearch() {
 }
 
 const props = defineProps({
+  // сообщение поиска: «Строка не найдена» (ADR-146)
+  searchMessage: { type: String, default: '' },
   reportId: { type: String, required: true },
   params: { type: Array, required: true },
   modelValue: { type: Object, required: true },
@@ -328,6 +331,11 @@ watch(
 }
 .report-search .search-input {
   width: 200px;
+}
+.report-search .search-msg {
+  align-self: center;
+  font-size: 12px;
+  color: #b91c1c;
 }
 .params button:disabled {
   opacity: 0.6;

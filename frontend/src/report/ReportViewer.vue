@@ -38,6 +38,7 @@
       :model-value="paramValues"
       :params="template.params || []"
       :loading="loading"
+      :search-message="search.message"
       @update:model-value="onParams"
       @labels="paramLabels = $event"
       @ready="onParamsReady"
@@ -128,7 +129,7 @@ const paramValues = reactive({})
 // Раньше искали по DOM и находили только отрисованные строки. Теперь совпадения собираются
 // по модели всех табличных блоков, а таблица подсвечивает видимые ячейки и прокручивается
 // к строке активного совпадения.
-const search = reactive({ term: '', matches: [], index: -1 })
+const search = reactive({ term: '', matches: [], index: -1, message: '' })
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -185,16 +186,25 @@ function searchInReport(rawTerm) {
     search.term = ''
     search.matches = []
     search.index = -1
+    search.message = ''
     return
   }
-  // тот же запрос при повторном нажатии — следующее вхождение по кругу
+  // тот же запрос при повторном нажатии — следующее вхождение
   if (term === search.term && search.matches.length) {
-    search.index = (search.index + 1) % search.matches.length
+    if (search.index >= search.matches.length - 1) {
+      // перебор закончился: сообщаем, что дальше искать нечего, следующее нажатие начнёт сначала
+      search.message = 'Строка не найдена'
+      search.index = -1
+      return
+    }
+    search.index += 1
+    search.message = ''
     return
   }
   search.term = term
   search.matches = collectMatches(term)
   search.index = search.matches.length ? 0 : -1
+  search.message = search.matches.length ? '' : 'Строка не найдена'
 }
 const paramLabels = ref({})
 const loading = ref(false)
