@@ -763,7 +763,7 @@ test('условное форматирование: ячейка по прав�
   expect(info.some((r) => r.rowBg === 'rgb(255, 255, 255)')).toBe(true)
 })
 
-test('админка показывает параметры и SQL их запросов', async ({ page }) => {
+test('админка показывает параметры (без SQL) и переходит к параметру по клику (ADR-141)', async ({ page }) => {
   await page.goto('/admin.html')
   await expect(page.locator('.rep-row, li').first()).toBeVisible()
 
@@ -775,19 +775,19 @@ test('админка показывает параметры и SQL их зап�
 
   const panel = page.locator('.params')
   await expect(panel).toBeVisible()
-  await expect(panel.locator('h3')).toContainText('Параметры и их запросы')
+  await expect(panel.locator('h3')).toContainText('Параметры')
 
-  // у справочника виден SQL и метка серверной проверки
-  const lookup = panel.locator('.param', { hasText: 'cost_center' })
-  await expect(lookup.locator('.psql')).toContainText('SELECT')
-  await expect(lookup.locator('.psql')).toContainText('cost_center')
-  await expect(lookup.locator('.tag.ok')).toHaveText('SELECT ok')
+  // одна строка на параметр, SQL справочника здесь не показывается — он в панели наборов
+  const lookup = panel.locator('.param-row', { hasText: 'cost_center' })
+  await expect(lookup).toHaveCount(1)
+  await expect(panel.locator('.psql')).toHaveCount(0)
+  await expect(lookup).toContainText('набор:')
 
-  // параметры без SQL честно это показывают
-  const dateParam = panel
-    .locator('.param')
-    .filter({ has: page.locator('.pname', { hasText: /^from$/ }) })
-  await expect(dateParam).toContainText('SQL не задан')
+  // клик по строке переводит курсор к этому параметру в шаблоне
+  await lookup.click()
+  await expect(page.locator('.cm-content')).toBeFocused()
+  const selection = await page.evaluate(() => window.getSelection().toString())
+  expect(selection).toContain('cost_center')
 })
 
 test('экспорт в Excel: файл со шапкой, числами и листом параметров', async ({ page }) => {
