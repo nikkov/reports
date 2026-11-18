@@ -144,8 +144,11 @@ function cellParts(cell) {
   const text = cellTextOf(cell)
   const term = (props.searchTerm || '').trim()
   if (!term || !text) return [{ text, hit: false }]
-  const lowerText = text.toLowerCase()
-  const lowerTerm = term.toLowerCase()
+  // разделитель тысяч — неразрывный пробел (U+00A0/U+202F): при сравнении считаем его обычным,
+  // длина не меняется, поэтому индексы годятся для подсветки (ADR-145)
+  const squash = (s) => s.replace(/[\u00A0\u202F]/g, ' ')
+  const lowerText = squash(text).toLowerCase()
+  const lowerTerm = squash(term).toLowerCase()
   const parts = []
   let from = 0
   for (;;) {

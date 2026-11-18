@@ -107,6 +107,7 @@ import { resolveBlockHeight, resolveBlockSpan } from '../engine/layout.js'
 import { textParts } from './text.js'
 import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
+import { columnFormat, formatCell } from './format.js'
 import ChartBlock from './ChartBlock.vue'
 import { resolveStyles } from '../template/styles.js'
 import { looksLikeDateExpr, resolveDefaultValue } from '../template/dates.js'
@@ -133,8 +134,21 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function collectMatches(term) {
+// Текст ячейки «как на экране»: поиск должен находить «15 000,00», а не только «15000» (ADR-145)
+function displayText(block, column, value) {
+  if (value === undefined || value === null) return ''
+  const styles = stylesFor(block) || null
+  const spec = columnFormat(column, styles?.columns?.[column.field])
+  if (!spec) return String(value)
+  const text = formatCell(spec.format, spec.decimals, value)
+  return text === null ? '' : text
+}
+
+function collectMatches(rawTerm) {
+  // неразрывный пробел в числах («15 000,00») приравниваем к обычному (ADR-145)
+  const term = rawTerm.replace(/[\u00A0\u202F]/g, ' ')
   const re = new RegExp(escapeRegExp(term), 'i')
+  const squash = (s) => String(s).replace(/[\u00A0\u202F]/g, ' ')
   const found = []
   const blocks = (template.value && template.value.blocks) || []
   blocks.forEach((block, blockIndex) => {
@@ -145,7 +159,10 @@ function collectMatches(term) {
       columns.forEach((column, colIndex) => {
         const value = row ? row[column.field] : undefined
         if (value === undefined || value === null) return
-        if (re.test(String(value))) found.push({ block: blockIndex, row: rowIndex, col: colIndex })
+        const shown = displayText(block, column, value)
+        if (re.test(squash(value)) || re.test(squash(shown))) {
+          found.push({ block: blockIndex, row: rowIndex, col: colIndex })
+        }
       })
     })
   })
