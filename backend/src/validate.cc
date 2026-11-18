@@ -561,35 +561,103 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
 } // namespace
 
 bool isReadOnlySql(const std::string &sql, std::string &err) {
-    std::string s;
-    for (char c : sql) {
-        if (!std::isspace(static_cast<unsigned char>(c))) {
-            s.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    // Лексемный разбор, а не поиск подстроки (ADR-155): иначе `is_delete` принимался за DELETE,
+    // а `for update` в склейке «forupdate» проскакивал. Проверяются только целые слова вне
+    // строковых литералов, "кавычек" и dollar-quoted блоков.
+    static const std::set<std::string> forbidden = {"insert", "update", "delete", "drop",   "alter", "create",
+                                                    "truncate", "grant", "revoke", "copy", "merge", "call",
+                                                    "do", "vacuum", "reindex"};
+    std::vector<std::string> words;
+    const std::size_t n = sql.size();
+    std::size_t i = 0;
+    while (i < n) {
+        const char c = sql[i];
+        if (c == '\'') { // строковый литерал: '...' с удвоенной кавычкой внутри
+            ++i;
+            bool closed = false;
+            while (i < n) {
+                if (sql[i] == '\'') {
+                    if (i + 1 < n && sql[i + 1] == '\'') {
+                        i += 2;
+                        continue;
+                    }
+                    ++i;
+                    closed = true;
+                    break;
+                }
+                ++i;
+            }
+            if (!closed) {
+                err = "SQL содержит незакрытый строковый литерал";
+                return false;
+            }
+            continue;
         }
+        if (c == '"') { // "идентификатор" — регистр и содержимое не проверяем
+            ++i;
+            const std::size_t close = sql.find('"', i);
+            if (close == std::string::npos) {
+                err = "SQL содержит незакрытую кавычку";
+                return false;
+            }
+            i = close + 1;
+            continue;
+        }
+        if (c == '$') { // dollar-quoted: $$...$$ или $tag$...$tag$
+            std::size_t j = i + 1;
+            std::string tag;
+            while (j < n && (std::isalnum(static_cast<unsigned char>(sql[j])) || sql[j] == '_')) {
+                tag.push_back(sql[j++]);
+            }
+            if (j < n && sql[j] == '$') {
+                const std::string delim = "$" + tag + "$";
+                const std::size_t close = sql.find(delim, j + 1);
+                if (close != std::string::npos) {
+                    i = close + delim.size();
+                    continue;
+                }
+                err = "SQL содержит незакрытый dollar-quoted блок";
+                return false;
+            }
+            ++i; // «$1» — позиционный параметр, просто пропускаем
+            continue;
+        }
+        if (c == ';') {
+            err = "SQL не может содержать ';'";
+            return false;
+        }
+        if (c == '-' && i + 1 < n && sql[i + 1] == '-') {
+            err = "SQL не может содержать '--'";
+            return false;
+        }
+        if (c == '/' && i + 1 < n && sql[i + 1] == '*') {
+            err = "SQL не может содержать '/*'";
+            return false;
+        }
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+            std::string word;
+            while (i < n) {
+                const char ch = sql[i];
+                if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '$') {
+                    word.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+                    ++i;
+                    continue;
+                }
+                break;
+            }
+            words.push_back(word);
+            continue;
+        }
+        ++i;
     }
-    if (s.rfind("select", 0) != 0 && s.rfind("with", 0) != 0) {
+    if (words.empty() || (words.front() != "select" && words.front() != "with")) {
         err = "SQL должен начинаться с SELECT или WITH";
         return false;
     }
-    if (sql.find(';') != std::string::npos || sql.find("--") != std::string::npos ||
-        sql.find("/*") != std::string::npos) {
-        err = "SQL не может содержать ';', '--' или '/*'";
-        return false;
-    }
-    static const std::vector<std::string> forbidden = {"insert", "update", "delete", "drop", "alter", "create",
-                                                       "truncate", "grant", "revoke", "copy", "merge", "call",
-                                                       "do", "vacuum", "reindex"};
-    for (const auto &word : forbidden) {
-        std::size_t pos = 0;
-        while ((pos = s.find(word, pos)) != std::string::npos) {
-            const bool leftOk = pos == 0 || !std::isalnum(static_cast<unsigned char>(s[pos - 1]));
-            const bool rightOk =
-                pos + word.size() >= s.size() || !std::isalnum(static_cast<unsigned char>(s[pos + word.size()]));
-            if (leftOk && rightOk) {
-                err = "SQL содержит запрещённую операцию «" + word + "»";
-                return false;
-            }
-            pos += word.size();
+    for (const auto &word : words) {
+        if (forbidden.count(word)) {
+            err = "SQL содержит запрещённую операцию «" + word + "»";
+            return false;
         }
     }
     return true;

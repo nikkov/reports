@@ -186,3 +186,33 @@ TEST_CASE("валидатор: предупреждение о частом ав
     REQUIRE(!result.warnings.empty());
     REQUIRE(result.warnings.front().path == "refreshSeconds");
 }
+
+// ADR-155: SQL-гард разбирает слова, а не ищет подстроки
+TEST_CASE("isReadOnlySql: is_delete не считается операцией DELETE") {
+    std::string err;
+    CHECK(rep::isReadOnlySql("SELECT * FROM reports.report_templates WHERE is_delete = false", err));
+    CHECK(rep::isReadOnlySql("SELECT is_deleted, delete_flag, created_at FROM t", err));
+    CHECK(rep::isReadOnlySql("SELECT 'delete from t' AS s", err));
+    CHECK(rep::isReadOnlySql("SELECT $$delete from t$$ AS s", err));
+    CHECK(rep::isReadOnlySql("SELECT x AS \"delete\" FROM t", err));
+}
+
+TEST_CASE("isReadOnlySql: настоящие операции по-прежнему запрещены") {
+    std::string err;
+    CHECK_FALSE(rep::isReadOnlySql("DELETE FROM t", err));
+    CHECK_FALSE(err.empty());
+    err.clear();
+    CHECK_FALSE(rep::isReadOnlySql("SELECT 1 FOR UPDATE", err));   // раньше проскакивало
+    CHECK_FALSE(rep::isReadOnlySql("SELECT * FROM t FOR UPDATE NOWAIT", err));
+    CHECK_FALSE(rep::isReadOnlySql("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d", err));
+    CHECK_FALSE(rep::isReadOnlySql("INSERT INTO t VALUES (1)", err));
+    CHECK_FALSE(rep::isReadOnlySql("SELECT 1; DROP TABLE t", err));
+}
+
+TEST_CASE("isReadOnlySql: литералы и кавычки не дают ложных срабатываний") {
+    std::string err;
+    CHECK(rep::isReadOnlySql("SELECT 'a--b; drop' AS s", err));    // внутри литерала
+    CHECK(rep::isReadOnlySql("SELECT \"drop\" FROM t", err));
+    CHECK_FALSE(rep::isReadOnlySql("SELECT 'unterminated", err));
+    CHECK_FALSE(rep::isReadOnlySql("SELECT 1 -- comment", err));
+}

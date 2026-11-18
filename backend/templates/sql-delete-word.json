@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "id": "sql-delete-word",
+  "title": "SQL: слово delete в тексте запроса",
+  "description": "Слово delete в имени колонки или строковом литерале больше не считается запрещённой операцией",
+  "params": [],
+  "datasets": {
+    "s": {
+      "sql": "SELECT region, customer, amount FROM reports_examples.sales WHERE category <> 'delete' AND amount > 0 ORDER BY amount DESC LIMIT 5"
+    }
+  },
+  "blocks": [
+    {
+      "type": "table",
+      "dataKey": "s",
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "customer",
+          "title": "Клиент"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма"
+        }
+      ]
+    }
+  ]
+}
