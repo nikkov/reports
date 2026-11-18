@@ -3,6 +3,7 @@
     <header class="head">
       <h1>{{ template?.title || reportId }}</h1>
       <div class="head-right">
+        <ThemeToggle />
         <span class="loader" v-if="loading">загрузка…</span>
         <span class="meta" v-if="status">
           строк: <b>{{ rowCount }}</b> · запрос: <b>{{ elapsedMs }} мс</b> · шаблон v{{ template?.version }}
@@ -102,6 +103,7 @@
 </template>
 
 <script setup>
+import ThemeToggle from '../components/ThemeToggle.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, API_BASE } from '../api/client.js'
 import { resolveBlockHeight, resolveBlockSpan } from '../engine/layout.js'
@@ -642,14 +644,14 @@ function tableColumns(block) {
 <style>
 /* Совпадения поиска создаются вручную в DOM (ADR-143) */
 mark.find-hit {
-  background: #fde68a;
+  background: var(--rep-warn-bg);
   color: inherit;
   padding: 0 1px;
   border-radius: 2px;
 }
 mark.find-hit.active {
-  background: #f59e0b;
-  outline: 2px solid #b45309;
+  background: var(--rep-warn);
+  outline: 2px solid var(--rep-warn);
 }
 .head-right {
   display: flex;
@@ -665,13 +667,13 @@ mark.find-hit.active {
   font: inherit;
   font-size: 13px;
   padding: 4px 10px;
-  border: 1px solid #cfd6de;
+  border: 1px solid var(--rep-border-strong);
   border-radius: 6px;
-  background: #fff;
+  background: var(--rep-surface);
   cursor: pointer;
 }
 .tool:hover:not(:disabled) {
-  background: #f2f6fd;
+  background: var(--rep-bg);
 }
 .tool:disabled {
   opacity: 0.55;
@@ -679,14 +681,14 @@ mark.find-hit.active {
 }
 .refresh {
   font-size: 12px;
-  color: #5b6472;
+  color: var(--rep-text-muted);
   white-space: nowrap;
 }
 .refresh.paused {
-  color: #8a6d3b;
+  color: var(--rep-warn);
 }
 .ref-time {
-  color: #8b97a6;
+  color: var(--rep-text-faint);
 }
 
 @media print {
@@ -703,7 +705,7 @@ mark.find-hit.active {
   .rt {
     height: auto !important;
     overflow: visible !important;
-    border: 1px solid #333;
+    border: 1px solid var(--rep-text);
   }
   .rt-table thead {
     position: static;
@@ -719,8 +721,8 @@ mark.find-hit.active {
 body {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f6f8;
-  color: #1c1f23;
+  background: var(--rep-bg);
+  color: var(--rep-text);
 }
 .page {
   max-width: 1400px;
@@ -738,19 +740,19 @@ body {
   margin: 0;
 }
 .meta {
-  color: #5b6472;
+  color: var(--rep-text-muted);
   font-size: 12px;
 }
 /* индикатор идущей загрузки: отдельный класс, чтобы .meta оставался метриками */
 .loader {
-  color: #8a5a00;
+  color: var(--rep-warn);
   font-size: 12px;
   font-style: italic;
 }
 .error {
-  background: #fdecec;
-  border: 1px solid #f3c2c2;
-  color: #8c1f1f;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-surface-alt);
+  color: var(--rep-danger-strong);
   padding: 8px 12px;
   border-radius: 8px;
   font-size: 13px;
@@ -772,8 +774,8 @@ body {
   margin: 6px 0 12px;
 }
 .chart-box {
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
   border-radius: 8px;
   padding: 10px 14px 4px;
 }

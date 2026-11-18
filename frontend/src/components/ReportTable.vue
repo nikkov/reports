@@ -797,7 +797,7 @@ function cellsAt(index) {
 
 <style scoped>
 .find-hit {
-  background: #fde68a;
+  background: var(--rep-warn-bg);
   color: inherit;
   padding: 0 1px;
   border-radius: 2px;
@@ -808,8 +808,8 @@ function cellsAt(index) {
   max-width: 420px;
   padding: 5px 8px;
   border-radius: 6px;
-  background: #111827;
-  color: #f9fafb;
+  background: var(--rep-accent);
+  color: var(--rep-accent-soft);
   font-size: 12px;
   line-height: 1.35;
   white-space: pre-wrap;
@@ -819,8 +819,8 @@ function cellsAt(index) {
 }
 .rt {
   overflow: auto;
-  background: var(--rt-b-bg, #fff);
-  border: 1px solid var(--rt-border, #dfe3e8);
+  background: var(--rt-b-bg, var(--rep-surface));
+  border: 1px solid var(--rt-border, var(--rep-border));
   border-radius: 8px;
   position: relative;
   contain: strict;
@@ -830,8 +830,8 @@ function cellsAt(index) {
   border-spacing: 0;
   width: 100%;
   table-layout: fixed;
-  background: var(--rt-b-bg, #fff);
-  color: var(--rt-b-color, #1c1f23);
+  background: var(--rt-b-bg, var(--rep-surface));
+  color: var(--rt-b-color, var(--rep-text));
   font-family: var(--rt-b-font-family, system-ui);
   font-size: var(--rt-b-font-size, 13px);
   font-weight: var(--rt-b-font-weight, 400);
@@ -848,8 +848,8 @@ function cellsAt(index) {
 .rt-table th {
   height: var(--rt-header-height, 26px);
   box-sizing: border-box;
-  background: var(--rt-h-bg, #f2f4f7);
-  color: var(--rt-h-color, #1c1f23);
+  background: var(--rt-h-bg, var(--rep-surface-alt));
+  color: var(--rt-h-color, var(--rep-text));
   font-family: var(--rt-h-font-family, system-ui);
   font-size: var(--rt-h-font-size, 13px);
   font-weight: var(--rt-h-font-weight, 600);
@@ -858,29 +858,29 @@ function cellsAt(index) {
   vertical-align: var(--rt-h-valign, middle);
   padding: var(--rt-h-padding, 2px 8px);
   white-space: nowrap;
-  border-bottom: 1px solid var(--rt-border, #d8dee6);
+  border-bottom: 1px solid var(--rt-border, var(--rep-accent-soft));
 }
 .rt-table td {
   height: var(--rt-row-height, 26px);
   box-sizing: border-box;
   padding: var(--rt-b-padding, 2px 8px);
-  color: var(--rt-b-color, #1c1f23);
-  background: var(--rt-b-bg, #fff);
+  color: var(--rt-b-color, var(--rep-text));
+  background: var(--rt-b-bg, var(--rep-surface));
   font-family: var(--rt-b-font-family, system-ui);
   font-size: var(--rt-b-font-size, 13px);
   font-weight: var(--rt-b-font-weight, 400);
   font-style: var(--rt-b-font-style, normal);
   text-align: var(--rt-b-align, left);
   vertical-align: var(--rt-b-valign, middle);
-  border-bottom: 1px solid color-mix(in srgb, var(--rt-border, #eef1f5) 45%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--rt-border, var(--rep-code-bg)) 45%, transparent);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .rt-table tr.subtotal td {
   height: var(--rt-subtotal-height, 26px);
-  background: var(--rt-s-bg, #f7f9fc);
-  color: var(--rt-s-color, #1c1f23);
+  background: var(--rt-s-bg, var(--rep-bg));
+  color: var(--rt-s-color, var(--rep-text));
   font-family: var(--rt-s-font-family, system-ui);
   font-size: var(--rt-s-font-size, 13px);
   font-weight: var(--rt-s-font-weight, 600);
@@ -891,8 +891,8 @@ function cellsAt(index) {
 }
 .rt-table tr.grandtotal td {
   height: var(--rt-grandtotal-height, 26px);
-  background: var(--rt-g-bg, #e9edf2);
-  color: var(--rt-g-color, #1c1f23);
+  background: var(--rt-g-bg, var(--rep-accent-soft));
+  color: var(--rt-g-color, var(--rep-text));
   font-family: var(--rt-g-font-family, system-ui);
   font-size: var(--rt-g-font-size, 13px);
   font-weight: var(--rt-g-font-weight, 700);
@@ -900,13 +900,13 @@ function cellsAt(index) {
   text-align: var(--rt-g-align, left);
   vertical-align: var(--rt-g-valign, middle);
   padding: var(--rt-g-padding, 2px 8px);
-  border-top: 2px solid color-mix(in srgb, var(--rt-border, #c9d3e0) 70%, transparent);
+  border-top: 2px solid color-mix(in srgb, var(--rt-border, var(--rep-focus)) 70%, transparent);
 }
 /* ячейки групп-предков внутри строки итога остаются обычными */
 .rt-table tr.subtotal td.inherit,
 .rt-table tr.grandtotal td.inherit {
-  background: var(--rt-b-bg, #fff);
-  color: var(--rt-b-color, #1c1f23);
+  background: var(--rt-b-bg, var(--rep-surface));
+  color: var(--rt-b-color, var(--rep-text));
   font-weight: var(--rt-b-font-weight, 400);
 }
 .rt-table td.num,
@@ -919,11 +919,11 @@ function cellsAt(index) {
   text-align: center;
 }
 .rt.zebra .rt-table tr.detail.stripe td {
-  background: var(--rt-stripe, #f7f9fc);
+  background: var(--rt-stripe, var(--rep-bg));
 }
 .rt.b-grid .rt-table th,
 .rt.b-grid .rt-table td {
-  border-right: 1px solid var(--rt-border, #e6eaef);
+  border-right: 1px solid var(--rt-border, var(--rep-accent-soft));
 }
 .rt.b-none .rt-table td {
   border-bottom: 0;
@@ -934,7 +934,7 @@ function cellsAt(index) {
   background: transparent;
 }
 .rt-table td.cont {
-  color: color-mix(in srgb, var(--rt-b-color, #8a94a3) 55%, transparent);
+  color: color-mix(in srgb, var(--rt-b-color, var(--rep-text-faint)) 55%, transparent);
   font-style: italic;
 }
 /* Прозрачная часть разрезанного объединения: держит выравнивание колонок, но не рисует
@@ -988,7 +988,7 @@ function cellsAt(index) {
   }
 }
 .drill {
-  color: #1f5fbf;
+  color: var(--rep-accent);
   text-decoration: underline dotted;
   cursor: pointer;
 }
@@ -998,7 +998,7 @@ function cellsAt(index) {
 }
 .chev {
   cursor: pointer;
-  color: #4f8ef7;
+  color: var(--rep-focus);
   user-select: none;
   margin-right: 4px;
 }

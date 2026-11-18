@@ -1,5 +1,6 @@
 <template>
   <div class="users">
+    <ThemeToggle />
     <h1>Пользователи</h1>
     <p class="muted">
       Роли: <b>viewer</b> — читает отчёты, <b>author</b> — создаёт и правит черновики,
@@ -127,6 +128,7 @@
 </template>
 
 <script setup>
+import ThemeToggle from '../components/ThemeToggle.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { api } from '../api/client.js'
 
@@ -299,7 +301,7 @@ onMounted(async () => {
   margin: 0 auto;
   padding: 18px 16px 60px;
   font: 14px/1.45 system-ui, sans-serif;
-  color: #1e242c;
+  color: var(--rep-text);
 }
 h1 {
   font-size: 20px;
@@ -310,43 +312,43 @@ h2 {
   margin: 0 0 10px;
 }
 .muted {
-  color: #6b7684;
+  color: var(--rep-text-muted);
 }
 .small {
   font-size: 12px;
 }
 .err {
-  color: #b3261e;
+  color: var(--rep-danger-strong);
 }
 .ok {
-  color: #1b6b3a;
+  color: var(--rep-ok);
 }
 .me {
-  color: #8b97a6;
+  color: var(--rep-text-faint);
   font-size: 12px;
 }
 .on {
-  color: #1b6b3a;
+  color: var(--rep-ok);
 }
 .off-label {
-  color: #b3261e;
+  color: var(--rep-danger-strong);
 }
 .list {
   width: 100%;
   border-collapse: collapse;
   margin: 14px 0 24px;
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
 }
 .list th,
 .list td {
   text-align: left;
   padding: 8px 10px;
-  border-bottom: 1px solid #eef1f4;
+  border-bottom: 1px solid var(--rep-code-bg);
   vertical-align: middle;
 }
 .list th {
-  background: #f7f9fb;
+  background: var(--rep-bg);
   font-weight: 600;
   font-size: 12px;
   text-transform: uppercase;
@@ -362,23 +364,23 @@ h2 {
 }
 .tool {
   padding: 5px 10px;
-  border: 1px solid #c9d1da;
-  background: #fff;
+  border: 1px solid var(--rep-border-input);
+  background: var(--rep-surface);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
 }
 .tool.primary {
-  background: #1f6feb;
-  border-color: #1f6feb;
-  color: #fff;
+  background: var(--rep-focus);
+  border-color: var(--rep-focus);
+  color: var(--rep-surface);
 }
 .tool.danger {
-  color: #b3261e;
+  color: var(--rep-danger-strong);
 }
 .form {
-  border: 1px solid #dfe3e8;
-  background: #fff;
+  border: 1px solid var(--rep-border);
+  background: var(--rep-surface);
   padding: 16px;
   display: grid;
   gap: 10px;
@@ -392,12 +394,12 @@ label {
 input,
 select {
   padding: 6px 8px;
-  border: 1px solid #c9d1da;
+  border: 1px solid var(--rep-border-input);
   border-radius: 6px;
   font: inherit;
 }
 .hint {
-  color: #8b97a6;
+  color: var(--rep-text-faint);
   font-size: 12px;
 }
 .buttons {

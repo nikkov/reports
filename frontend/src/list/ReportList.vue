@@ -1,6 +1,7 @@
 <template>
   <div class="page">
     <header class="head">
+      <ThemeToggle />
       <div>
         <h1>Сервер отчётов</h1>
         <p class="sub">
@@ -94,6 +95,7 @@
 </template>
 
 <script setup>
+import ThemeToggle from '../components/ThemeToggle.vue'
 // Каталог отчётов (ADR-30): папки, теги и избранное из шаблона + localStorage.
 // Данные — GET /api/reports (title, description, folder, tags, params).
 import { computed, onMounted, ref, watch } from 'vue'
@@ -235,8 +237,8 @@ onMounted(async () => {
 body {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  color: #1c1f23;
-  background: #f6f8fb;
+  color: var(--rep-text);
+  background: var(--rep-bg);
 }
 </style>
 
@@ -260,7 +262,7 @@ h1 {
 }
 .sub {
   margin: 0;
-  color: #5b6472;
+  color: var(--rep-text-muted);
   font-size: 13px;
   max-width: 560px;
 }
@@ -273,14 +275,14 @@ h1 {
   font: inherit;
   font-size: 13px;
   padding: 6px 10px;
-  border: 1px solid #cfd6de;
+  border: 1px solid var(--rep-border-strong);
   border-radius: 8px;
   min-width: 240px;
-  background: #fff;
+  background: var(--rep-surface);
 }
 .count {
   font-size: 12px;
-  color: #7b8492;
+  color: var(--rep-text-dim);
   white-space: nowrap;
 }
 .catalog {
@@ -310,20 +312,20 @@ h1 {
   border: 1px solid transparent;
   border-radius: 8px;
   background: none;
-  color: #33404f;
+  color: var(--rep-accent);
   cursor: pointer;
 }
 .folder:hover {
-  background: #eef2f8;
+  background: var(--rep-bg);
 }
 .folder.active {
-  background: #e7effb;
-  border-color: #cddff6;
-  color: #17427f;
+  background: var(--rep-accent-soft);
+  border-color: var(--rep-accent-soft);
+  color: var(--rep-accent-hover);
   font-weight: 600;
 }
 .fcnt {
-  color: #8b97a6;
+  color: var(--rep-text-faint);
   font-size: 11px;
 }
 .side-title {
@@ -331,7 +333,7 @@ h1 {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #8b97a6;
+  color: var(--rep-text-faint);
 }
 .tags {
   display: flex;
@@ -343,15 +345,15 @@ h1 {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid #d7e0ec;
-  background: #fff;
-  color: #3a4a5f;
+  border: 1px solid var(--rep-accent-soft);
+  background: var(--rep-surface);
+  color: var(--rep-accent);
   cursor: pointer;
 }
 .tag.active {
-  background: #17427f;
-  border-color: #17427f;
-  color: #fff;
+  background: var(--rep-accent-hover);
+  border-color: var(--rep-accent-hover);
+  color: var(--rep-surface);
 }
 .cards {
   list-style: none;
@@ -361,8 +363,8 @@ h1 {
   gap: 12px;
 }
 .card {
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
   border-radius: 10px;
   padding: 14px 16px;
   display: grid;
@@ -380,17 +382,17 @@ h1 {
   line-height: 1;
   border: 0;
   background: none;
-  color: #b6c0cc;
+  color: var(--rep-focus);
   cursor: pointer;
   padding: 0;
 }
 .star.on {
-  color: #e0a32b;
+  color: var(--rep-warn);
 }
 .title {
   font-size: 16px;
   font-weight: 600;
-  color: #1a4fa0;
+  color: var(--rep-accent);
   text-decoration: none;
 }
 .title:hover {
@@ -398,23 +400,23 @@ h1 {
 }
 .id {
   font-size: 11px;
-  color: #7b8492;
-  background: #f2f5f9;
+  color: var(--rep-text-dim);
+  background: var(--rep-bg);
   border-radius: 4px;
   padding: 1px 6px;
 }
 .folder-badge {
   font-size: 11px;
-  color: #4a5361;
-  background: #eef3fb;
-  border: 1px solid #dbe6f7;
+  color: var(--rep-text-muted);
+  background: var(--rep-bg);
+  border: 1px solid var(--rep-accent-soft);
   border-radius: 999px;
   padding: 1px 8px;
 }
 .desc {
   margin: 0;
   font-size: 13px;
-  color: #4a5361;
+  color: var(--rep-text-muted);
 }
 .tags-row {
   list-style: none;
@@ -426,8 +428,8 @@ h1 {
 }
 .tag-chip {
   font-size: 11px;
-  color: #5b6b86;
-  background: #f4f6fa;
+  color: var(--rep-text-dim);
+  background: var(--rep-accent-soft);
   border-radius: 4px;
   padding: 1px 6px;
   cursor: pointer;
@@ -444,48 +446,48 @@ h1 {
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #eef3fb;
-  color: #26456f;
-  border: 1px solid #dbe6f7;
+  background: var(--rep-bg);
+  color: var(--rep-accent);
+  border: 1px solid var(--rep-accent-soft);
 }
 .badge.lookup {
-  background: #eaf5ee;
-  border-color: #cfe8d8;
-  color: #1f5a38;
+  background: var(--rep-ok-bg);
+  border-color: var(--rep-surface-alt);
+  color: var(--rep-ok);
 }
 .badge.static {
-  background: #fdf3e6;
-  border-color: #f3e0c4;
-  color: #6b4a17;
+  background: var(--rep-warn-bg);
+  border-color: var(--rep-warn-bg);
+  color: var(--rep-warn);
 }
 .badge .kind {
-  color: #7b8492;
+  color: var(--rep-text-dim);
   font-size: 11px;
 }
 .open {
   justify-self: start;
   font-size: 13px;
-  color: #1a4fa0;
+  color: var(--rep-accent);
   text-decoration: none;
 }
 .foot {
   margin-top: 22px;
   font-size: 12px;
-  color: #7b8492;
+  color: var(--rep-text-dim);
 }
 .foot a {
-  color: #5b6b86;
+  color: var(--rep-text-dim);
 }
 .error {
-  color: #8c1f1f;
-  background: #fdeaea;
-  border: 1px solid #f3cfcf;
+  color: var(--rep-danger-strong);
+  background: var(--rep-danger-bg);
+  border: 1px solid var(--rep-danger-bg);
   padding: 10px 12px;
   border-radius: 8px;
   font-size: 13px;
 }
 .muted {
-  color: #7b8492;
+  color: var(--rep-text-dim);
   font-size: 13px;
 }
 @media (max-width: 720px) {

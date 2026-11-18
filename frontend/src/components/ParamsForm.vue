@@ -288,8 +288,8 @@ watch(
   gap: 12px;
   align-items: flex-end;
   padding: 10px 12px;
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
   border-radius: 8px;
   margin-bottom: 12px;
 }
@@ -298,13 +298,13 @@ watch(
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: #5b6472;
+  color: var(--rep-text-muted);
 }
 .field input,
 .field select {
   font: inherit;
   padding: 4px 6px;
-  border: 1px solid #cfd6de;
+  border: 1px solid var(--rep-border-strong);
   border-radius: 6px;
   min-width: 150px;
 }
@@ -312,14 +312,14 @@ watch(
   min-height: 66px;
 }
 .err {
-  color: #8c1f1f;
+  color: var(--rep-danger-strong);
 }
 .params button {
   font: inherit;
   padding: 6px 14px;
-  border: 1px solid #4f8ef7;
-  background: #4f8ef7;
-  color: #fff;
+  border: 1px solid var(--rep-focus);
+  background: var(--rep-focus);
+  color: var(--rep-surface);
   border-radius: 6px;
   cursor: pointer;
   height: 30px;
@@ -335,7 +335,7 @@ watch(
 .report-search .search-msg {
   align-self: center;
   font-size: 12px;
-  color: #b91c1c;
+  color: var(--rep-danger);
 }
 .params button:disabled {
   opacity: 0.6;

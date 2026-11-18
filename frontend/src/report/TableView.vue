@@ -462,23 +462,23 @@ function cellText(row, key) {
   gap: 8px;
   margin-bottom: 6px;
   font-size: 12px;
-  color: #5b6472;
+  color: var(--rep-text-muted);
 }
 .tv-broken {
   margin: 0 0 6px;
   padding: 6px 10px;
   font-size: 12px;
-  color: #8c1f1f;
-  background: #fdeaea;
-  border: 1px solid #f3cfcf;
+  color: var(--rep-danger-strong);
+  background: var(--rep-danger-bg);
+  border: 1px solid var(--rep-danger-bg);
   border-radius: 6px;
 }
 .tv-bar button {
   font: inherit;
   padding: 3px 10px;
-  border: 1px solid #cfd6de;
+  border: 1px solid var(--rep-border-strong);
   border-radius: 6px;
-  background: #fff;
+  background: var(--rep-surface);
   cursor: pointer;
 }
 .tv-info {
@@ -493,15 +493,15 @@ function cellText(row, key) {
 .tv-more {
   font-size: 12px;
   padding: 2px 8px;
-  border: 1px solid #c8d2de;
+  border: 1px solid var(--rep-focus);
   border-radius: 5px;
-  background: #fff;
-  color: #1f2d3d;
+  background: var(--rep-surface);
+  color: var(--rep-accent);
   cursor: pointer;
 }
 
 .tv-more:disabled {
-  color: #8a96a3;
+  color: var(--rep-focus);
   cursor: default;
 }
 </style>

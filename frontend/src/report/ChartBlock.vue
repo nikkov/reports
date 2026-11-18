@@ -14,6 +14,7 @@
 <script setup>
 // Блок диаграммы (Ф3): данные берутся из того же движка агрегации, что и таблица.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { themeColors } from '../theme/index.js'
 import * as echarts from 'echarts'
 import RU from 'echarts/i18n/langRU'
 import { aggregateSeries } from '../engine/group.js'
@@ -41,7 +42,14 @@ const textStyle = () => {
 
 // Коридоры полосы (ADR-69): либо bands[], либо прежняя пара lowField/highField.
 // Цвет и подпись разрешаются здесь один раз — их читают и график, и подпись под ним.
-const BAND_DEFAULT_COLORS = ['#2e7d32', '#1565c0', '#ef6c00', '#6a1b9a']
+// ECharts не понимает var(--rep-*): цвета читаем из CSS при построении опций (ADR-156)
+const cssColors = ref(themeColors())
+const BAND_DEFAULT_COLORS = computed(() => [
+  cssColors.value.ok,
+  cssColors.value.accent,
+  cssColors.value.warn,
+  cssColors.value.muted
+])
 const bandSpecs = computed(() => {
   if (props.block?.chartType !== 'band') return []
   const list = Array.isArray(props.block.bands) && props.block.bands.length
@@ -49,7 +57,7 @@ const bandSpecs = computed(() => {
     : [{ lowField: props.block.lowField, highField: props.block.highField, color: props.block.bandColor }]
   const palette = props.styles?.palette || {}
   return list.map((spec, i) => {
-    const raw = spec?.color || props.block.bandColor || BAND_DEFAULT_COLORS[i % BAND_DEFAULT_COLORS.length]
+    const raw = spec?.color || props.block.bandColor || BAND_DEFAULT_COLORS.value[i % BAND_DEFAULT_COLORS.value.length]
     return {
       lowField: spec?.lowField,
       highField: spec?.highField,
@@ -84,12 +92,12 @@ function buildOption() {
       zoneColors: props.block.zoneColors,
       palette: props.styles?.palette
     })
-    const accent = props.styles?.palette?.accent || props.styles?.colors?.accent || '#17427f'
+    const accent = props.styles?.palette?.accent || props.styles?.colors?.accent || cssColors.value.accent
     const span = model.max - model.min || 1
     // ось красится полосами: доля правой границы зоны на шкале
     const axisColors = model.zones.length
       ? model.zones.map((z) => [(z.to - model.min) / span, z.color])
-      : [[1, '#e6ebf2']]
+      : [[1, cssColors.value.accent]]
     const valueColor = model.color || accent
     return {
       animation: false,
@@ -105,7 +113,7 @@ function buildOption() {
           progress: { show: !model.zones.length, width: 12, itemStyle: { color: accent } },
           axisLine: { lineStyle: { width: 12, color: axisColors } },
           axisTick: { show: false },
-          splitLine: { length: 10, lineStyle: { color: '#c3ccd8' } },
+          splitLine: { length: 10, lineStyle: { color: cssColors.value.border } },
           axisLabel: { color: textStyle()?.color, fontSize: 11, distance: 14 },
           pointer: { width: 4, itemStyle: { color: valueColor } },
           title: { show: !!model.name, offsetCenter: [0, '72%'], fontSize: 12, color: textStyle()?.color },
@@ -342,9 +350,16 @@ function render() {
   registerChart()
 }
 
+// тема сменилась: ECharts держит цвета внутри опций — перечитываем и перерисовываем
+function onThemeChange() {
+  cssColors.value = themeColors()
+  render()
+}
+
 onMounted(async () => {
   chart = echarts.init(el.value, null, { locale: 'RU' })
   chart.on('click', onPointClick)
+  window.addEventListener('rep:theme', onThemeChange)
   render()
   await nextTick()
   chart.resize()
@@ -353,6 +368,7 @@ onMounted(async () => {
 watch(() => [props.rows, props.block], render, { deep: false })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('rep:theme', onThemeChange)
   window.__charts = (window.__charts || []).filter((c) => c.instance !== chart)
   chart?.dispose()
   chart = null
@@ -361,8 +377,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .chart-box {
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
   border-radius: 8px;
   padding: 10px 14px 4px;
 }
@@ -380,7 +396,7 @@ onBeforeUnmount(() => {
   gap: 16px;
   margin: 6px 0 0 8px;
   font-size: 12px;
-  color: var(--rep-muted, #6b7684);
+  color: var(--rep-muted, var(--rep-text-muted));
 }
 
 .band-key {

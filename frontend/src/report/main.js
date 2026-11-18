@@ -1,3 +1,5 @@
+import '../theme/tokens.css'
+import { initTheme as initAppTheme } from '../theme/index.js'
 import { createApp } from 'vue'
 import ReportViewer from './ReportViewer.vue'
 import { ensureSession } from '../auth/session.js'
@@ -21,4 +23,5 @@ async function boot() {
   const session = await ensureSession()
   if (session) createApp(ReportViewer, { session }).mount('#app')
 }
+initAppTheme()
 boot()

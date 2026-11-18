@@ -112,15 +112,15 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   gap: 8px;
   font: inherit;
   padding: 4px 8px;
-  border: 1px solid #cfd6de;
+  border: 1px solid var(--rep-border-strong);
   border-radius: 6px;
-  background: #fff;
+  background: var(--rep-surface);
   cursor: pointer;
   min-height: 28px;
   text-align: left;
 }
 .ms.disabled .ms-trigger {
-  background: #f5f6f8;
+  background: var(--rep-bg);
   cursor: default;
   opacity: 0.7;
 }
@@ -130,10 +130,10 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   white-space: nowrap;
 }
 .ms-summary.muted {
-  color: #9aa3ae;
+  color: var(--rep-focus);
 }
 .ms-caret {
-  color: #7b8492;
+  color: var(--rep-text-dim);
 }
 .ms-panel {
   position: absolute;
@@ -143,8 +143,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   min-width: 100%;
   max-height: 260px;
   overflow: auto;
-  background: #fff;
-  border: 1px solid #cfd6de;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border-strong);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(20, 30, 45, 0.12);
   padding: 6px;
@@ -153,16 +153,16 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   display: flex;
   gap: 6px;
   padding: 2px 4px 6px;
-  border-bottom: 1px solid #eef1f5;
+  border-bottom: 1px solid var(--rep-code-bg);
   margin-bottom: 4px;
 }
 .ms-actions button {
   font: inherit;
   font-size: 12px;
   padding: 2px 8px;
-  border: 1px solid #cfd6de;
+  border: 1px solid var(--rep-border-strong);
   border-radius: 6px;
-  background: #fff;
+  background: var(--rep-surface);
   cursor: pointer;
 }
 .ms-item {
@@ -173,14 +173,14 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
-  color: #1c1f23;
+  color: var(--rep-text);
 }
 .ms-item:hover {
-  background: #f2f6fd;
+  background: var(--rep-bg);
 }
 .ms-empty {
   padding: 6px;
-  color: #9aa3ae;
+  color: var(--rep-focus);
   font-size: 12px;
 }
 </style>

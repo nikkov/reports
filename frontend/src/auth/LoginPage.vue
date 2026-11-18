@@ -97,8 +97,8 @@ async function submit() {
 body {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: #f6f8fb;
-  color: #1c1f23;
+  background: var(--rep-bg);
+  color: var(--rep-text);
 }
 </style>
 
@@ -113,8 +113,8 @@ body {
   width: 340px;
   display: grid;
   gap: 12px;
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
   border-radius: 12px;
   padding: 24px;
 }
@@ -124,20 +124,20 @@ h1 {
 }
 .sub {
   margin: -6px 0 6px;
-  color: #6b7684;
+  color: var(--rep-text-muted);
   font-size: 13px;
 }
 label {
   display: grid;
   gap: 4px;
   font-size: 12px;
-  color: #4a5361;
+  color: var(--rep-text-muted);
 }
 input {
   font: inherit;
   font-size: 14px;
   padding: 8px 10px;
-  border: 1px solid #cfd6de;
+  border: 1px solid var(--rep-border-strong);
   border-radius: 8px;
 }
 button {
@@ -146,8 +146,8 @@ button {
   padding: 9px 12px;
   border: 0;
   border-radius: 8px;
-  background: #17427f;
-  color: #fff;
+  background: var(--rep-accent-hover);
+  color: var(--rep-surface);
   cursor: pointer;
 }
 button:disabled {
@@ -157,19 +157,19 @@ button:disabled {
 .error {
   margin: 0;
   font-size: 13px;
-  color: #8c1f1f;
-  background: #fdeaea;
-  border: 1px solid #f3cfcf;
+  color: var(--rep-danger-strong);
+  background: var(--rep-danger-bg);
+  border: 1px solid var(--rep-danger-bg);
   border-radius: 8px;
   padding: 8px 10px;
 }
 .hint {
   margin: 0;
   font-size: 11px;
-  color: #8b97a6;
+  color: var(--rep-text-faint);
 }
 code {
-  background: #f2f5f9;
+  background: var(--rep-bg);
   padding: 1px 4px;
   border-radius: 4px;
 }

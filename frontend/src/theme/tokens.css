@@ -1,0 +1,155 @@
+/* Палитра приложения (ADR-156): одна точка правды для светлой и тёмной темы.
+ * Правило: в компонентах не должно оставаться хардкод-цветов — только var(--rep-*).
+ * Печать всегда светлая: @media print принудительно возвращает светлые значения,
+ * потому что документ не должен зависеть от темы экрана.
+ */
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* поверхности */
+  --rep-bg: #f7f9fc;
+  --rep-surface: #ffffff;
+  --rep-surface-alt: #f2f4f7;
+  --rep-surface-hover: #eef1f5;
+  --rep-overlay: rgba(16, 24, 40, 0.45);
+
+  /* текст */
+  --rep-text: #1c1f23;
+  --rep-text-muted: #5b6472;
+  --rep-text-dim: #7b8492;
+  --rep-text-faint: #8b97a6;
+  --rep-text-inverse: #ffffff;
+
+  /* линии и акценты */
+  --rep-border: #dfe3e8;
+  --rep-border-strong: #cfd6de;
+  --rep-border-input: #c9d1da;
+  --rep-accent: #1a4fa0;
+  --rep-accent-hover: #17427f;
+  --rep-accent-soft: #e8eef9;
+  --rep-focus: #4f8ef7;
+
+  /* состояния */
+  --rep-danger: #b42318;
+  --rep-danger-strong: #8c1f1f;
+  --rep-danger-bg: #fdeaea;
+  --rep-ok: #2e7d32;
+  --rep-ok-bg: #e8f5e9;
+  --rep-warn: #f9a825;
+  --rep-warn-bg: #fff7e0;
+
+  /* служебное */
+  --rep-code-bg: #eef1f5;
+  --rep-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+  --rep-shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.06);
+
+  /* таблица отчёта: значения по умолчанию, если шаблон не задал свои (ADR-156) */
+  --rep-table-text: #1c1f23;
+  --rep-table-bg: #ffffff;
+  --rep-table-border: #dfe3e8;
+  --rep-table-head-bg: #f2f4f7;
+  --rep-table-head-text: #1c1f23;
+  --rep-table-stripe: #f7f9fc;
+  --rep-table-subtotal-bg: #f7f9fc;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --rep-bg: #14171b;
+  --rep-surface: #1b1f24;
+  --rep-surface-alt: #232830;
+  --rep-surface-hover: #2a3038;
+  --rep-overlay: rgba(0, 0, 0, 0.6);
+
+  --rep-text: #e6e9ee;
+  --rep-text-muted: #a5aebb;
+  --rep-text-dim: #8b94a3;
+  --rep-text-faint: #6f7887;
+  --rep-text-inverse: #14171b;
+
+  --rep-border: #2e343d;
+  --rep-border-strong: #3a424d;
+  --rep-border-input: #444d59;
+  --rep-accent: #6ea8fe;
+  --rep-accent-hover: #8bbdff;
+  --rep-accent-soft: #1e2a3d;
+  --rep-focus: #6ea8fe;
+
+  --rep-danger: #ff8a80;
+  --rep-danger-strong: #ff6b5f;
+  --rep-danger-bg: #3a2222;
+  --rep-ok: #8bd17c;
+  --rep-ok-bg: #1f3320;
+  --rep-warn: #ffd166;
+  --rep-warn-bg: #3a3320;
+
+  --rep-code-bg: #232830;
+  --rep-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  --rep-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.4);
+
+  --rep-table-text: #e6e9ee;
+  --rep-table-bg: #1b1f24;
+  --rep-table-border: #2e343d;
+  --rep-table-head-bg: #232830;
+  --rep-table-head-text: #e6e9ee;
+  --rep-table-stripe: #20252c;
+  --rep-table-subtotal-bg: #232830;
+}
+
+/* Печать: только светлые значения, независимо от темы экрана (ADR-156). */
+@media print {
+  :root,
+  :root[data-theme='light'],
+  :root[data-theme='dark'] {
+    color-scheme: light;
+
+    --rep-bg: #ffffff;
+    --rep-surface: #ffffff;
+    --rep-surface-alt: #f2f4f7;
+    --rep-surface-hover: #f2f4f7;
+    --rep-overlay: transparent;
+
+    --rep-text: #1c1f23;
+    --rep-text-muted: #3a424d;
+    --rep-text-dim: #5b6472;
+    --rep-text-faint: #7b8492;
+    --rep-text-inverse: #ffffff;
+
+    --rep-border: #c9d1da;
+    --rep-border-strong: #b3bcc8;
+    --rep-border-input: #c9d1da;
+    --rep-accent: #1a4fa0;
+    --rep-accent-hover: #17427f;
+    --rep-accent-soft: #ffffff;
+    --rep-focus: #1a4fa0;
+
+    --rep-danger: #b42318;
+    --rep-danger-strong: #8c1f1f;
+    --rep-danger-bg: #ffffff;
+    --rep-ok: #2e7d32;
+    --rep-ok-bg: #ffffff;
+    --rep-warn: #8a6100;
+    --rep-warn-bg: #ffffff;
+
+    --rep-code-bg: #f2f4f7;
+    --rep-shadow: none;
+    --rep-shadow-soft: none;
+
+    --rep-table-text: #1c1f23;
+    --rep-table-bg: #ffffff;
+    --rep-table-border: #dfe3e8;
+    --rep-table-head-bg: #f2f4f7;
+    --rep-table-head-text: #1c1f23;
+    --rep-table-stripe: #f7f9fc;
+    --rep-table-subtotal-bg: #f7f9fc;
+  }
+}
+
+html,
+body {
+  background: var(--rep-bg);
+  color: var(--rep-text);
+}

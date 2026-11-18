@@ -18,7 +18,8 @@ export const ZONES = ['header', 'body', 'subtotal', 'grandtotal']
 // Вид версии 1.0 — без секции styles шаблон должен рендериться ровно так же.
 export const DEFAULTS = {
   font: { family: 'system-ui', size: 13, weight: 400, style: 'normal', lineHeight: 1.4 },
-  colors: { text: '#1c1f23', background: '#ffffff', border: '#dfe3e8' },
+  // умолчания берём из темы приложения (ADR-156): явные цвета шаблона важнее
+  colors: { text: 'var(--rep-table-text)', background: 'var(--rep-table-bg)', border: 'var(--rep-table-border)' },
   layout: {
     rowHeight: 26,
     headerHeight: 26,
@@ -27,25 +28,25 @@ export const DEFAULTS = {
     cellPadding: '2px 8px',
     borders: 'grid',
     zebra: false,
-    stripeColor: '#f7f9fc',
+    stripeColor: 'var(--rep-table-stripe)',
     tableLayout: 'auto'
   },
   header: {
     font: { weight: 600 },
-    colors: { text: '#1c1f23', background: '#f2f4f7' },
+    colors: { text: 'var(--rep-table-head-text)', background: 'var(--rep-table-head-bg)' },
     align: 'left',
     verticalAlign: 'middle'
   },
   body: { align: 'left', verticalAlign: 'top', padding: '3px 8px' },
   subtotal: {
     font: { weight: 600 },
-    colors: { text: '#1c1f23', background: '#f7f9fc' },
+    colors: { text: 'var(--rep-table-text)', background: 'var(--rep-table-subtotal-bg)' },
     align: 'left',
     verticalAlign: 'top'
   },
   grandtotal: {
     font: { weight: 600 },
-    colors: { text: '#1c1f23', background: '#f7f9fc' },
+    colors: { text: 'var(--rep-table-text)', background: 'var(--rep-table-subtotal-bg)' },
     align: 'left',
     verticalAlign: 'top'
   }

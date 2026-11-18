@@ -3243,3 +3243,42 @@ test('восстановление удалённого шаблона из ад
 
   await request.delete(`/api/reports/${id}`)
 })
+
+test('тема: переключатель меняет оформление и запоминает выбор (ADR-156)', async ({ page }) => {
+  await page.goto('/reports/')
+  await page.waitForSelector('.theme-toggle')
+  const before = await page.evaluate(() => document.documentElement.dataset.theme)
+  const bgBefore = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+
+  await page.click('.theme-toggle')
+  const after = await page.evaluate(() => document.documentElement.dataset.theme)
+  expect(after).not.toBe(before)
+  expect(['light', 'dark']).toContain(after)
+  const bgAfter = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+  expect(bgAfter).not.toBe(bgBefore)
+  expect(await page.evaluate(() => window.localStorage.getItem('rep.theme'))).toBe(after)
+
+  // выбор переживает перезагрузку
+  await page.reload()
+  await page.waitForSelector('.theme-toggle')
+  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(after)
+  await page.screenshot({ path: `/tmp/theme-${after}.png`, fullPage: false })
+})
+
+test('тема: печать всегда светлая, независимо от темы экрана (ADR-156)', async ({ page }) => {
+  await page.goto('/reports/')
+  await page.waitForSelector('.theme-toggle')
+  await page.evaluate(() => {
+    window.localStorage.setItem('rep.theme', 'dark')
+  })
+  await page.reload()
+  await page.waitForSelector('.theme-toggle')
+  const read = () =>
+    page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--rep-bg').trim())
+  const screenBg = await read()
+  await page.emulateMedia({ media: 'print' })
+  const printBg = await read()
+  await page.emulateMedia({ media: 'screen' })
+  expect(printBg.toLowerCase()).toBe('#ffffff')
+  expect(screenBg.toLowerCase()).not.toBe('#ffffff')
+})

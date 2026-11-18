@@ -1,5 +1,6 @@
 <template>
   <div class="audit">
+    <ThemeToggle />
     <h1>Журнал действий</h1>
     <p class="muted">
       Кто и когда публиковал шаблоны, менял роли, отправлял рассылку. Записи только добавляются —
@@ -76,6 +77,7 @@
 </template>
 
 <script setup>
+import ThemeToggle from '../components/ThemeToggle.vue'
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client.js'
 
@@ -179,40 +181,40 @@ onMounted(reload)
   margin: 0 auto;
   padding: 18px 16px 60px;
   font: 14px/1.45 system-ui, sans-serif;
-  color: #1e242c;
+  color: var(--rep-text);
 }
 h1 {
   font-size: 20px;
   margin: 0 0 6px;
 }
 .muted {
-  color: #6b7684;
+  color: var(--rep-text-muted);
 }
 .small {
   font-size: 12px;
 }
 .err {
-  color: #b3261e;
+  color: var(--rep-danger-strong);
 }
 .lvl {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 8px;
-  background: #eef1f5;
-  color: #3a4552;
+  background: var(--rep-code-bg);
+  color: var(--rep-accent);
 }
 .lvl-warning {
-  background: #fdf1d8;
-  color: #7a5a12;
+  background: var(--rep-surface-alt);
+  color: var(--rep-warn);
 }
 .lvl-error {
-  background: #fbe3e1;
-  color: #8c1f1f;
+  background: var(--rep-surface);
+  color: var(--rep-danger-strong);
 }
 .lvl-trace,
 .lvl-debug {
-  background: #e8eefb;
-  color: #334d80;
+  background: var(--rep-accent-soft);
+  color: var(--rep-accent);
 }
 .filters {
   display: flex;
@@ -229,14 +231,14 @@ h1 {
 input,
 select {
   padding: 6px 8px;
-  border: 1px solid #c9d1da;
+  border: 1px solid var(--rep-border-input);
   border-radius: 6px;
   font: inherit;
 }
 .tool {
   padding: 6px 12px;
-  border: 1px solid #c9d1da;
-  background: #fff;
+  border: 1px solid var(--rep-border-input);
+  background: var(--rep-surface);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
@@ -244,25 +246,25 @@ select {
 .list {
   width: 100%;
   border-collapse: collapse;
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
 }
 .list th,
 .list td {
   text-align: left;
   padding: 6px 10px;
-  border-bottom: 1px solid #eef1f4;
+  border-bottom: 1px solid var(--rep-code-bg);
   vertical-align: top;
 }
 .list th {
-  background: #f7f9fb;
+  background: var(--rep-bg);
   font-weight: 600;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 .details {
-  color: #4a5561;
+  color: var(--rep-accent);
 }
 .more {
   margin-top: 12px;

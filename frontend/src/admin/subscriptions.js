@@ -1,3 +1,5 @@
+import '../theme/tokens.css'
+import { initTheme as initAppTheme } from '../theme/index.js'
 import { createApp } from 'vue'
 import SubscriptionsApp from './SubscriptionsApp.vue'
 import { ensureSession } from '../auth/session.js'
@@ -13,4 +15,5 @@ async function boot() {
   }
   createApp(SubscriptionsApp, { session }).mount('#app')
 }
+initAppTheme()
 boot()

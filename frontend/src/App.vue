@@ -246,7 +246,7 @@ function renderChart() {
         {
           type: 'bar',
           data: subtotals.map((r) => r.totals.amount),
-          itemStyle: { color: '#4f8ef7' }
+          itemStyle: { color: 'var(--rep-focus)' }
         }
       ]
     },
@@ -305,8 +305,8 @@ watch(model, () => nextTick(() => {
 body {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f6f8;
-  color: #1c1f23;
+  background: var(--rep-bg);
+  color: var(--rep-text);
 }
 .page {
   max-width: 1400px;
@@ -319,7 +319,7 @@ h1 {
 }
 .hint {
   margin: 0 0 14px;
-  color: #5b6472;
+  color: var(--rep-text-muted);
   font-size: 13px;
 }
 .toolbar {
@@ -328,8 +328,8 @@ h1 {
   gap: 14px;
   align-items: center;
   padding: 10px 12px;
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
   border-radius: 8px;
   margin-bottom: 10px;
   font-size: 13px;
@@ -338,22 +338,22 @@ h1 {
 .toolbar button {
   font: inherit;
   padding: 4px 8px;
-  border: 1px solid #cfd6de;
+  border: 1px solid var(--rep-border-strong);
   border-radius: 6px;
-  background: #fff;
+  background: var(--rep-surface);
   cursor: pointer;
 }
 .metric b {
   font-variant-numeric: tabular-nums;
 }
 .grid {
-  background: #fff;
+  background: var(--rep-surface);
 }
 .chev {
   display: inline-block;
   width: 16px;
   cursor: pointer;
-  color: #4f8ef7;
+  color: var(--rep-focus);
   user-select: none;
 }
 .total {
@@ -361,8 +361,8 @@ h1 {
 }
 .chart-wrap {
   margin-top: 18px;
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
   border-radius: 8px;
   padding: 12px 16px 4px;
 }
