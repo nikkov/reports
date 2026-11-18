@@ -80,13 +80,26 @@ struct TracedMutex {
         std::fprintf(stderr, "MUTEX %s %p tid %zu\n", tag, self, threadId);
 #endif
     }
+    // повторный вход в тот же поток — вечный дедлок на обычном мьютексе (ADR-153).
+    // Сообщаем об этом ДО lock(), чтобы случай было видно в журнале, а не после зависания
+    static bool &held() {
+        thread_local bool holds = false;
+        return holds;
+    }
     void lock() {
+        if (enabled() && held()) {
+            std::fprintf(stderr, "MUTEX REENTER %p tid %zu — повторный захват, будет дедлок\n",
+                         static_cast<void *>(this), tid());
+            dumpStack("reenter", static_cast<void *>(this), tid());
+        }
         if (enabled()) dumpStack("wait", static_cast<void *>(this), tid());
         m.lock();
+        held() = true;
         if (enabled()) dumpStack("lock", static_cast<void *>(this), tid());
     }
     void unlock() {
         if (enabled()) std::fprintf(stderr, "MUTEX free %p tid %zu\n", static_cast<void *>(this), tid());
+        held() = false;
         m.unlock();
     }
 };
@@ -1917,9 +1930,9 @@ int main() {
     // Восстановление удалённого шаблона: снимаем is_delete и возвращаем в память
     app().registerHandler(
         "/api/admin/reports/{id}/restore",
-        [db, adminEnabled, &applyTemplateInMemory](const HttpRequestPtr &req,
-                                                   std::function<void(const HttpResponsePtr &)> &&cb,
-                                                   const std::string &id) {
+        [db, adminEnabled, &applyTemplateInMemory, &prepareTemplate](const HttpRequestPtr &req,
+                                                                    std::function<void(const HttpResponsePtr &)> &&cb,
+                                                                    const std::string &id) {
             currentActor = actorOf(req);
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
@@ -1930,13 +1943,22 @@ int main() {
             runQuery(
                 db, "SELECT title, body::text AS body FROM report_templates WHERE id = $1 AND is_delete = true",
                 {id},
-                [cb, db, id, &applyTemplateInMemory, restoreActor, restoreIp](const orm::Result &res) {
+                [cb, db, id, &applyTemplateInMemory, &prepareTemplate, restoreActor, restoreIp](
+                    const orm::Result &res) {
                     if (res.empty()) {
                         sendError(cb, k404NotFound, "NOT_DELETED", "отчёт '" + id + "' не найден среди удалённых");
                         return;
                     }
                     const std::string title = res[0]["title"].as<std::string>();
                     const std::string body = res[0]["body"].as<std::string>();
+                    // тело могло быть испорчено правкой в БД: в каталог битый шаблон не пускаем,
+                    // признак удаления при этом НЕ снимаем (ADR-154)
+                    const auto restored = prepareTemplate(body, id, nullptr, nullptr);
+                    if (!restored.ok()) {
+                        sendError(cb, k422UnprocessableEntity, "TEMPLATE_INVALID",
+                                  "удалённый шаблон содержит ошибки и не может быть восстановлен");
+                        return;
+                    }
                     runQuery(
                         db, "UPDATE report_templates SET is_delete = false, updated_at = now() WHERE id = $1",
                         {id},
