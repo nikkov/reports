@@ -42,6 +42,8 @@
                   cont: cell.continued,
                   phantom: cell.hidden
                 }"
+                @mouseenter="showCellTip($event, cellTextOf(cell))"
+                @mouseleave="hideCellTip()"
               >
                 <span v-if="cell.toggle" class="chev"            @click.stop="handleToggle(cell.toggle)">{{
                   cell.expanded ? '▾' : '▸'
@@ -113,6 +115,14 @@
       </table>
     </div>
   </div>
+  <!-- Подсказка с полным текстом ячейки, если он не помещается (ADR-139) -->
+  <Teleport to="body">
+    <div
+      v-if="cellTip.visible"
+      class="cell-tip"
+      :style="{ left: cellTip.x + 'px', top: cellTip.y + 'px' }"
+    >{{ cellTip.text }}</div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -127,10 +137,38 @@ function cellTextOf(cell) {
   return cell.plain ? String(cell.text ?? '') : pretty(cell.text)
 }
 
+// --- Подсказка с полным текстом ячейки (ADR-139) ---
+// Показываем только если текст не помещается: иначе подсказка повторяла бы то, что видно.
+const cellTip = reactive({ visible: false, text: '', x: 0, y: 0 })
+let cellTipTimer = null
+
+function showCellTip(event, text) {
+  const el = event && event.currentTarget
+  if (!el || !text) return
+  // scrollWidth учитывает обрезку (ellipsis), clientWidth — видимую ширину
+  if (el.scrollWidth <= el.clientWidth + 1) return
+  hideCellTip()
+  cellTipTimer = setTimeout(() => {
+    const rect = el.getBoundingClientRect()
+    cellTip.text = String(text)
+    cellTip.x = Math.max(8, Math.round(rect.left))
+    cellTip.y = Math.max(8, Math.round(rect.top - 30))
+    cellTip.visible = true
+  }, 350)
+}
+
+function hideCellTip() {
+  if (cellTipTimer) {
+    clearTimeout(cellTipTimer)
+    cellTipTimer = null
+  }
+  cellTip.visible = false
+}
+
 // Свой рендерер таблицы отчёта (ADR-20): нативная <table>, объединения из модели.
 // Стили (ADR-23) приходят разрешёнными из шаблона и уходят в CSS-переменные:
 // inline-стили на ячейках — только для переопределений конкретной колонки.
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { DEFAULTS, rowHeightFor, zoneVars } from '../template/styles.js'
 
 const props = defineProps({
@@ -177,6 +215,9 @@ const containerWidth = ref(0)
 let widthObserver = null
 onMounted(() => {
   if (!scroller.value) return
+  // прокрутка и изменение размера: подсказка привязана к координатам, её надо убрать
+  scroller.value.addEventListener('scroll', hideCellTip, { passive: true })
+  window.addEventListener('resize', hideCellTip)
   containerWidth.value = scroller.value.clientWidth
   if (typeof ResizeObserver !== 'undefined') {
     widthObserver = new ResizeObserver((entries) => {
@@ -187,6 +228,7 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => {
+  hideCellTip()
   if (widthObserver) widthObserver.disconnect()
   widthObserver = null
 })
@@ -711,6 +753,21 @@ function cellsAt(index) {
 </script>
 
 <style scoped>
+.cell-tip {
+  position: fixed;
+  z-index: 3000;
+  max-width: 420px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #111827;
+  color: #f9fafb;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.25);
+}
 .rt {
   overflow: auto;
   background: var(--rt-b-bg, #fff);
