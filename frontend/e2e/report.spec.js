@@ -3179,3 +3179,36 @@ test('черновик с ошибками сохраняется, но не п�
 
   await request.delete(`/api/reports/${id}`)
 })
+
+test('мягкое удаление: шаблон остаётся в БД, но пропадает из выдачи и оживает при создании (ADR-150)', async ({ request }) => {
+  const id = 'soft-del-e2e'
+  const body = {
+    version: 2,
+    id,
+    title: 'Мягкое удаление e2e',
+    params: [],
+    datasets: { s: { sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }]
+  }
+  await request.post(`/api/reports/${id}`)
+  await request.delete(`/api/reports/${id}`)
+
+  expect((await request.post('/api/reports', { data: { id, body } })).ok()).toBeTruthy()
+  const listBefore = await (await request.get('/api/reports')).json()
+  expect(listBefore.some((r) => r.id === id)).toBe(true)
+
+  // удаление: из выдачи исчезает, по ссылке — 404, сервер продолжает отвечать
+  expect((await request.delete(`/api/reports/${id}`)).ok()).toBeTruthy()
+  const listAfter = await (await request.get('/api/reports')).json()
+  expect(listAfter.some((r) => r.id === id)).toBe(false)
+  expect((await request.get(`/api/reports/${id}`)).status()).toBe(404)
+  expect((await request.get('/api/health')).ok()).toBeTruthy()
+
+  // повторное создание оживляет запись (is_delete сбрасывается)
+  expect((await request.post('/api/reports', { data: { id, body } })).ok()).toBeTruthy()
+  const listAgain = await (await request.get('/api/reports')).json()
+  expect(listAgain.some((r) => r.id === id)).toBe(true)
+  expect((await request.get(`/api/reports/${id}`)).ok()).toBeTruthy()
+
+  await request.delete(`/api/reports/${id}`)
+})

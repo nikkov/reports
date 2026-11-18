@@ -1365,7 +1365,8 @@ int main() {
         REP_LOG_INFO(ChangeTemplate, "") << "loaded " << templates.size() << " templates from " << templatesDir;
     } else {
         try {
-            auto rows = db->execSqlSync("SELECT id, title, body::text FROM report_templates ORDER BY id");
+            auto rows = db->execSqlSync(
+                "SELECT id, title, body::text FROM report_templates WHERE is_delete = false ORDER BY id");
             for (const auto &row : rows) {
                 const std::string id = row["id"].as<std::string>();
                 const std::string body = row["body"].as<std::string>();
@@ -1381,7 +1382,8 @@ int main() {
             }
             REP_LOG_INFO(ChangeTemplate, "") << "loaded " << templates.size() << " templates from database";
             auto draftRows = db->execSqlSync(
-                "SELECT id, draft::text AS draft FROM report_templates WHERE draft IS NOT NULL");
+                "SELECT id, draft::text AS draft FROM report_templates "
+                "WHERE draft IS NOT NULL AND is_delete = false");
             for (const auto &row : draftRows) {
                 const std::string id = row["id"].as<std::string>();
                 const std::string draft = row["draft"].as<std::string>();
@@ -1575,7 +1577,7 @@ int main() {
     if (subscriptionLeaseSeconds > 3600) subscriptionLeaseSeconds = 3600;
     const int sessionTtlHours = std::stoi(rep::envOr("REP_SESSION_TTL_HOURS", "12"));
     const size_t maxTemplateBytes = std::stoul(rep::envOr("REP_MAX_TEMPLATE_BYTES", "262144"));
-    std::mutex templatesMutex;
+    std::recursive_mutex templatesMutex; // диагностика ADR-150
 
     // Публичный отчёт (ADR-103): открывается по прямой ссылке без входа. Флаг `public`
     // в шаблоне важнее accessRoles. Ниже — определение отчёта по запросу и его публичности;
@@ -1601,7 +1603,7 @@ int main() {
         if (id.empty()) return false;
         std::string raw;
         {
-            std::lock_guard<std::mutex> lock(templatesMutex);
+            std::lock_guard<std::recursive_mutex> lock(templatesMutex);
             const auto it = templatesRaw.find(id);
             if (it == templatesRaw.end()) return false;
             raw = it->second;
@@ -1628,7 +1630,7 @@ int main() {
     // оставался со старой проверкой (дефект /text в 2.0.0) — теперь выбор один на всех.
     auto resolveDataset = [&templates, &draftsParsed, &draftsRaw, &draftsErrors, &templatesMutex](
                               const Json::Value &body, bool wantDraft, ResolvedDataset &out) {
-        std::lock_guard<std::mutex> lock(templatesMutex);
+        std::lock_guard<std::recursive_mutex> lock(templatesMutex);
         const std::string reportId = body.get("reportId", "").asString();
         const TemplateInfo *tpl = nullptr;
         TemplateInfo draftCopy;
@@ -1757,7 +1759,7 @@ int main() {
         return rep::roleAtLeast(role, rep::Role::Author);
     };
     auto draftTemplate = [&draftsParsed, &templatesMutex](const std::string &id, TemplateInfo &out) {
-        std::lock_guard<std::mutex> lock(templatesMutex);
+        std::lock_guard<std::recursive_mutex> lock(templatesMutex);
         const auto it = draftsParsed.find(id);
         if (it == draftsParsed.end()) return false;
         out = it->second;
@@ -1791,7 +1793,7 @@ int main() {
         info.id = id;
         info.title = title;
         {
-            std::lock_guard<std::mutex> lock(templatesMutex);
+            std::lock_guard<std::recursive_mutex> lock(templatesMutex);
             templates[id] = info;
             templatesRaw[id] = body;
         }
@@ -1805,7 +1807,7 @@ int main() {
     auto dropTemplateFromMemory = [&templates, &templatesRaw, &templatesMutex, &templatesVersion,
                                    &resultCache](const std::string &id) {
         {
-            std::lock_guard<std::mutex> lock(templatesMutex);
+            std::lock_guard<std::recursive_mutex> lock(templatesMutex);
             templates.erase(id);
             templatesRaw.erase(id);
         }
@@ -1825,7 +1827,7 @@ int main() {
             }
             std::string raw;
             {
-                std::lock_guard<std::mutex> lock(templatesMutex);
+                std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                 const auto it = templatesRaw.find(id);
                 if (it == templatesRaw.end()) {
                     sendError(cb, k404NotFound, "REPORT_NOT_FOUND", "отчёт '" + id + "' не найден");
@@ -1989,7 +1991,7 @@ int main() {
                 db,
                 "SELECT id, title, char_length(body::text) AS size, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated, "
                 "(draft IS NOT NULL) AS has_draft, to_char(draft_updated_at, 'YYYY-MM-DD HH24:MI') AS draft_at "
-                "FROM report_templates ORDER BY id",
+                "FROM report_templates WHERE is_delete = false ORDER BY id",
                 {},
                 [cb](const orm::Result &res) {
                     Json::Value list(Json::arrayValue);
@@ -2055,14 +2057,17 @@ int main() {
             const std::string title = tpl.get("title", id).asString();
 
             runQuery(
-                db, "SELECT 1 FROM report_templates WHERE id = $1", {id},
+                db, "SELECT 1 FROM report_templates WHERE id = $1 AND is_delete = false", {id},
                 [cb, db, id, raw, title, &applyTemplateInMemory, req](const orm::Result &res) {
                     if (!res.empty()) {
                         sendError(cb, k409Conflict, "REPORT_EXISTS", "отчёт '" + id + "' уже существует");
                         return;
                     }
                     runQuery(
-                        db, "INSERT INTO report_templates (id, title, body, updated_at) VALUES ($1, $2, $3::jsonb, now())",
+                        db, "INSERT INTO report_templates (id, title, body, updated_at, is_delete) "
+                            "VALUES ($1, $2, $3::jsonb, now(), false) "
+                            "ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, "
+                            "body = EXCLUDED.body, updated_at = now(), is_delete = false, draft = NULL",
                         {id, title, raw},
                         [cb, id, raw, title, &applyTemplateInMemory, req](const orm::Result &) {
                             if (!applyTemplateInMemory(id, raw, title)) {
@@ -2165,12 +2170,14 @@ int main() {
                 [cb, db, id, &dropTemplateFromMemory, &draftsParsed, &draftsRaw, &templatesMutex, req](
                     const orm::Result &) {
                     {
-                        std::lock_guard<std::mutex> lock(templatesMutex);
+                        std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                         draftsParsed.erase(id);
                         draftsRaw.erase(id);
                     }
                     runQuery(
-                        db, "DELETE FROM report_templates WHERE id = $1", {id},
+                        db, "UPDATE report_templates SET is_delete = true, draft = NULL, "
+                    "draft_updated_at = NULL WHERE id = $1",
+                {id},
                         [cb, id, &dropTemplateFromMemory, req](const orm::Result &del) {
                             dropTemplateFromMemory(id);
                             auditEvent(requestActor(req), "template.delete", "report", id, "{}", requestIp(req));
@@ -2385,7 +2392,7 @@ int main() {
                         return;
                     }
                     {
-                        std::lock_guard<std::mutex> lock(templatesMutex);
+                        std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                         draftsRaw[id] = raw;
                         draftsErrors[id] = valid ? std::string() : firstError;
                         if (valid) {
@@ -2421,7 +2428,7 @@ int main() {
                 db, "UPDATE report_templates SET draft = NULL, draft_updated_at = NULL WHERE id = $1", {id},
                 [cb, id, &draftsParsed, &draftsRaw, &templatesMutex](const orm::Result &) {
                     {
-                        std::lock_guard<std::mutex> lock(templatesMutex);
+                        std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                         draftsParsed.erase(id);
                         draftsRaw.erase(id);
                     }
@@ -2488,7 +2495,7 @@ int main() {
                                  &templatesMutex, req](const orm::Result &) {
                                     applyTemplateInMemory(id, raw, title);
                                     {
-                                        std::lock_guard<std::mutex> lock(templatesMutex);
+                                        std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                                         draftsParsed.erase(id);
                                         draftsRaw.erase(id);
                                     }
@@ -2752,7 +2759,7 @@ int main() {
                     }
                     std::string raw;
                     {
-                        std::lock_guard<std::mutex> lock(templatesMutex);
+                        std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                         const auto it = templatesRaw.find(reportId);
                         if (it == templatesRaw.end()) {
                             next(); // «не найден» отдаст сам обработчик
@@ -3551,7 +3558,7 @@ int main() {
         const std::string &datasetKey = rds.key; // какой блок брать из шаблона
         std::string raw;
         {
-            std::lock_guard<std::mutex> lock(templatesMutex);
+            std::lock_guard<std::recursive_mutex> lock(templatesMutex);
             const auto &source = wantDraft ? draftsRaw : templatesRaw;
             const auto rawIt = source.find(reportId);
             if (rawIt != source.end()) raw = rawIt->second;
@@ -4504,7 +4511,7 @@ int main() {
             err = "неизвестный часовой пояс «" + timezone + "»: нужен IANA-идентификатор (Europe/Moscow)";
             return false;
         }
-        std::lock_guard<std::mutex> lock(templatesMutex);
+        std::lock_guard<std::recursive_mutex> lock(templatesMutex);
         if (!templates.count(reportId)) {
             err = "отчёт '" + reportId + "' не найден";
             return false;
@@ -4982,7 +4989,7 @@ const std::string from = req->getParameter("from");
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
             std::map<std::string, std::string> snapshot;
             {
-                std::lock_guard<std::mutex> lock(templatesMutex);
+                std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                 snapshot = templatesRaw;
             }
             // список для экрана отчётов: заголовок, описание и состав параметров
@@ -5089,7 +5096,7 @@ const std::string from = req->getParameter("from");
             (void)req;
             std::map<std::string, std::string> snapshot;
             {
-                std::lock_guard<std::mutex> lock(templatesMutex);
+                std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                 snapshot = templatesRaw;
             }
             const auto it = snapshot.find(id);
@@ -5142,7 +5149,7 @@ const std::string from = req->getParameter("from");
             }
             std::map<std::string, std::string> snapshot;
             {
-                std::lock_guard<std::mutex> lock(templatesMutex);
+                std::lock_guard<std::recursive_mutex> lock(templatesMutex);
                 snapshot = wantDraft ? draftsRaw : templatesRaw;
             }
             const auto it = snapshot.find(reportId);
