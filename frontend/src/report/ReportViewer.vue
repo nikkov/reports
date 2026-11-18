@@ -42,6 +42,7 @@
       @labels="paramLabels = $event"
       @ready="onParamsReady"
       @submit="load"
+      @search="searchInReport"
     />
 
     <p v-if="template && !autoLoad && !loadedOnce && !loading" class="hint no-data">
@@ -118,6 +119,81 @@ const draftMode = params.get('draft') === '1'
 const template = ref(null)
 const rows = ref([])
 const paramValues = reactive({})
+
+// --- Поиск по тексту отчёта (ADR-143) ---
+// Ищем в ячейках всех табличных блоков, оборачиваем совпадения в <mark>, повторное нажатие
+// «Найти» переходит к следующему. Виртуализация держит в DOM окно строк, поэтому поиск идёт
+// по отрисованным строкам — про это честно написано в ограничениях ADR.
+const searchState = { term: '', hits: [], index: -1 }
+
+function clearSearchMarks() {
+  document.querySelectorAll('mark.find-hit').forEach((mark) => {
+    const parent = mark.parentNode
+    if (!parent) return
+    parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
+    parent.normalize()
+  })
+  searchState.hits = []
+  searchState.index = -1
+  searchState.term = ''
+}
+
+function highlightInReport(term) {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(escaped, 'gi')
+  const cells = document.querySelectorAll('.blocks .rt-table td, .blocks .rt-table th')
+  const hits = []
+  for (const cell of cells) {
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
+    const nodes = []
+    while (walker.nextNode()) nodes.push(walker.currentNode)
+    for (const node of nodes) {
+      const text = node.nodeValue || ''
+      re.lastIndex = 0
+      if (!re.test(text)) continue
+      re.lastIndex = 0
+      const frag = document.createDocumentFragment()
+      let last = 0
+      let match
+      while ((match = re.exec(text)) !== null) {
+        frag.appendChild(document.createTextNode(text.slice(last, match.index)))
+        const mark = document.createElement('mark')
+        mark.className = 'find-hit'
+        mark.textContent = match[0]
+        frag.appendChild(mark)
+        hits.push(mark)
+        last = match.index + match[0].length
+      }
+      frag.appendChild(document.createTextNode(text.slice(last)))
+      node.parentNode.replaceChild(frag, node)
+    }
+  }
+  return hits
+}
+
+function searchInReport(rawTerm) {
+  const term = String(rawTerm || '').trim()
+  if (!term) {
+    clearSearchMarks()
+    return
+  }
+  // тот же запрос при повторном нажатии — идём к следующему вхождению
+  if (term === searchState.term && searchState.hits.length) {
+    searchState.hits[searchState.index]?.classList.remove('active')
+    searchState.index = (searchState.index + 1) % searchState.hits.length
+    const next = searchState.hits[searchState.index]
+    next.classList.add('active')
+    next.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    return
+  }
+  clearSearchMarks()
+  searchState.term = term
+  searchState.hits = highlightInReport(term)
+  if (!searchState.hits.length) return
+  searchState.index = 0
+  searchState.hits[0].classList.add('active')
+  searchState.hits[0].scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
 const paramLabels = ref({})
 const loading = ref(false)
 // Автозагрузка (ADR-89): шаблон может требовать явного нажатия «Обновить»
@@ -552,6 +628,17 @@ function tableColumns(block) {
 </script>
 
 <style>
+/* Совпадения поиска создаются вручную в DOM (ADR-143) */
+mark.find-hit {
+  background: #fde68a;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+mark.find-hit.active {
+  background: #f59e0b;
+  outline: 2px solid #b45309;
+}
 .head-right {
   display: flex;
   align-items: center;

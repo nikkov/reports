@@ -74,6 +74,19 @@
     <button type="submit" :disabled="loading" :aria-busy="loading">
       {{ loading ? 'Загрузка…' : 'Обновить' }}
     </button>
+
+    <!-- Поиск по тексту отчёта: ввод и «Найти», повторное нажатие — следующее вхождение (ADR-143) -->
+    <div class="report-search">
+      <input
+        v-model="searchTerm"
+        type="search"
+        class="search-input"
+        placeholder="Найти в отчёте"
+        aria-label="Текст для поиска в отчёте"
+        @keydown.enter.prevent="emitSearch"
+      />
+      <button type="button" class="search-btn" @click="emitSearch">Найти</button>
+    </div>
   </form>
 </template>
 
@@ -86,6 +99,12 @@ import { onMounted, reactive, ref, watch } from 'vue'
 import { api } from '../api/client.js'
 import MultiSelect from './MultiSelect.vue'
 
+const searchTerm = ref('')
+
+function emitSearch() {
+  emit('search', searchTerm.value)
+}
+
 const props = defineProps({
   reportId: { type: String, required: true },
   params: { type: Array, required: true },
@@ -94,7 +113,7 @@ const props = defineProps({
   // просмотр черновика: справочники считаются по телу черновика (ADR-82)
   draft: { type: Boolean, default: false }
 })
-const emit = defineEmits(['update:modelValue', 'submit', 'labels', 'ready'])
+const emit = defineEmits(['update:modelValue', 'submit', 'labels', 'ready', 'search'])
 
 const fetched = reactive({}) // имя параметра → [{value,label}]
 const errors = reactive({})
@@ -301,6 +320,14 @@ watch(
   border-radius: 6px;
   cursor: pointer;
   height: 30px;
+}
+.report-search {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.report-search .search-input {
+  width: 200px;
 }
 .params button:disabled {
   opacity: 0.6;
