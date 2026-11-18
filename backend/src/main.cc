@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <execinfo.h>
 #include <filesystem>
 #include <fstream>
 #include <cctype>
@@ -56,9 +57,9 @@ namespace {
 // Диагностика взаимной блокировки (ADR-152): при REP_DEBUG_MUTEX=1 печатаем захват и
 // освобождение мьютекса шаблонов с идентификатором потока — видно, кто держит его вечно.
 struct TracedMutex {
-    // рекурсивный: подтверждённый повторный захват в одном потоке (ADR-152) не должен вешать
-    // сервер; при REP_DEBUG_MUTEX=1 в stderr видно последовательность захватов
-    std::recursive_mutex m;
+    // обычный мьютекс: причина дедлока найдена и устранена (ADR-153). При REP_DEBUG_MUTEX=1
+    // в stderr пишется последовательность захватов со стеком — для поиска будущих ошибок
+    std::mutex m;
     static bool enabled() {
         static const bool on = rep::envOr("REP_DEBUG_MUTEX", "0") == "1";
         return on;
@@ -66,10 +67,23 @@ struct TracedMutex {
     static std::size_t tid() {
         return std::hash<std::thread::id>{}(std::this_thread::get_id());
     }
+    static void dumpStack(const char *tag, void *self, std::size_t threadId) {
+#ifdef __linux__
+        void *frames[8];
+        const int n = ::backtrace(frames, 8);
+        char **syms = ::backtrace_symbols(frames, n);
+        std::fprintf(stderr, "MUTEX %s %p tid %zu", tag, self, threadId);
+        for (int i = 0; syms && i < n; ++i) std::fprintf(stderr, " | %s", syms[i]);
+        std::fprintf(stderr, "\n");
+        if (syms) std::free(syms);
+#else
+        std::fprintf(stderr, "MUTEX %s %p tid %zu\n", tag, self, threadId);
+#endif
+    }
     void lock() {
-        if (enabled()) std::fprintf(stderr, "MUTEX wait %p tid %zu\n", static_cast<void *>(this), tid());
+        if (enabled()) dumpStack("wait", static_cast<void *>(this), tid());
         m.lock();
-        if (enabled()) std::fprintf(stderr, "MUTEX lock %p tid %zu\n", static_cast<void *>(this), tid());
+        if (enabled()) dumpStack("lock", static_cast<void *>(this), tid());
     }
     void unlock() {
         if (enabled()) std::fprintf(stderr, "MUTEX free %p tid %zu\n", static_cast<void *>(this), tid());
@@ -2390,10 +2404,14 @@ int main() {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
             }
+            // логин и ip до асинхронной задачи: в колбэке req уже уничтожен (ADR-153)
+            const std::string auditActor = requestActor(req);
+            const std::string auditIp = requestIp(req);
             runQuery(
                 db, "SELECT title, body::text AS body FROM report_templates_history WHERE id = $1 AND report_id = $2",
                 {snapshot, id},
-                [cb, db, id, &applyTemplateInMemory, req, snapshot](const orm::Result &res) {
+                [cb, db, id, &applyTemplateInMemory, auditActor, auditIp, snapshot](
+                    const orm::Result &res) {
                     if (res.empty()) {
                         sendError(cb, k404NotFound, "SNAPSHOT_NOT_FOUND", "версия не найдена");
                         return;
@@ -2405,16 +2423,18 @@ int main() {
                         "INSERT INTO report_templates_history (report_id, title, body) "
                         "SELECT id, title, body FROM report_templates WHERE id = $1",
                         {id},
-                        [cb, db, id, raw, title, &applyTemplateInMemory, req, snapshot](const orm::Result &) {
+                        [cb, db, id, raw, title, &applyTemplateInMemory, auditActor, auditIp, snapshot](
+                            const orm::Result &) {
                             runQuery(
                                 db, "UPDATE report_templates SET title = $2, body = $3::jsonb, updated_at = now() WHERE id = $1",
                                 {id, title, raw},
-                                [cb, id, raw, title, &applyTemplateInMemory, req, snapshot](const orm::Result &) {
+                                [cb, id, raw, title, &applyTemplateInMemory, auditActor, auditIp, snapshot](
+                                    const orm::Result &) {
                                     applyTemplateInMemory(id, raw, title);
                                     Json::Value out;
                                     out["id"] = id;
-                                    auditEvent(requestActor(req), "template.rollback", "report", id,
-                                               "{\"snapshot\":\"" + snapshot + "\"}", requestIp(req));
+                                    auditEvent(auditActor, "template.rollback", "report", id,
+                                               "{\"snapshot\":\"" + snapshot + "\"}", auditIp);
                                     out["restored"] = true;
                                     cb(jsonResponse(out));
                                 },
@@ -2875,15 +2895,22 @@ int main() {
                         next();
                         return;
                     }
+                    // Мьютекс нельзя держать во время next(): обработчик возьмёт его снова и
+                    // встанет навсегда (ADR-153 — именно этот дедлок вешал сервер после удаления
+                    // шаблона: удалённого нет в памяти, ветка «не найден» вызывала next() под lock)
                     std::string raw;
+                    bool found = false;
                     {
                         std::lock_guard<TracedMutex> lock(templatesMutex);
                         const auto it = templatesRaw.find(reportId);
-                        if (it == templatesRaw.end()) {
-                            next(); // «не найден» отдаст сам обработчик
-                            return;
+                        if (it != templatesRaw.end()) {
+                            raw = it->second;
+                            found = true;
                         }
-                        raw = it->second;
+                    }
+                    if (!found) {
+                        next(); // «не найден» отдаст сам обработчик
+                        return;
                     }
                     if (!allowedForReport(req, accessRolesOfRaw(raw))) {
                         auto resp = HttpResponse::newHttpResponse();
