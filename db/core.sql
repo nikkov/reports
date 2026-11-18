@@ -14,8 +14,17 @@ CREATE TABLE IF NOT EXISTS reports.report_templates (
     body             jsonb       NOT NULL,        -- опубликованная версия
     updated_at       timestamptz NOT NULL DEFAULT now(),
     draft            jsonb,                       -- черновик правки (ADR-31)
-    draft_updated_at timestamptz
+    draft_updated_at timestamptz,
+    is_delete        boolean     NOT NULL DEFAULT false  -- мягкое удаление (ADR-150)
 );
+
+-- Мягкое удаление (ADR-150): для баз, созданных до появления колонки. Идемпотентно.
+ALTER TABLE reports.report_templates
+    ADD COLUMN IF NOT EXISTS is_delete boolean NOT NULL DEFAULT false;
+
+-- Частичный индекс: живые шаблоны читаются на старте и в каталоге, удалённые — только в админке.
+CREATE INDEX IF NOT EXISTS report_templates_alive_idx
+    ON reports.report_templates (updated_at DESC) WHERE is_delete = false;
 
 -- История версий шаблонов (ADR-26): append-only снапшоты при сохранении и удалении.
 CREATE TABLE IF NOT EXISTS reports.report_templates_history (

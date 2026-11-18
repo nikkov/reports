@@ -1,5 +1,24 @@
 # История версий
 
+## v2.25.3 — 2026-11-18
+
+`is_delete` попал в схему ядра (дополнение к ADR-150).
+
+### Что было не так
+Колонка `is_delete` существовала только в рабочей базе после ручного `ALTER TABLE`: в `db/core.sql`
+её не было. На чистой установке (`db/init.sh`) сервер падал на каждом запросе к шаблонам —
+`column is_delete does not exist`.
+
+### Что сделано
+- `reports.report_templates.is_delete boolean NOT NULL DEFAULT false` в `CREATE TABLE`;
+- идемпотентный `ALTER TABLE … ADD COLUMN IF NOT EXISTS` для баз, созданных раньше;
+- частичный индекс `report_templates_alive_idx (updated_at DESC) WHERE is_delete = false`.
+
+### Проверки
+Пересоздание схемы в `reporting_ci` (`DROP SCHEMA` + `db/init.sh --core-only`): колонка
+`boolean NOT NULL DEFAULT false`, индекс на месте, 44 шаблона загружено. Повторное применение к
+`reporting` — без ошибок, 46 живых шаблонов.
+
 ## v2.25.2 — 2026-11-18
 
 SQL-гард больше не путает `is_delete` с операцией DELETE (ADR-155).
