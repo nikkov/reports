@@ -161,7 +161,11 @@
         title="Потяните, чтобы изменить высоту"
         @pointerdown="startSqlResize"
       />
-      <section v-if="sqlOpen" class="sql-panel" :style="{ height: sqlHeight + 'px' }">
+      <section
+        v-if="sqlOpen"
+        class="sql-panel"
+        :style="{ height: sqlHeight + 'px', gridTemplateColumns: sqlListWidth + 'px 6px 1fr' }"
+      >
         <div class="sql-list">
           <button
             v-for="d in sqlDatasets"
@@ -175,6 +179,14 @@
           </button>
           <p v-if="!sqlDatasets.length" class="muted">в шаблоне нет SQL-наборов (REST не редактируется)</p>
         </div>
+        <div
+          class="sql-col-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Изменить ширину списка наборов"
+          title="Потяните, чтобы изменить ширину списка"
+          @pointerdown="startListResize"
+        />
         <div class="sql-side">
           <div ref="sqlHost" class="sql-editor"></div>
           <p class="muted">{{ sqlHint }}</p>
@@ -416,17 +428,51 @@ const sqlChecking = ref(false)
 // дат вроде year(*)), автор может поправить их прямо в панели (ADR-140).
 const sqlCheckParams = ref([])
 const sqlHeight = ref(260)
+const sqlListWidth = ref(210)
 let sqlView = null
 let resizeState = null
+let listResizeState = null
 
 const SQL_HEIGHT_KEY = 'rep.admin.sqlHeight'
+const SQL_LIST_WIDTH_KEY = 'rep.admin.sqlListWidth'
 
 // Высота панели запоминается между сессиями: у автора свой удобный размер (ADR-135)
 try {
   const saved = Number(localStorage.getItem(SQL_HEIGHT_KEY))
   if (Number.isFinite(saved) && saved >= 140 && saved <= 700) sqlHeight.value = saved
+  const savedWidth = Number(localStorage.getItem(SQL_LIST_WIDTH_KEY))
+  if (Number.isFinite(savedWidth) && savedWidth >= 120 && savedWidth <= 420) {
+    sqlListWidth.value = savedWidth
+  }
 } catch {
   // localStorage может быть недоступен (приватный режим) — молча оставляем значение по умолчанию
+}
+
+// Ширина списка наборов: перетаскивание по вертикальному разделителю (ADR-142)
+function startListResize(event) {
+  event.preventDefault()
+  listResizeState = { startX: event.clientX, startWidth: sqlListWidth.value }
+  window.addEventListener('pointermove', onListResize)
+  window.addEventListener('pointerup', stopListResize)
+  document.body.classList.add('resizing-horizontal')
+}
+
+function onListResize(event) {
+  if (!listResizeState) return
+  const next = listResizeState.startWidth + (event.clientX - listResizeState.startX)
+  sqlListWidth.value = Math.min(420, Math.max(120, Math.round(next)))
+}
+
+function stopListResize() {
+  window.removeEventListener('pointermove', onListResize)
+  window.removeEventListener('pointerup', stopListResize)
+  document.body.classList.remove('resizing-horizontal')
+  listResizeState = null
+  try {
+    localStorage.setItem(SQL_LIST_WIDTH_KEY, String(sqlListWidth.value))
+  } catch {
+    // без сохранения: ширина просто не запомнится
+  }
 }
 
 function startSqlResize(event) {
@@ -1748,7 +1794,7 @@ body.resizing-vertical {
   min-height: 140px;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 210px 1fr;
+  grid-template-columns: 210px 6px 1fr;
   gap: 8px;
   height: 260px;
   margin-top: 8px;
@@ -1760,6 +1806,29 @@ body.resizing-vertical {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.sql-col-resizer {
+  cursor: col-resize;
+  position: relative;
+}
+.sql-col-resizer::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 2px;
+  height: 22px;
+  margin-top: -11px;
+  border-radius: 2px;
+  background: #d1d5db;
+}
+.sql-col-resizer:hover::after,
+body.resizing-horizontal .sql-col-resizer::after {
+  background: #2563eb;
+}
+body.resizing-horizontal {
+  user-select: none;
+  cursor: col-resize;
 }
 .sql-item {
   text-align: left;
