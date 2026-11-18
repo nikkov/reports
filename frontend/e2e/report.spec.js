@@ -581,7 +581,8 @@ test('все шаблоны из списка открываются и отда
       await page.locator('.params button[type=submit]').click()
     }
     await expect(page.locator('.error')).toHaveCount(0)
-    await expect(page.locator('.meta')).toContainText('строк')
+    // первый запрос после перезапуска стенда бывает медленным: 5 с по умолчанию не хватает
+    await expect(page.locator('.meta')).toContainText('строк', { timeout: 15000 })
     // Отчёт считается живым, если показал либо строки таблицы, либо диаграмму:
     // у отчёта из одних диаграмм таблицы может не быть вовсе (sales-flow, ADR-56).
     // таблица виртуализирована и рисуется после появления .meta — ждём отрисовку,
