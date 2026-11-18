@@ -185,6 +185,16 @@
         <div class="sql-side">
           <div ref="sqlHost" class="sql-editor"></div>
           <p class="muted">{{ sqlHint }}</p>
+          <div v-if="sqlCheckParams.length" class="sql-params">
+            <label v-for="p in sqlCheckParams" :key="p.name" class="sql-param">
+              <span>{{ p.name }}</span>
+              <input
+                v-model="p.value"
+                :type="p.type === 'date' ? 'date' : p.type === 'datetime' ? 'datetime-local' : 'text'"
+                :placeholder="p.type === 'date' || p.type === 'datetime' ? 'YYYY-MM-DD' : ''"
+              />
+            </label>
+          </div>
           <div class="sql-actions">
             <button class="btn primary" type="button" :disabled="!sqlKey || !canEdit" @click="applySql">
               Применить SQL в шаблон
@@ -318,6 +328,7 @@ import { EditorView, keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { StreamLanguage } from '@codemirror/language'
 import { listSqlDatasets, setDatasetSql, sqlInfo } from './datasetSql.js'
+import { resolveDefaultValue } from '../template/dates.js'
 import { json, jsonParseLinter } from '@codemirror/lang-json'
 import { lintGutter, linter } from '@codemirror/lint'
 import { API_BASE, api } from '../api/client.js'
@@ -408,6 +419,9 @@ const sqlHint = ref('')
 const sqlHost = ref(null)
 const sqlCheck = ref(null)
 const sqlChecking = ref(false)
+// Значения параметров для проверки SQL: по умолчанию берём из шаблона (включая выражения
+// дат вроде year(*)), автор может поправить их прямо в панели (ADR-140).
+const sqlCheckParams = ref([])
 const sqlHeight = ref(260)
 let sqlView = null
 let resizeState = null
@@ -461,7 +475,20 @@ function setSqlDoc(value) {
   sqlView.dispatch({ changes: { from: 0, to: sqlView.state.doc.length, insert: value || '' } })
 }
 
+function refreshCheckParams() {
+  const tpl = parseTemplateText()
+  const defs = (tpl && Array.isArray(tpl.params)) ? tpl.params : []
+  sqlCheckParams.value = defs
+    .filter((p) => p && p.name)
+    .map((p) => ({
+      name: p.name,
+      type: p.type || 'text',
+      value: resolveDefaultValue(p) || ''
+    }))
+}
+
 function refreshSqlDatasets() {
+  refreshCheckParams()
   const tpl = parseTemplateText()
   sqlDatasets.value = listSqlDatasets(tpl)
   const current = sqlDatasets.value.find((d) => d.key === sqlKey.value)
@@ -537,9 +564,14 @@ async function checkSqlNow() {
   sqlChecking.value = true
   sqlCheck.value = null
   try {
+    const params = {}
+    for (const p of sqlCheckParams.value) {
+      if (p.value !== '' && p.value !== undefined && p.value !== null) params[p.name] = p.value
+    }
     sqlCheck.value = await api.checkSql(sqlView.state.doc.toString(), {
       connections: (tpl && tpl.connections) || {},
-      connection: ds.connection || ''
+      connection: ds.connection || '',
+      params
     })
   } catch (e) {
     sqlCheck.value = { error: e.message }
@@ -1755,6 +1787,25 @@ body.resizing-vertical {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   overflow: auto;
+}
+.sql-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.sql-param {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sql-param input {
+  width: 120px;
+  padding: 2px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font: inherit;
 }
 .sql-check {
   margin-top: 6px;
