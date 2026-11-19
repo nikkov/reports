@@ -117,6 +117,38 @@
       "text": "Дашборд производства на наших данных: KPI-карточки с отклонением от плана, горизонтальные полосы с опорной линией плана, спарклайн по дням, гейдж маржи и таблица план/факт по центрам финансовой ответственности. Переключите тему — табло рассчитано на тёмную."
     },
     {
+      "type": "legend",
+      "span": 12,
+      "card": true,
+      "items": [
+        {
+          "label": "план / норматив",
+          "color": "#c62828",
+          "shape": "line"
+        },
+        {
+          "label": "факт",
+          "color": "#1a4fa0",
+          "shape": "square"
+        },
+        {
+          "label": "в пределах нормы",
+          "color": "#2e7d32",
+          "shape": "circle"
+        },
+        {
+          "label": "отклонение хуже плана",
+          "color": "#b42318",
+          "shape": "circle"
+        },
+        {
+          "label": "тренд по дням",
+          "color": "#6ea8fe",
+          "shape": "line"
+        }
+      ]
+    },
+    {
       "type": "kpi",
       "dataKey": "kpi",
       "span": 3,
@@ -192,7 +224,8 @@
         "value": 270000,
         "label": "план 270 000",
         "color": "#c62828"
-      }
+      },
+      "card": true
     },
     {
       "type": "chart",
@@ -218,7 +251,8 @@
         "#2e7d32",
         "#f9a825",
         "#c62828"
-      ]
+      ],
+      "card": true
     },
     {
       "type": "chart",
@@ -230,7 +264,8 @@
       "xField": "day",
       "yField": "amount",
       "aggregate": "sum",
-      "area": true
+      "area": true,
+      "card": true
     },
     {
       "type": "table",
@@ -288,6 +323,46 @@
             "detail"
           ]
         }
+      ],
+      "card": true
+    },
+    {
+      "type": "chart",
+      "chartType": "pie",
+      "dataKey": "by_region",
+      "span": 4,
+      "height": 300,
+      "card": true,
+      "title": "Доля регионов в выручке, % от цели",
+      "xField": "region",
+      "yField": "amount",
+      "aggregate": "sum",
+      "donut": true,
+      "target": 1400000
+    },
+    {
+      "type": "chart",
+      "chartType": "gauge",
+      "dataKey": "kpi",
+      "span": 4,
+      "height": 300,
+      "card": true,
+      "title": "Маржа против плана",
+      "yField": "margin_pct",
+      "aggregate": "max",
+      "min": 0,
+      "max": 40,
+      "unit": "%",
+      "semi": true,
+      "showLimits": true,
+      "thresholds": [
+        15,
+        22
+      ],
+      "zoneColors": [
+        "#c62828",
+        "#f9a825",
+        "#2e7d32"
       ]
     }
   ]

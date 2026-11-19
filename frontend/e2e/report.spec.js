@@ -3325,3 +3325,27 @@ test('KPI-карточки и горизонтальные полосы дашб
   })
   expect(hasRefLine).toBe(true)
 })
+
+test('дашборд: легенда, кольцо с целью и полукруглый гейдж (ADR-160)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=production-dashboard')
+  await page.waitForSelector('.kpi', { timeout: 30000 })
+  await page.waitForTimeout(2000)
+
+  // легенда-строка: маркеры с подписями
+  expect(await page.locator('.legend-item').count()).toBe(5)
+  // блоки в оформлении карточки
+  expect(await page.locator('.block.card').count()).toBeGreaterThan(3)
+  // кольцо: подпись в центре — число и доля от цели
+  expect(await page.locator('.blocks').innerText()).toContain('от цели')
+  // полукруг: углы 180…0 у опций gauge
+  const semi = await page.evaluate(() => {
+    const charts = window.__charts || []
+    const gauge = charts.find((c) => c.block?.semi === true)
+    if (!gauge) return null
+    const s = (gauge.instance.getOption().series || [])[0] || {}
+    return { start: s.startAngle, end: s.endAngle }
+  })
+  expect(semi).not.toBeNull()
+  expect(semi.start).toBe(180)
+  expect(semi.end).toBe(0)
+})

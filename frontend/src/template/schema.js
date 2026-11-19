@@ -763,6 +763,10 @@ export default {
           ],
           "description": "устаревшая пара ширин: full = 12, half = 6; новая раскладка — span (ADR-96)"
         },
+        "card": {
+          "type": "boolean",
+          "description": "оформление карточки: фон, рамка, скругление и внутренние отступы у блока"
+        },
         "span": {
           "type": "integer",
           "minimum": 1,
@@ -880,6 +884,10 @@ export default {
             "half"
           ],
           "description": "устаревшая пара ширин: full = 12, half = 6; новая раскладка — span (ADR-96)"
+        },
+        "card": {
+          "type": "boolean",
+          "description": "оформление карточки: фон, рамка, скругление и внутренние отступы у блока"
         },
         "span": {
           "type": "integer",
@@ -1040,6 +1048,27 @@ export default {
         "max": {
           "type": "number"
         },
+        "donut": {
+          "type": "boolean",
+          "description": "для pie: кольцо вместо полного круга (итерация 2 дашборда)"
+        },
+        "centerField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "для pie/donut: поле, чьё значение показывается числом в центре"
+        },
+        "target": {
+          "type": "number",
+          "description": "цель (план): в центре кольца показывается доля от цели в процентах"
+        },
+        "semi": {
+          "type": "boolean",
+          "description": "для gauge: полукольцо 180° вместо полного"
+        },
+        "showLimits": {
+          "type": "boolean",
+          "description": "для gauge: подписи нижней и верхней границы шкалы"
+        },
         "unit": {
           "type": "string",
           "maxLength": 8
@@ -1094,6 +1123,10 @@ export default {
           ],
           "description": "устаревшая пара ширин: full = 12, half = 6; новая раскладка — span (ADR-96)"
         },
+        "card": {
+          "type": "boolean",
+          "description": "оформление карточки: фон, рамка, скругление и внутренние отступы у блока"
+        },
         "span": {
           "type": "integer",
           "minimum": 1,
@@ -1115,8 +1148,73 @@ export default {
         },
         {
           "$ref": "#/$defs/kpiBlock"
+        },
+        {
+          "$ref": "#/$defs/legendBlock"
         }
       ]
+    },
+    "legendBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "items"
+      ],
+      "properties": {
+        "type": {
+          "const": "legend"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "color": {
+                "$ref": "#/$defs/color"
+              },
+              "shape": {
+                "enum": [
+                  "square",
+                  "line",
+                  "circle"
+                ]
+              }
+            }
+          }
+        },
+        "height": {
+          "$ref": "#/$defs/blockHeight"
+        },
+        "width": {
+          "enum": [
+            "full",
+            "half"
+          ]
+        },
+        "card": {
+          "type": "boolean"
+        },
+        "span": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        }
+      }
     },
     "kpiBlock": {
       "type": "object",
@@ -1190,6 +1288,10 @@ export default {
             "full",
             "half"
           ]
+        },
+        "card": {
+          "type": "boolean",
+          "description": "оформление карточки: фон, рамка, скругление и внутренние отступы у блока"
         },
         "span": {
           "type": "integer",

@@ -99,6 +99,9 @@ function buildOption() {
       ? model.zones.map((z) => [(z.to - model.min) / span, z.color])
       : [[1, cssColors.value.accent]]
     const valueColor = model.color || accent
+    // Полукруг (ADR-160): 180° вместо 210…-30, подписи границ под шкалой.
+    const semi = props.block.semi === true
+    const showLimits = props.block.showLimits === true
     return {
       animation: false,
       textStyle: textStyle(),
@@ -107,14 +110,20 @@ function buildOption() {
           type: 'gauge',
           min: model.min,
           max: model.max,
-          startAngle: 210,
-          endAngle: -30,
+          startAngle: semi ? 180 : 210,
+          endAngle: semi ? 0 : -30,
+          center: semi ? ['50%', '72%'] : ['50%', '55%'],
           // при цветовых зонах полоса прогресса закрыла бы зоны — оставляем только полосы
           progress: { show: !model.zones.length, width: 12, itemStyle: { color: accent } },
           axisLine: { lineStyle: { width: 12, color: axisColors } },
           axisTick: { show: false },
           splitLine: { length: 10, lineStyle: { color: cssColors.value.border } },
-          axisLabel: { color: textStyle()?.color, fontSize: 11, distance: 14 },
+          axisLabel: {
+            show: !showLimits,
+            color: textStyle()?.color,
+            fontSize: 11,
+            distance: 14
+          },
           pointer: { width: 4, itemStyle: { color: valueColor } },
           title: { show: !!model.name, offsetCenter: [0, '72%'], fontSize: 12, color: textStyle()?.color },
           detail: {
@@ -124,9 +133,19 @@ function buildOption() {
             color: valueColor,
             formatter: (v) => `${nf.format(Math.round(v * 100) / 100)}${model.unit}`
           },
-          data: [{ value: model.value, name: model.name }]
+          data: [{ value: model.value, name: model.name }],
+          // подписи границ: нижняя и верхняя точка шкалы под полукругом
+          markPoint: showLimits
+            ? undefined
+            : undefined
         }
-      ]
+      ],
+      graphic: showLimits
+        ? [
+            { type: 'text', left: '8%', bottom: 4, style: { text: fmt(model.min), fontSize: 11, fill: 'var(--rep-text-muted)' } },
+            { type: 'text', right: '8%', bottom: 4, style: { text: fmt(model.max), fontSize: 11, fill: 'var(--rep-text-muted)' } }
+          ]
+        : undefined
     }
   }
 
@@ -260,17 +279,62 @@ function buildOption() {
 
   if (props.block.chartType === 'pie') {
     const first = series[0] || { data: [] }
+    const donut = props.block.donut === true
+    const total = first.data.reduce((acc, v) => acc + (Number(v) || 0), 0)
+    // Число в центре кольца (ADR-160): сумма секторов и доля от цели, если цель задана.
+    const centerValue = props.block.centerField && props.rows?.length
+      ? Number(props.rows[0][props.block.centerField])
+      : total
+    const target = Number(props.block.target)
+    const centerText = Number.isFinite(centerValue) ? fmt(centerValue) : ''
+    const centerSub = Number.isFinite(target) && target > 0 && Number.isFinite(centerValue)
+      ? `${(centerValue / target * 100).toFixed(1)}% от цели`
+      : ''
     return {
       animation: false,
       tooltip: { trigger: 'item', valueFormatter: fmt },
       legend: { type: 'scroll', bottom: 0, textStyle: textStyle() },
       textStyle: textStyle(),
+      // подпись в центре кольца: число и доля от цели рисуются graphic-слоем —
+      // у title при пустом сегменте текст иногда не появляется
+      graphic: donut
+        ? [
+            {
+              type: 'text',
+              left: 'center',
+              top: '40%',
+              style: {
+                text: centerText,
+                fontSize: 20,
+                fontWeight: 700,
+                fill: textStyle()?.color,
+                textAlign: 'center'
+              }
+            },
+            {
+              type: 'text',
+              left: 'center',
+              top: '48%',
+              style: {
+                text: centerSub,
+                fontSize: 12,
+                fill: 'var(--rep-text-muted)',
+                textAlign: 'center'
+              }
+            }
+          ]
+        : undefined,
       series: [
         {
           type: 'pie',
-          radius: ['35%', '65%'],
+          radius: donut ? ['52%', '74%'] : ['35%', '65%'],
           data: categories.map((name, i) => ({ name, value: first.data[i] })),
-          label: { formatter: '{b}: {d}%' }
+          // у кольца подписи секторов убираем: место в центре занято числом и долей от цели,
+          // расшифровка цветов — в легенде под графиком (ADR-160)
+          label: donut
+            ? { show: false }
+            : { formatter: '{b}: {d}%', color: textStyle()?.color },
+          labelLine: donut ? { show: false } : { lineStyle: { color: textStyle()?.color } }
         }
       ]
     }

@@ -49,7 +49,8 @@ const branchValidator = {
   text: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/textBlock' }),
   table: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/tableBlock' }),
   chart: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/chartBlock' }),
-  kpi: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/kpiBlock' })
+  kpi: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/kpiBlock' }),
+  legend: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/legendBlock' })
 }
 
 const translate = {
@@ -993,7 +994,7 @@ function checkGaugeZones(block, base, errors) {
     if (!validator) {
       errors.push({
         path: `${base}.type`,
-        message: `неизвестный тип блока «${block?.type ?? '—'}» (допустимо: text, table, chart, kpi)`
+        message: `неизвестный тип блока «${block?.type ?? '—'}» (допустимо: text, table, chart, kpi, legend)`
       })
       return
     }
@@ -1013,6 +1014,9 @@ function checkGaugeZones(block, base, errors) {
       }
       return
     }
+
+    // легенда — оформление, набор данных ей не нужен (ADR-160)
+    if (block.type === 'legend') return
 
     if (!datasetNames.includes(block.dataKey)) {
       errors.push({
@@ -1162,6 +1166,15 @@ function checkGaugeZones(block, base, errors) {
       }
     }
 
+    // Легенда (ADR-160): маркеры без подписи бессмысленны
+    if (block.type === 'legend' && Array.isArray(block.items)) {
+      block.items.forEach((item, i) => {
+        if (!item || typeof item !== 'object' || typeof item.label !== 'string' || !item.label) {
+          errors.push({ path: `${base}.items.${i}`, message: 'у маркера нужна подпись label' })
+        }
+      })
+    }
+
     // KPI-карточка (ADR-159): одна строка набора — одно число, плюс сравнение и отклонение.
     if (block.type === 'kpi') {
       const needField = (field) => {
@@ -1218,6 +1231,21 @@ function checkGaugeZones(block, base, errors) {
       if (block.showValues !== undefined && type !== 'bar') {
         errors.push({ path: `${base}.showValues`, message: 'showValues задаётся только для bar' })
       }
+      // поля кольца (ADR-160) — только у pie, поля полукруга — только у gauge
+      for (const field of ['donut', 'centerField', 'target']) {
+        if (block[field] !== undefined && type !== 'pie') {
+          errors.push({ path: `${base}.${field}`, message: `${field} задаётся только для pie` })
+        }
+      }
+      for (const field of ['semi', 'showLimits']) {
+        if (block[field] !== undefined && type !== 'gauge') {
+          errors.push({ path: `${base}.${field}`, message: `${field} задаётся только для gauge` })
+        }
+      }
+      if (type === 'pie' && block.target !== undefined && !(typeof block.target === 'number' && block.target > 0)) {
+        errors.push({ path: `${base}.target`, message: 'target: положительное число (цель)' })
+      }
+
       const need = (field) => {
         if (typeof block[field] !== 'string' || !block[field]) {
           errors.push({
@@ -1422,9 +1450,9 @@ function checkGaugeZones(block, base, errors) {
     }
   }
 
-  // Высота блоков (ADR-85): у таблицы, диаграммы и KPI-карточки — пиксели или процент от окна
+  // Высота блоков (ADR-85): у таблицы, диаграммы, KPI-карточки и легенды — пиксели или процент
   ;(template.blocks || []).forEach((block, i) => {
-    if (block.type !== 'table' && block.type !== 'chart' && block.type !== 'kpi') {
+    if (block.type !== 'table' && block.type !== 'chart' && block.type !== 'kpi' && block.type !== 'legend') {
       if (block.height !== undefined) {
         errors.push({ path: `blocks.${i}.height`, message: 'height допустим только у таблицы и диаграммы' })
       }

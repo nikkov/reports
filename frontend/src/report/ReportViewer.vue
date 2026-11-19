@@ -56,8 +56,9 @@
       <div class="blocks">
       <template v-for="(block, index) in template.blocks" :key="index">
       <section
-        v-if="block.type === 'text' || loadedOnce"
+        v-if="block.type === 'text' || block.type === 'legend' || loadedOnce"
         class="block"
+        :class="{ card: block.card === true }"
         :style="{ gridColumn: `span ${spanOf(block)}` }"
       >
         <p v-if="block.type === 'text'" class="text">
@@ -85,6 +86,8 @@
           :search-col="searchColFor(index)"
           @drill="onDrill"
         />
+
+        <LegendBlock v-else-if="block.type === 'legend'" :block="block" />
 
         <KpiBlock
           v-else-if="block.type === 'kpi'"
@@ -121,6 +124,7 @@ import TableView from './TableView.vue'
 import { columnFormat, formatCell } from './format.js'
 import ChartBlock from './ChartBlock.vue'
 import KpiBlock from './KpiBlock.vue'
+import LegendBlock from './LegendBlock.vue'
 import { resolveStyles } from '../template/styles.js'
 import { looksLikeDateExpr, resolveDefaultValue } from '../template/dates.js'
 import { drillAllowed, resolveDrill } from '../engine/drill.js'
@@ -779,6 +783,24 @@ body {
 .block {
   margin-bottom: 0;
   min-width: 0;
+}
+/* card: блок рисуется карточкой — общий фон, рамка и отступы (ADR-160) */
+.block.card {
+  box-sizing: border-box;
+  padding: 10px 12px;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
+  border-radius: 8px;
+}
+.block.card .chart-box {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+@media print {
+  .block.card {
+    background: #ffffff;
+  }
 }
 .text {
   font-size: 14px;
