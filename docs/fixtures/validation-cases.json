@@ -5014,6 +5014,355 @@
       "errors": [
         "connections.crm.auth.spn"
       ]
+    },
+    {
+      "name": "kpi без valueField",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "kpi",
+            "dataKey": "d",
+            "title": "V"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.valueField"
+      ]
+    },
+    {
+      "name": "kpi корректная карточка",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "kpi",
+            "dataKey": "d",
+            "valueField": "v",
+            "compareField": "p"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "kpi с плохим decimals",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "kpi",
+            "dataKey": "d",
+            "valueField": "v",
+            "decimals": 9
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.decimals"
+      ]
+    },
+    {
+      "name": "legend без items",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "legend"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.items"
+      ]
+    },
+    {
+      "name": "legend: маркер без label",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "legend",
+            "items": [
+              {
+                "color": "#c62828"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.items.0.label"
+      ]
+    },
+    {
+      "name": "legend корректная",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "legend",
+            "items": [
+              {
+                "label": "план",
+                "color": "#c62828"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "sparkline без yField",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "chart",
+            "dataKey": "d",
+            "chartType": "sparkline",
+            "xField": "v"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.yField"
+      ]
+    },
+    {
+      "name": "donut у bar недопустим",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "chart",
+            "dataKey": "d",
+            "chartType": "bar",
+            "xField": "v",
+            "yField": "p",
+            "donut": true
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.donut"
+      ]
+    },
+    {
+      "name": "semi у line недопустим",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "chart",
+            "dataKey": "d",
+            "chartType": "line",
+            "xField": "v",
+            "yField": "p",
+            "semi": true
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.semi"
+      ]
+    },
+    {
+      "name": "referenceField у line недопустим",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "chart",
+            "dataKey": "d",
+            "chartType": "line",
+            "xField": "v",
+            "yField": "p",
+            "referenceField": "p"
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.referenceField"
+      ]
+    },
+    {
+      "name": "скрытая колонка не может быть группой",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "d",
+            "columns": [
+              {
+                "field": "v",
+                "title": "V",
+                "hidden": true,
+                "group": true
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.columns.0"
+      ]
+    },
+    {
+      "name": "скрытая колонка без field",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "d",
+            "columns": [
+              {
+                "title": "V",
+                "hidden": true,
+                "expression": "1"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": [
+        "blocks.0.columns.0"
+      ]
+    },
+    {
+      "name": "скрытая колонка и card не мешают",
+      "template": {
+        "version": 2,
+        "id": "parity-new",
+        "title": "Проверка",
+        "params": [],
+        "datasets": {
+          "d": {
+            "sql": "SELECT 1 AS v, 2 AS p"
+          }
+        },
+        "blocks": [
+          {
+            "type": "table",
+            "dataKey": "d",
+            "card": true,
+            "columns": [
+              {
+                "field": "v",
+                "title": "V",
+                "aggregate": "sum"
+              },
+              {
+                "field": "p",
+                "title": "P",
+                "hidden": true,
+                "aggregate": "sum"
+              }
+            ]
+          }
+        ]
+      },
+      "errors": []
     }
   ]
 }

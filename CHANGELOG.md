@@ -1,5 +1,25 @@
 # История версий
 
+## v2.30.1 — 2026-11-19
+
+Серверная валидация новых блоков и полей (ADR-162).
+
+### Что было не так
+Шаблоны с `kpi`, `legend`, `sparkline` и полями дашборда сохранялись только через `psql`: админка
+получала `422 blocks.N.type: неизвестный тип блока`, то есть автор не мог сохранить такой отчёт из
+интерфейса.
+
+### Что сделано
+- сервер знает `kpi` и `legend` (обязательные поля, `decimals`, маркеры, высота) и `chartType: sparkline`;
+- поля дашборда проверяются по видам: `donut`/`centerField`/`target`/`goalField` — pie,
+  `semi`/`showLimits` — gauge, `referenceField`/`showValues`/`orientation` — bar;
+- скрытые колонки: нужен `field`, запрещены `group`/`subtotal`;
+- 13 parity-фикстур; путь ошибки маркера легенды согласован (`items.<i>.label`).
+
+### Проверки
+`production-dashboard`, `full-featured`, `hidden-columns`, `theme-demo` сохраняются через
+`PUT /api/admin/reports/{id}` — 200. ctest 145 / 799, клиент 215 тестов (parity 128), vitest зелёный.
+
 ## v2.30.0 — 2026-11-19
 
 Цель по категориям, интерактивная легенда, панель REST/join (ADR-161).

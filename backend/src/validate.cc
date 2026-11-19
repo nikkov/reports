@@ -207,6 +207,18 @@ void checkTableBlock(ValidationResult &r,
             if (!group && !col["aggregate"].isNull() && !hasField) {
                 addError(r, cpath, "агрегат требует поля field");
             }
+            // Скрытая колонка (ADR-158): значение нужно для вычислений, ячейки на экране нет,
+            // поэтому группой/подытогом она быть не может — подпись группы печатается в её ячейке
+            if (col["hidden"].asBool()) {
+                if (!hasField) {
+                    addError(r, cpath, "у скрытой колонки должен быть field: значения нужны для вычислений");
+                }
+                if (group || col["subtotal"].asBool()) {
+                    addError(r, cpath,
+                             "скрытая колонка не может быть группой или подытогом — группировка выводится "
+                             "по видимым колонкам");
+                }
+            }
             checkDateFormat(r, col["format"], cpath + ".format");
             if (hasField) leafFields.insert(asString(col["field"]));
         };
@@ -372,11 +384,13 @@ void checkBlockHeight(ValidationResult &r, const Json::Value &block, const std::
 
 void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::string &base) {
     checkBlockHeight(r, block, base);
-    static const std::vector<std::string> types = {"bar", "line", "pie", "area", "scatter", "gauge", "sankey", "band"};
+    static const std::vector<std::string> types = {"bar",  "line", "pie",   "area",  "scatter",
+                                                   "gauge", "sankey", "band", "sparkline"};
     const std::string type = asString(block["chartType"]);
     if (!isOneOf(type, types)) {
         addError(r, base + ".chartType",
-                 "chartType должен быть одним из: bar, line, pie, area, scatter, gauge, sankey, band");
+                 "chartType должен быть одним из: bar, line, pie, area, scatter, gauge, sankey, band, "
+                 "sparkline");
         // для неизвестного вида поля всё равно проверяем: сообщений об опечатках должно быть больше одного
         if (asString(block["xField"]).empty()) addError(r, base + ".xField", "xField обязателен");
         if (asString(block["yField"]).empty()) addError(r, base + ".yField", "yField обязателен");
@@ -395,6 +409,40 @@ void checkChartBlock(ValidationResult &r, const Json::Value &block, const std::s
                                                 " не используется: " + why);
         }
     };
+
+    // Поля дашборда (ADR-159/160/161): кольцо, полукруг, план по категориям — только своим видам.
+    // Правила зеркалят клиентский валидатор, иначе parity расходится.
+    const auto onlyFor = [&](const std::vector<std::string> &fields, const std::string &allowed) {
+        for (const auto &field : fields) {
+            if (!block[field].isNull() && type != allowed) {
+                addError(r, base + "." + field, field + " задаётся только для " + allowed);
+            }
+        }
+    };
+    onlyFor({"donut", "centerField", "target", "goalField"}, "pie");
+    onlyFor({"semi", "showLimits"}, "gauge");
+    onlyFor({"referenceField"}, "bar");
+    onlyFor({"showValues"}, "bar");
+    if (!block["orientation"].isNull() && type != "bar") {
+        addError(r, base + ".orientation", "orientation задаётся только для bar");
+    }
+    if (block["orientation"].isString()) {
+        const std::string o = block["orientation"].asString();
+        if (o != "horizontal" && o != "vertical") {
+            addError(r, base + ".orientation", "orientation: horizontal или vertical");
+        }
+    }
+    if (!block["reference"].isNull()) {
+        const Json::Value &ref = block["reference"];
+        const bool okNumber = ref.isNumeric();
+        const bool okObject = ref.isObject() && ref["value"].isNumeric();
+        if (!okNumber && !okObject) {
+            addError(r, base + ".reference", "reference: число или объект {value, label?, color?}");
+        }
+    }
+    if (!block["target"].isNull() && (!block["target"].isNumeric() || block["target"].asDouble() <= 0)) {
+        addError(r, base + ".target", "target: положительное число (цель)");
+    }
 
     if (type == "gauge") {
         need("yField");
@@ -1521,10 +1569,53 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             const std::string type = asString(block["type"]);
             const bool isTable = type == "table";
             const bool isChart = type == "chart";
+            const bool isKpi = type == "kpi";
+            const bool isLegend = type == "legend";
 
-            if (type != "text" && !isTable && !isChart) {
+            if (type != "text" && !isTable && !isChart && !isKpi && !isLegend) {
                 addError(r, base + ".type", "неизвестный тип блока «" + (type.empty() ? "—" : type) +
-                                                "» (допустимо: text, table, chart)");
+                                                "» (допустимо: text, table, chart, kpi, legend)");
+                ++index;
+                continue;
+            }
+
+            // KPI-карточка (ADR-159): набор обязателен, значение — поле первой строки
+            if (isKpi) {
+                checkBlockHeight(r, block, base);
+                const std::string kpiKey = asString(block["dataKey"]);
+                if (kpiKey.empty()) {
+                    addError(r, base + ".dataKey", "dataKey обязателен");
+                } else if (!root["datasets"].isObject() || !root["datasets"].isMember(kpiKey)) {
+                    addError(r, base + ".dataKey", "набор данных «" + kpiKey + "» не объявлен в datasets");
+                }
+                if (asString(block["valueField"]).empty()) {
+                    addError(r, base + ".valueField", "KPI-карточке нужно поле valueField");
+                }
+                if (block.isMember("decimals") && !block["decimals"].isNull()) {
+                    const auto d = block["decimals"];
+                    if (!d.isInt() || d.asInt() < 0 || d.asInt() > 6) {
+                        addError(r, base + ".decimals", "decimals: целое 0…6");
+                    }
+                }
+                ++index;
+                continue;
+            }
+
+            // Легенда (ADR-160): оформление, набор данных не нужен, но маркеры без подписи бесполезны
+            if (isLegend) {
+                checkBlockHeight(r, block, base);
+                if (!block["items"].isArray() || block["items"].empty()) {
+                    addError(r, base + ".items", "items должен быть непустым массивом");
+                } else {
+                    for (Json::ArrayIndex i = 0; i < block["items"].size(); ++i) {
+                        const auto &item = block["items"][i];
+                        if (!item.isObject() || asString(item["label"]).empty()) {
+                            // путь совпадает с клиентским, иначе parity расходится
+                            addError(r, base + ".items." + std::to_string(i) + ".label",
+                                     "у маркера нужна подпись label");
+                        }
+                    }
+                }
                 ++index;
                 continue;
             }
