@@ -276,18 +276,57 @@ function buildOption() {
     }
   }
 
+  // Спарклайн (ADR-159): мини-график без осей, сетки и легенды — для карточки показателя.
+  // Живёт отдельным chartType, чтобы в блоке диаграммы можно было показать тренд вне KPI.
+  if (props.block.chartType === 'sparkline') {
+    const first = series[0] || { data: [] }
+    return {
+      animation: false,
+      grid: { left: 2, right: 2, top: 4, bottom: 4 },
+      tooltip: { trigger: 'axis', valueFormatter: fmt },
+      textStyle: textStyle(),
+      xAxis: { type: 'category', data: categories, show: false, boundaryGap: false },
+      yAxis: { type: 'value', show: false, min: 'dataMin', max: 'dataMax' },
+      series: [
+        {
+          type: 'line',
+          data: first.data,
+          smooth: props.block.smooth === true,
+          symbol: 'none',
+          lineStyle: { width: 1.6 },
+          areaStyle: props.block.area === true ? { opacity: 0.2 } : undefined,
+          emphasis: { focus: 'series' }
+        }
+      ]
+    }
+  }
+
+  // Горизонтальные полосы (ADR-159): категории по вертикали, значения по горизонтали —
+  // так удобно сравнивать план/факт по нескольким объектам (bullet chart).
+  const horizontal = props.block.chartType === 'bar' && props.block.orientation === 'horizontal'
+  // Опорная линия: план, лучший результат, норматив — вертикальная (или горизонтальная) черта.
+  const reference = props.block.reference
+  const refValue = typeof reference === 'number' ? reference : reference?.value
+  const refLabel = (typeof reference === 'object' && reference?.label) || ''
+  const refColor = (typeof reference === 'object' && reference?.color) || 'var(--rep-danger)'
+
+  const axisCategory = {
+    type: 'category',
+    data: categories,
+    axisLabel: { rotate: horizontal ? 0 : categories.length > 8 ? 30 : 0, color: textStyle()?.color },
+    nameTextStyle: textStyle()
+  }
+  const axisValue = { type: 'value', axisLabel: { formatter: fmt, color: textStyle()?.color } }
+
   return {
     animation: false,
-    grid: { left: 90, right: 24, top: 24, bottom: 48, containLabel: false },
+    grid: horizontal
+      ? { left: 110, right: 32, top: 16, bottom: 24, containLabel: false }
+      : { left: 90, right: 24, top: 24, bottom: 48, containLabel: false },
     tooltip: { trigger: 'axis', valueFormatter: fmt },
     legend: series.length > 1 ? { type: 'scroll', bottom: 0, textStyle: textStyle() } : undefined,
-    xAxis: {
-      type: 'category',
-      data: categories,
-      axisLabel: { rotate: categories.length > 8 ? 30 : 0, color: textStyle()?.color },
-      nameTextStyle: textStyle()
-    },
-    yAxis: { type: 'value', axisLabel: { formatter: fmt, color: textStyle()?.color } },
+    xAxis: horizontal ? axisValue : axisCategory,
+    yAxis: horizontal ? axisCategory : axisValue,
     textStyle: textStyle(),
     series: series.map((s) => ({
       name: s.name,
@@ -296,9 +335,24 @@ function buildOption() {
       areaStyle: props.block.chartType === 'area' ? { opacity: 0.25 } : undefined,
       data: s.data,
       smooth: props.block.smooth === true,
-      barMaxWidth: 42,
+      barMaxWidth: horizontal ? 22 : 42,
       symbolSize: props.block.chartType === 'scatter' ? 9 : undefined,
-      emphasis: { focus: 'series' }
+      emphasis: { focus: 'series' },
+      // подписи значений у полос: без них «bullet» нечитаем
+      label:
+        horizontal && props.block.showValues === true
+          ? { show: true, position: 'right', formatter: (p) => fmt(p.value), color: textStyle()?.color }
+          : undefined,
+      markLine:
+        Number.isFinite(Number(refValue)) && refValue !== null && refValue !== undefined
+          ? {
+              symbol: 'none',
+              silent: true,
+              lineStyle: { color: refColor, type: 'dashed', width: 1.5 },
+              label: { formatter: refLabel, color: refColor, position: 'end' },
+              data: [horizontal ? { xAxis: Number(refValue) } : { yAxis: Number(refValue) }]
+            }
+          : undefined
     }))
   }
 }

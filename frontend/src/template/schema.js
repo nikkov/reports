@@ -933,8 +933,53 @@ export default {
             "scatter",
             "gauge",
             "sankey",
-            "band"
+            "band",
+            "sparkline"
           ]
+        },
+        "orientation": {
+          "enum": [
+            "vertical",
+            "horizontal"
+          ],
+          "description": "для bar: horizontal — категории по вертикали, значения по горизонтали (bullet)"
+        },
+        "reference": {
+          "description": "опорная линия плана/норматива: число или {value, label, color}",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "value"
+              ],
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "color": {
+                  "$ref": "#/$defs/color"
+                }
+              }
+            }
+          ]
+        },
+        "showValues": {
+          "type": "boolean",
+          "description": "подписи значений у горизонтальных полос"
+        },
+        "area": {
+          "type": "boolean",
+          "description": "для sparkline: заливка под линией"
+        },
+        "smooth": {
+          "type": "boolean"
         },
         "xField": {
           "type": "string",
@@ -1067,8 +1112,91 @@ export default {
         },
         {
           "$ref": "#/$defs/chartBlock"
+        },
+        {
+          "$ref": "#/$defs/kpiBlock"
         }
       ]
+    },
+    "kpiBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "dataKey",
+        "valueField"
+      ],
+      "properties": {
+        "type": {
+          "const": "kpi"
+        },
+        "dataKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "valueField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "поле с текущим значением (первая строка набора)"
+        },
+        "compareField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "поле для сравнения: план, лучший результат, прошлый период"
+        },
+        "compareLabel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deltaField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "готовое отклонение в процентах из набора; иначе считается из valueField/compareField"
+        },
+        "sparkField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "поле для спарклайна; по умолчанию — valueField"
+        },
+        "sparkDataKey": {
+          "type": "string",
+          "minLength": 1,
+          "description": "набор для ряда спарклайна, если значение и тренд лежат в разных наборах"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "goodWhen": {
+          "enum": [
+            "up",
+            "down"
+          ],
+          "description": "рост значения хорош (up) или плох (down)"
+        },
+        "height": {
+          "$ref": "#/$defs/blockHeight"
+        },
+        "width": {
+          "enum": [
+            "full",
+            "half"
+          ]
+        },
+        "span": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        }
+      }
     },
     "color": {
       "type": "string",

@@ -86,6 +86,14 @@
           @drill="onDrill"
         />
 
+        <KpiBlock
+          v-else-if="block.type === 'kpi'"
+          :block="block"
+          :rows="rowsFor(block)"
+          :spark-rows="block.sparkDataKey ? dataByKey[block.sparkDataKey] || [] : []"
+          :height="heightFor(block)"
+        />
+
         <ChartBlock
           v-else-if="block.type === 'chart'"
           :block="block"
@@ -112,6 +120,7 @@ import ParamsForm from '../components/ParamsForm.vue'
 import TableView from './TableView.vue'
 import { columnFormat, formatCell } from './format.js'
 import ChartBlock from './ChartBlock.vue'
+import KpiBlock from './KpiBlock.vue'
 import { resolveStyles } from '../template/styles.js'
 import { looksLikeDateExpr, resolveDefaultValue } from '../template/dates.js'
 import { drillAllowed, resolveDrill } from '../engine/drill.js'
@@ -325,8 +334,10 @@ async function load() {
   error.value = null
   const started = performance.now()
   try {
-    // набор нужен и таблицам, и диаграммам: диаграмма берёт строки своего dataKey
-    const blocks = (template.value?.blocks || []).filter((b) => b.type === 'table' || b.type === 'chart')
+    // набор нужен таблицам, диаграммам и KPI-карточкам (им — одна строка показателя)
+    const blocks = (template.value?.blocks || []).filter(
+      (b) => b.type === 'table' || b.type === 'chart' || b.type === 'kpi'
+    )
     const keys = [...new Set(blocks.map((b) => b.dataKey || ''))]
     if (!keys.length) keys.push('') // шаблон без блоков данных — запросим первый набор
     const loaded = {}

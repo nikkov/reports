@@ -48,7 +48,8 @@ const validateRoot = ajv.compile(rootSchema)
 const branchValidator = {
   text: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/textBlock' }),
   table: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/tableBlock' }),
-  chart: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/chartBlock' })
+  chart: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/chartBlock' }),
+  kpi: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/kpiBlock' })
 }
 
 const translate = {
@@ -992,7 +993,7 @@ function checkGaugeZones(block, base, errors) {
     if (!validator) {
       errors.push({
         path: `${base}.type`,
-        message: `неизвестный тип блока «${block?.type ?? '—'}» (допустимо: text, table, chart)`
+        message: `неизвестный тип блока «${block?.type ?? '—'}» (допустимо: text, table, chart, kpi)`
       })
       return
     }
@@ -1161,10 +1162,62 @@ function checkGaugeZones(block, base, errors) {
       }
     }
 
+    // KPI-карточка (ADR-159): одна строка набора — одно число, плюс сравнение и отклонение.
+    if (block.type === 'kpi') {
+      const needField = (field) => {
+        if (typeof block[field] !== 'string' || !block[field]) {
+          errors.push({ path: `${base}.${field}`, message: `KPI-карточке нужно поле ${field}` })
+        }
+      }
+      needField('valueField')
+      if (block.deltaField && !block.compareField) {
+        warnings.push({
+          path: `${base}.deltaField`,
+          message: 'задано готовое отклонение: compareField не используется, сравнение не покажется'
+        })
+      }
+      if (!block.deltaField && !block.compareField) {
+        warnings.push({
+          path: `${base}.compareField`,
+          message: 'без compareField и deltaField карточка покажет только значение, без отклонения'
+        })
+      }
+      if (typeof block.decimals === 'number' && (block.decimals < 0 || block.decimals > 6)) {
+        errors.push({ path: `${base}.decimals`, message: 'decimals: 0…6' })
+      }
+    }
+
     if (block.type === 'chart') {
       // Состав полей зависит от вида диаграммы (ADR-56): линия/столбцы/точки/круг —
       // категория + значение, gauge — одно значение, sankey — пара узлов и вес потока.
       const type = block.chartType
+      // sparkline (ADR-159) — та же пара категория+значение, но без осей
+      if (type === 'sparkline') {
+        for (const field of ['xField', 'yField']) {
+          if (typeof block[field] !== 'string' || !block[field]) {
+            errors.push({ path: `${base}.${field}`, message: `для диаграммы «sparkline» обязательно поле ${field}` })
+          }
+        }
+      }
+      if (block.orientation !== undefined) {
+        if (type !== 'bar') {
+          errors.push({ path: `${base}.orientation`, message: 'orientation задаётся только для bar' })
+        } else if (block.orientation !== 'horizontal' && block.orientation !== 'vertical') {
+          errors.push({ path: `${base}.orientation`, message: 'orientation: horizontal или vertical' })
+        }
+      }
+      if (block.reference !== undefined) {
+        const ref = block.reference
+        const okNumber = typeof ref === 'number' && Number.isFinite(ref)
+        const okObject = ref && typeof ref === 'object' && !Array.isArray(ref) &&
+          typeof ref.value === 'number' && Number.isFinite(ref.value)
+        if (!okNumber && !okObject) {
+          errors.push({ path: `${base}.reference`, message: 'reference: число или объект {value, label?, color?}' })
+        }
+      }
+      if (block.showValues !== undefined && type !== 'bar') {
+        errors.push({ path: `${base}.showValues`, message: 'showValues задаётся только для bar' })
+      }
       const need = (field) => {
         if (typeof block[field] !== 'string' || !block[field]) {
           errors.push({
@@ -1369,9 +1422,9 @@ function checkGaugeZones(block, base, errors) {
     }
   }
 
-  // Высота блоков (ADR-85): у таблицы и диаграммы — пиксели или процент от окна
+  // Высота блоков (ADR-85): у таблицы, диаграммы и KPI-карточки — пиксели или процент от окна
   ;(template.blocks || []).forEach((block, i) => {
-    if (block.type !== 'table' && block.type !== 'chart') {
+    if (block.type !== 'table' && block.type !== 'chart' && block.type !== 'kpi') {
       if (block.height !== undefined) {
         errors.push({ path: `blocks.${i}.height`, message: 'height допустим только у таблицы и диаграммы' })
       }

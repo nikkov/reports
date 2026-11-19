@@ -3302,3 +3302,26 @@ test('скрытые колонки: не видны на экране и в в�
   expect(header).not.toContain('скрыт')
   expect(header).toContain('Штук на 1000 руб.')
 })
+
+test('KPI-карточки и горизонтальные полосы дашборда (ADR-159)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=production-dashboard')
+  await page.waitForSelector('.kpi', { timeout: 30000 })
+  await page.waitForTimeout(2000)
+
+  const cards = page.locator('.kpi')
+  expect(await cards.count()).toBe(4)
+  // значение и отклонение посчитаны, а не прочерк
+  const first = await cards.first().innerText()
+  expect(first).toMatch(/\d[\d\s]*/u)
+  expect(first).toMatch(/[▲▼=]\s*\d+[.,]\d+%/)
+  // спарклайн нарисован
+  expect(await page.locator('.kpi-spark polyline').count()).toBe(4)
+  // горизонтальные полосы: опорная линия плана есть в опциях графика
+  const hasRefLine = await page.evaluate(() => {
+    const chart = (window.__charts || []).find((c) => c.block?.orientation === 'horizontal')
+    if (!chart) return false
+    const option = chart.instance.getOption()
+    return JSON.stringify(option.series || []).includes('markLine')
+  })
+  expect(hasRefLine).toBe(true)
+})

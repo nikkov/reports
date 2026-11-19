@@ -1,0 +1,294 @@
+{
+  "version": 2,
+  "id": "production-dashboard",
+  "title": "Дашборд производства (пример)",
+  "description": "Как собрать табло вроде промышленного: KPI-карточки с отклонением, горизонтальные полосы с планом, спарклайн, гейдж и таблица план/факт",
+  "folder": "Примеры",
+  "tags": [
+    "пример",
+    "дашборд",
+    "KPI",
+    "ADR-159"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "year(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "today(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "region",
+      "type": "select",
+      "label": "Регион",
+      "default": "",
+      "emptyOption": {
+        "value": "",
+        "label": "— все регионы —"
+      },
+      "source": {
+        "kind": "lookup",
+        "dataset": "region_lookup"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "kpi": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region"
+      },
+      "sql": "SELECT round(sum(s.amount)/1000.0, 0) AS revenue, round(sum(s.amount)/1000.0*1.03, 0) AS revenue_plan, round(sum(s.profit)*100.0/nullif(sum(s.amount),0), 1) AS margin_pct, 22.0 AS margin_plan, count(*) AS deals, round(count(*)*1.06, 0) AS deals_plan, round(coalesce(sum(CASE WHEN s.profit < 0 THEN -s.profit END),0)/1000.0, 1) AS losses, round(coalesce(sum(CASE WHEN s.profit < 0 THEN -s.profit END),0)/1000.0*1.15, 1) AS losses_plan, sum(s.qty) AS qty, round(sum(s.qty)*1.05, 0) AS qty_plan FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region,'')::int) "
+    },
+    "region_lookup": {
+      "connection": "main",
+      "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name"
+    },
+    "by_region": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region"
+      },
+      "sql": "SELECT s.region, round(sum(s.amount)/1000.0, 0) AS amount, round(sum(s.qty), 0) AS qty FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region,'')::int)  AND s.region IS NOT NULL GROUP BY s.region ORDER BY 2 DESC"
+    },
+    "days": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region"
+      },
+      "sql": "SELECT s.order_date::text AS day, round(sum(s.amount)/1000.0, 0) AS amount FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region,'')::int)  GROUP BY s.order_date ORDER BY s.order_date"
+    },
+    "finance": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT f.cost_center AS center, round(sum(f.plan_amount)/1000.0, 0) AS plan, round(sum(f.fact_amount)/1000.0, 0) AS fact FROM reports_examples.finance f WHERE f.period BETWEEN :from::date AND :to::date GROUP BY f.cost_center ORDER BY f.cost_center"
+    },
+    "margin": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region"
+      },
+      "sql": "SELECT round(sum(s.profit)*100.0/nullif(sum(s.amount),0), 1) AS margin_pct FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region,'')::int) "
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Дашборд производства на наших данных: KPI-карточки с отклонением от плана, горизонтальные полосы с опорной линией плана, спарклайн по дням, гейдж маржи и таблица план/факт по центрам финансовой ответственности. Переключите тему — табло рассчитано на тёмную."
+    },
+    {
+      "type": "kpi",
+      "dataKey": "kpi",
+      "span": 3,
+      "height": 170,
+      "title": "Выручка, тыс. руб.",
+      "valueField": "revenue",
+      "compareField": "revenue_plan",
+      "compareLabel": "план",
+      "unit": "тыс.",
+      "decimals": 0,
+      "goodWhen": "up",
+      "sparkField": "amount",
+      "sparkDataKey": "days"
+    },
+    {
+      "type": "kpi",
+      "dataKey": "kpi",
+      "span": 3,
+      "height": 170,
+      "title": "Маржа, %",
+      "valueField": "margin_pct",
+      "compareField": "margin_plan",
+      "compareLabel": "план",
+      "unit": "%",
+      "decimals": 1,
+      "goodWhen": "up",
+      "sparkField": "amount",
+      "sparkDataKey": "days"
+    },
+    {
+      "type": "kpi",
+      "dataKey": "kpi",
+      "span": 3,
+      "height": 170,
+      "title": "Сделок, шт.",
+      "valueField": "deals",
+      "compareField": "deals_plan",
+      "compareLabel": "план",
+      "unit": "шт.",
+      "decimals": 0,
+      "goodWhen": "up",
+      "sparkField": "amount",
+      "sparkDataKey": "days"
+    },
+    {
+      "type": "kpi",
+      "dataKey": "kpi",
+      "span": 3,
+      "height": 170,
+      "title": "Потери от убыточных, тыс. руб.",
+      "valueField": "losses",
+      "compareField": "losses_plan",
+      "compareLabel": "предел",
+      "unit": "тыс.",
+      "decimals": 1,
+      "goodWhen": "down",
+      "sparkField": "amount",
+      "sparkDataKey": "days"
+    },
+    {
+      "type": "chart",
+      "chartType": "bar",
+      "orientation": "horizontal",
+      "dataKey": "by_region",
+      "span": 7,
+      "height": 320,
+      "title": "Продажи по регионам, тыс. руб. (плановая линия)",
+      "xField": "region",
+      "yField": "amount",
+      "aggregate": "sum",
+      "showValues": true,
+      "reference": {
+        "value": 270000,
+        "label": "план 270 000",
+        "color": "#c62828"
+      }
+    },
+    {
+      "type": "chart",
+      "chartType": "gauge",
+      "dataKey": "margin",
+      "span": 5,
+      "height": 320,
+      "title": "Маржа за период",
+      "yField": "margin_pct",
+      "aggregate": "max",
+      "min": 0,
+      "max": 40,
+      "unit": "%",
+      "thresholds": [
+        10,
+        15,
+        25,
+        30
+      ],
+      "zoneColors": [
+        "#c62828",
+        "#f9a825",
+        "#2e7d32",
+        "#f9a825",
+        "#c62828"
+      ]
+    },
+    {
+      "type": "chart",
+      "chartType": "sparkline",
+      "dataKey": "days",
+      "span": 6,
+      "height": 160,
+      "title": "Выручка по дням, тыс. руб.",
+      "xField": "day",
+      "yField": "amount",
+      "aggregate": "sum",
+      "area": true
+    },
+    {
+      "type": "table",
+      "dataKey": "finance",
+      "span": 6,
+      "title": "План/факт по центрам ответственности",
+      "height": 300,
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "center",
+          "title": "ЦФ",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "plan",
+          "title": "План",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "fact",
+          "title": "Факт",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Δ, %",
+          "expression": "(sum(fact) - sum(plan)) * 100 / sum(plan)",
+          "format": "number",
+          "align": "right"
+        }
+      ],
+      "rules": [
+        {
+          "when": {
+            "column": "Δ, %",
+            "op": "<",
+            "value": 0
+          },
+          "apply": {
+            "colors": {
+              "text": "danger"
+            },
+            "font": {
+              "weight": 600
+            }
+          },
+          "zones": [
+            "detail"
+          ]
+        }
+      ]
+    }
+  ]
+}
