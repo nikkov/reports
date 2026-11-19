@@ -1232,10 +1232,13 @@ function checkGaugeZones(block, base, errors) {
         errors.push({ path: `${base}.showValues`, message: 'showValues задаётся только для bar' })
       }
       // поля кольца (ADR-160) — только у pie, поля полукруга — только у gauge
-      for (const field of ['donut', 'centerField', 'target']) {
+      for (const field of ['donut', 'centerField', 'target', 'goalField']) {
         if (block[field] !== undefined && type !== 'pie') {
           errors.push({ path: `${base}.${field}`, message: `${field} задаётся только для pie` })
         }
+      }
+      if (block.referenceField !== undefined && type !== 'bar') {
+        errors.push({ path: `${base}.referenceField`, message: 'referenceField задаётся только для bar' })
       }
       for (const field of ['semi', 'showLimits']) {
         if (block[field] !== undefined && type !== 'gauge') {

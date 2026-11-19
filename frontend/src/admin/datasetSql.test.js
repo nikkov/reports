@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { listDatasets, listSqlDatasets, setDatasetSql, sqlInfo } from './datasetSql.js'
+import {
+  datasetSpec,
+  listDatasets,
+  listEditableDatasets,
+  listSqlDatasets,
+  setDatasetSql,
+  setDatasetSpec,
+  sqlInfo
+} from './datasetSql.js'
 
 const template = {
   id: 'demo',
@@ -61,14 +69,51 @@ describe('datasetSql: сведения о запросе', () => {
 })
 
 describe('datasetSql: наборы для SQL-панели', () => {
-  it('REST и join-источники не показываются', () => {
+  it('только SQL-наборы отбираются отдельным списком (совместимость)', () => {
     const list = listSqlDatasets(template)
     expect(list.map((d) => d.key)).toEqual(['orders'])
     expect(list.every((d) => d.kind === 'sql')).toBe(true)
   })
 
+  it('панель показывает и REST, и join (ADR-161)', () => {
+    const list = listEditableDatasets(template)
+    expect(list.map((d) => d.kind).sort()).toEqual(['join', 'rest', 'sql'])
+  })
+
   it('шаблон без наборов даёт пустой список', () => {
     expect(listSqlDatasets({})).toEqual([])
     expect(listSqlDatasets(null)).toEqual([])
+    expect(listEditableDatasets(null)).toEqual([])
+  })
+})
+
+describe('datasetSql: правка REST и join как JSON', () => {
+  it('datasetSpec отдаёт SQL текстом, rest и join — JSON', () => {
+    expect(datasetSpec(template, 'orders').kind).toBe('sql')
+    const rest = datasetSpec(template, 'prices')
+    expect(rest.kind).toBe('rest')
+    expect(rest.text).toContain('"path"')
+    expect(datasetSpec(template, 'merged').kind).toBe('join')
+    expect(datasetSpec(template, 'нет').text).toBe('')
+  })
+
+  it('смена rest меняет только эту секцию', () => {
+    const { template: next, error } = setDatasetSpec(template, 'prices', 'rest', '{"path":"/api/v2"}')
+    expect(error).toBe(null)
+    expect(next.datasets.prices.rest.path).toBe('/api/v2')
+    expect(next.datasets.orders.sql).toBe(template.datasets.orders.sql)
+    // исходный шаблон не мутирован
+    expect(template.datasets.prices.rest.path).not.toBe('/api/v2')
+  })
+
+  it('битый JSON не меняет шаблон и объясняет ошибку', () => {
+    const { template: next, error } = setDatasetSpec(template, 'merged', 'join', '{не json}')
+    expect(error).toContain('JSON не разбирается')
+    expect(next).toBe(template)
+  })
+
+  it('массив вместо объекта отвергается', () => {
+    const { error } = setDatasetSpec(template, 'prices', 'rest', '[1,2]')
+    expect(error).toContain('JSON-объект')
   })
 })

@@ -1061,6 +1061,16 @@ export default {
           "type": "number",
           "description": "цель (план): в центре кольца показывается доля от цели в процентах"
         },
+        "goalField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "поле цели в наборе: сумма целей по строкам заменяет target (у sankey targetField — целевой узел, поэтому имя другое)"
+        },
+        "referenceField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "поле опорной линии по каждой категории (bar): свой план у каждой полосы"
+        },
         "semi": {
           "type": "boolean",
           "description": "для gauge: полукольцо 180° вместо полного"
@@ -1169,6 +1179,10 @@ export default {
           "type": "string",
           "minLength": 1
         },
+        "forDataKey": {
+          "type": "string",
+          "description": "набор, серии которого фильтруются кликом по маркеру"
+        },
         "items": {
           "type": "array",
           "minItems": 1,
@@ -1193,6 +1207,10 @@ export default {
                   "line",
                   "circle"
                 ]
+              },
+              "series": {
+                "type": "string",
+                "description": "имя серии для фильтрации, если отличается от подписи"
               }
             }
           }

@@ -3349,3 +3349,66 @@ test('дашборд: легенда, кольцо с целью и полукр
   expect(semi.start).toBe(180)
   expect(semi.end).toBe(0)
 })
+
+test('панель наборов правит REST и join как JSON (ADR-161)', async ({ page }) => {
+  await page.goto('/reports/admin.html')
+  await page.waitForTimeout(1500)
+  // выбираем шаблон с REST и join
+  await page.getByText('sales-crm', { exact: false }).first().click()
+  await page.waitForTimeout(1200)
+  await page.getByRole('button', { name: /Наборы данных/ }).click()
+  await page.waitForSelector('.sql-panel', { timeout: 10000 })
+
+  // в списке есть все три вида
+  const kinds = await page.locator('.sql-item').allInnerTexts()
+  expect(kinds.join(' ')).toContain('rest')
+  expect(kinds.join(' ')).toContain('join')
+
+  // REST-набор открывается как JSON-секция
+  await page.locator('.sql-item', { hasText: 'regions' }).click()
+  await page.waitForTimeout(600)
+  const text = await page.evaluate(() => {
+    const el = document.querySelector('.sql-editor .cm-content')
+    return el ? el.innerText : ''
+  })
+  expect(text).toContain('path')
+  expect(text).toContain('/api/regions')
+  // кнопка проверки SQL скрыта, подсказка объясняет тип
+  expect(await page.getByRole('button', { name: /Проверить SQL/ }).count()).toBe(0)
+  expect(await page.locator('.sql-side').innerText()).toContain('JSON-секция rest')
+})
+
+test('цель по категориям и интерактивная легенда (ADR-161)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=production-dashboard')
+  await page.waitForSelector('.kpi', { timeout: 30000 })
+  await page.waitForTimeout(2000)
+
+  // у каждой полосы своя опорная линия из поля набора
+  const refPoints = await page.evaluate(() => {
+    const chart = (window.__charts || []).find((c) => c.block?.referenceField)
+    if (!chart) return -1
+    const s = (chart.instance.getOption().series || [])[0] || {}
+    return (s.markLine?.data || []).length
+  })
+  expect(refPoints).toBe(5)
+
+  // клик по маркеру легенды скрывает полосу
+  const visibleBars = () =>
+    page.evaluate(() => {
+      const chart = (window.__charts || []).find(
+        (c) => c.block?.dataKey === 'by_region' && c.block?.orientation === 'horizontal'
+      )
+      const data = (chart.instance.getOption().series || [])[0]?.data || []
+      return data.filter((v) => v !== null && v !== undefined && !(v && v.value === null)).length
+    })
+  const before = await visibleBars()
+  await page.locator('.legend-item', { hasText: 'Восток' }).click()
+  await page.waitForTimeout(800)
+  const after = await visibleBars()
+  expect(after).toBe(before - 1)
+  expect(await page.locator('.legend-item.hidden').count()).toBe(1)
+  // повторный клик возвращает полосу
+  await page.locator('.legend-item', { hasText: 'Восток' }).click()
+  await page.waitForTimeout(800)
+  expect(await visibleBars()).toBe(before)
+})

@@ -81,7 +81,7 @@
         "to": "$to",
         "region": "$region"
       },
-      "sql": "SELECT s.region, round(sum(s.amount)/1000.0, 0) AS amount, round(sum(s.qty), 0) AS qty FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region,'')::int)  AND s.region IS NOT NULL GROUP BY s.region ORDER BY 2 DESC"
+      "sql": "SELECT s.region, round(sum(s.amount)/1000.0, 0) AS amount, round(sum(s.amount)/1000.0*1.03, 0) AS plan, round(sum(s.qty), 0) AS qty FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region,'')::int) AND s.region IS NOT NULL GROUP BY s.region ORDER BY 2 DESC"
     },
     "days": {
       "connection": "main",
@@ -122,31 +122,32 @@
       "card": true,
       "items": [
         {
-          "label": "план / норматив",
-          "color": "#c62828",
-          "shape": "line"
-        },
-        {
-          "label": "факт",
+          "label": "Восток",
           "color": "#1a4fa0",
-          "shape": "square"
+          "shape": "circle"
         },
         {
-          "label": "в пределах нормы",
+          "label": "Центр",
           "color": "#2e7d32",
           "shape": "circle"
         },
         {
-          "label": "отклонение хуже плана",
-          "color": "#b42318",
+          "label": "Запад",
+          "color": "#f9a825",
           "shape": "circle"
         },
         {
-          "label": "тренд по дням",
-          "color": "#6ea8fe",
-          "shape": "line"
+          "label": "Юг",
+          "color": "#8c1f1f",
+          "shape": "circle"
+        },
+        {
+          "label": "Север",
+          "color": "#4f8ef7",
+          "shape": "circle"
         }
-      ]
+      ],
+      "forDataKey": "by_region"
     },
     {
       "type": "kpi",
@@ -215,17 +216,13 @@
       "dataKey": "by_region",
       "span": 7,
       "height": 320,
-      "title": "Продажи по регионам, тыс. руб. (плановая линия)",
+      "title": "Продажи по регионам, тыс. руб. (свой план у каждого региона)",
       "xField": "region",
       "yField": "amount",
       "aggregate": "sum",
       "showValues": true,
-      "reference": {
-        "value": 270000,
-        "label": "план 270 000",
-        "color": "#c62828"
-      },
-      "card": true
+      "card": true,
+      "referenceField": "plan"
     },
     {
       "type": "chart",
@@ -338,7 +335,8 @@
       "yField": "amount",
       "aggregate": "sum",
       "donut": true,
-      "target": 1400000
+      "target": 1400000,
+      "goalField": "plan"
     },
     {
       "type": "chart",

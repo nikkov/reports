@@ -1,6 +1,6 @@
-// Работа с многострочным SQL в редакторе шаблонов (ADR-134).
-// Панель «Наборы данных» правит datasets.<key>.sql как обычный текст, а в JSON-документ
-// значение возвращается одним полем — экранирование делает JSON.stringify.
+// Панель «Наборы данных» в редакторе шаблонов (ADR-134, расширена в ADR-161).
+// SQL-набор правится обычным текстом, REST и join — секцией JSON: у них нет поля sql,
+// и правка «через JSON шаблона целиком» была единственным способом.
 
 // Список наборов для боковой панели: ключ, вид и текущий SQL.
 export function listDatasets(template) {
@@ -13,10 +13,23 @@ export function listDatasets(template) {
   })
 }
 
-// Наборы для SQL-панели: REST и join-источники не показываем — в них нет поля sql,
-// и редактировать нечего (ADR-138).
+// Наборы только с SQL — оставлено для совместимости вызовов и тестов.
 export function listSqlDatasets(template) {
   return listDatasets(template).filter((d) => d.kind === 'sql')
+}
+
+// Что панель показывает в редакторе: всё, что можно править осмысленно.
+export function listEditableDatasets(template) {
+  return listDatasets(template)
+}
+
+// Текст для редактора: SQL как есть, rest/join — отформатированная JSON-секция.
+export function datasetSpec(template, key) {
+  const ds = template && template.datasets ? template.datasets[key] : null
+  if (!ds) return { kind: '', text: '' }
+  if (ds.rest) return { kind: 'rest', text: JSON.stringify(ds.rest, null, 2) }
+  if (ds.join) return { kind: 'join', text: JSON.stringify(ds.join, null, 2) }
+  return { kind: 'sql', text: typeof ds.sql === 'string' ? ds.sql : '' }
 }
 
 // Записать SQL набора в шаблон. Остальные поля набора и остальные наборы не меняются.
@@ -28,8 +41,28 @@ export function setDatasetSql(template, key, sql) {
   return next
 }
 
-// Число строк в SQL и признак того, что запрос действительно многострочный —
-// подсказка в панели, чтобы автор видел, что переносы сохранены.
+// Записать секцию rest/join из JSON-текста. Ошибка разбора возвращается как {error},
+// шаблон при этом не меняется — автор видит, что именно не так.
+export function setDatasetSpec(template, key, kind, text) {
+  if (!template || !template.datasets || !template.datasets[key]) {
+    return { template, error: `набор «${key}» не найден` }
+  }
+  if (kind !== 'rest' && kind !== 'join') return { template, error: `вид «${kind}» не редактируется как JSON` }
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch (e) {
+    return { template, error: `JSON не разбирается: ${e.message}` }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { template, error: 'ожидался JSON-объект' }
+  }
+  const next = { ...template, datasets: { ...template.datasets } }
+  next.datasets[key] = { ...next.datasets[key], [kind]: parsed }
+  return { template: next, error: null }
+}
+
+// Число строк и признак многострочности — подсказка в панели.
 export function sqlInfo(sql) {
   const text = typeof sql === 'string' ? sql : ''
   const lines = text.split('\n')

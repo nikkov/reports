@@ -15,6 +15,7 @@
 // Блок диаграммы (Ф3): данные берутся из того же движка агрегации, что и таблица.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { themeColors } from '../theme/index.js'
+import { hiddenLabels } from './legendFilter.js'
 import * as echarts from 'echarts'
 import RU from 'echarts/i18n/langRU'
 import { aggregateSeries } from '../engine/group.js'
@@ -44,6 +45,8 @@ const textStyle = () => {
 // Цвет и подпись разрешаются здесь один раз — их читают и график, и подпись под ним.
 // ECharts не понимает var(--rep-*): цвета читаем из CSS при построении опций (ADR-156)
 const cssColors = ref(themeColors())
+// серии, скрытые кликом по легенде (ADR-161): имя серии = подпись маркера
+const hiddenNames = computed(() => hiddenLabels(props.block.dataKey))
 const BAND_DEFAULT_COLORS = computed(() => [
   cssColors.value.ok,
   cssColors.value.accent,
@@ -285,7 +288,11 @@ function buildOption() {
     const centerValue = props.block.centerField && props.rows?.length
       ? Number(props.rows[0][props.block.centerField])
       : total
-    const target = Number(props.block.target)
+    // цель может быть константой (target) или полем набора (targetField): у каждого региона свой план
+    const targetFromField = props.block.goalField
+      ? (props.rows || []).reduce((acc, r) => acc + (Number(r[props.block.goalField]) || 0), 0)
+      : null
+    const target = targetFromField !== null ? targetFromField : Number(props.block.target)
     const centerText = Number.isFinite(centerValue) ? fmt(centerValue) : ''
     const centerSub = Number.isFinite(target) && target > 0 && Number.isFinite(centerValue)
       ? `${(centerValue / target * 100).toFixed(1)}% от цели`
@@ -328,7 +335,9 @@ function buildOption() {
         {
           type: 'pie',
           radius: donut ? ['52%', '74%'] : ['35%', '65%'],
-          data: categories.map((name, i) => ({ name, value: first.data[i] })),
+          data: categories
+            .map((name, i) => ({ name, value: first.data[i] }))
+            .filter((d) => !hiddenNames.value.includes(d.name)),
           // у кольца подписи секторов убираем: место в центре занято числом и долей от цели,
           // расшифровка цветов — в легенде под графиком (ADR-160)
           label: donut
@@ -373,6 +382,17 @@ function buildOption() {
   const refValue = typeof reference === 'number' ? reference : reference?.value
   const refLabel = (typeof reference === 'object' && reference?.label) || ''
   const refColor = (typeof reference === 'object' && reference?.color) || 'var(--rep-danger)'
+  // Свой план у каждой полосы (ADR-161): опорные точки берутся из поля набора по категориям.
+  const refField = props.block.referenceField
+  const refPoints = refField
+    ? categories
+        .map((name, i) => {
+          const src = (props.rows || []).find((r) => String(r[props.block.xField]) === String(name))
+          const value = src ? Number(src[refField]) : NaN
+          return Number.isFinite(value) ? { name, value } : null
+        })
+        .filter(Boolean)
+    : []
 
   const axisCategory = {
     type: 'category',
@@ -392,12 +412,16 @@ function buildOption() {
     xAxis: horizontal ? axisValue : axisCategory,
     yAxis: horizontal ? axisCategory : axisValue,
     textStyle: textStyle(),
-    series: series.map((s) => ({
+    series: series.filter((s) => !hiddenNames.value.includes(s.name)).map((s) => ({
       name: s.name,
       // ECharts не знает типа «area»: это линия с заливкой до оси
       type: props.block.chartType === 'area' ? 'line' : props.block.chartType,
       areaStyle: props.block.chartType === 'area' ? { opacity: 0.25 } : undefined,
-      data: s.data,
+      // скрытая легендой категория превращается в пропуск: так можно гасить и полосы,
+      // когда серия одна, а маркеры легенды соответствуют категориям (ADR-161)
+      data: s.data.map((v, i) =>
+        hiddenNames.value.includes(String(categories[i])) ? null : v
+      ),
       smooth: props.block.smooth === true,
       barMaxWidth: horizontal ? 22 : 42,
       symbolSize: props.block.chartType === 'scatter' ? 9 : undefined,
@@ -407,8 +431,18 @@ function buildOption() {
         horizontal && props.block.showValues === true
           ? { show: true, position: 'right', formatter: (p) => fmt(p.value), color: textStyle()?.color }
           : undefined,
-      markLine:
-        Number.isFinite(Number(refValue)) && refValue !== null && refValue !== undefined
+      markLine: refPoints.length
+        ? {
+            // у каждой категории своя цель: для горизонтальных полос — отметка по оси значений
+            symbol: 'none',
+            silent: true,
+            lineStyle: { color: refColor, type: 'dashed', width: 1.5 },
+            label: { formatter: (p) => fmt(p.value), color: refColor, position: 'end' },
+            data: refPoints
+              .filter((p) => !hiddenNames.value.includes(String(p.name)))
+              .map((p) => (horizontal ? { yAxis: p.name, xAxis: p.value } : { xAxis: p.name, yAxis: p.value }))
+          }
+        : Number.isFinite(Number(refValue)) && refValue !== null && refValue !== undefined
           ? {
               symbol: 'none',
               silent: true,
@@ -484,6 +518,8 @@ onMounted(async () => {
 })
 
 watch(() => [props.rows, props.block], render, { deep: false })
+// клик по легенде меняет набор видимых серий — перерисовываем
+watch(hiddenNames, render)
 
 onBeforeUnmount(() => {
   window.removeEventListener('rep:theme', onThemeChange)

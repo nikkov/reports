@@ -3,7 +3,15 @@
   <div class="legend-block" :class="{ carded: block.card === true }">
     <span v-if="block.title" class="legend-title">{{ block.title }}</span>
     <ul class="legend-items">
-      <li v-for="(item, i) in items" :key="i" class="legend-item">
+      <li
+        v-for="(item, i) in items"
+        :key="i"
+        class="legend-item"
+        :class="{ hidden: isHidden(item) }"
+        :role="forDataKey ? 'button' : undefined"
+        :title="forDataKey ? 'Показать или скрыть на графиках' : undefined"
+        @click="onClick(item)"
+      >
         <span class="marker" :class="`shape-${item.shape || 'square'}`" :style="{ background: colorOf(item) }"></span>
         <span class="legend-label">{{ item.label }}</span>
       </li>
@@ -13,10 +21,19 @@
 
 <script setup>
 import { computed } from 'vue'
+import { isLegendHidden, toggleLegend } from './legendFilter.js'
 
 const props = defineProps({
   block: { type: Object, required: true }
 })
+
+// Клик по маркеру скрывает серию с тем же именем на графиках набора (ADR-161).
+const forDataKey = computed(() => props.block.forDataKey || '')
+const isHidden = (item) => forDataKey.value && isLegendHidden(forDataKey.value, item.label)
+function onClick(item) {
+  if (!forDataKey.value) return
+  toggleLegend(forDataKey.value, item.label)
+}
 
 const FALLBACK = ['var(--rep-ok)', 'var(--rep-accent)', 'var(--rep-danger)', 'var(--rep-warn)']
 const items = computed(() => (Array.isArray(props.block.items) ? props.block.items : []))
@@ -58,6 +75,17 @@ const colorOf = (item, index) => item.color || FALLBACK[index % FALLBACK.length]
   gap: 6px;
   font-size: 12px;
   color: var(--rep-text-muted);
+  user-select: none;
+}
+.legend-item[role='button'] {
+  cursor: pointer;
+}
+.legend-item[role='button']:hover {
+  color: var(--rep-text);
+}
+.legend-item.hidden {
+  opacity: 0.4;
+  text-decoration: line-through;
 }
 .marker {
   display: inline-block;

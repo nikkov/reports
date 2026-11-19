@@ -196,7 +196,7 @@
           >
             {{ d.key }}<span class="muted"> · {{ d.kind }}</span>
           </button>
-          <p v-if="!sqlDatasets.length" class="muted">в шаблоне нет SQL-наборов (REST не редактируется)</p>
+          <p v-if="!sqlDatasets.length" class="muted">в шаблоне нет наборов данных</p>
         </div>
         <div
           class="sql-col-resizer"
@@ -221,11 +221,20 @@
           </div>
           <div class="sql-actions">
             <button class="btn primary" type="button" :disabled="!sqlKey || !canEdit" @click="applySql">
-              Применить SQL в шаблон
+              {{ sqlKind === 'sql' ? 'Применить SQL в шаблон' : 'Применить в шаблон' }}
             </button>
-            <button class="btn" type="button" :disabled="!sqlKey || sqlChecking" @click="checkSqlNow">
+            <button
+              v-if="sqlKind === 'sql'"
+              class="btn"
+              type="button"
+              :disabled="!sqlKey || sqlChecking"
+              @click="checkSqlNow"
+            >
               {{ sqlChecking ? 'Проверяю…' : 'Проверить SQL' }}
             </button>
+            <span v-if="sqlKind !== 'sql'" class="muted">
+              набор типа {{ sqlKind }} — правьте секцию JSON, проверка SQL неприменима
+            </span>
             <span v-if="sqlNote" class="muted">{{ sqlNote }}</span>
           </div>
           <div v-if="sqlCheck" class="sql-check">
@@ -352,7 +361,7 @@ import { EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { StreamLanguage } from '@codemirror/language'
-import { listSqlDatasets, setDatasetSql, sqlInfo } from './datasetSql.js'
+import { datasetSpec, listEditableDatasets, setDatasetSql, setDatasetSpec, sqlInfo } from './datasetSql.js'
 import { resolveDefaultValue } from '../template/dates.js'
 import { json, jsonParseLinter } from '@codemirror/lang-json'
 import { lintGutter, linter } from '@codemirror/lint'
@@ -491,6 +500,8 @@ const errors = ref([])
 const sqlOpen = ref(false)
 const sqlKey = ref('')
 const sqlDatasets = ref([])
+// вид выбранного набора: sql правится как текст, rest/join — как JSON-секция (ADR-161)
+const sqlKind = ref('sql')
 const sqlNote = ref('')
 const sqlHint = ref('')
 const sqlHost = ref(null)
@@ -601,26 +612,36 @@ function refreshCheckParams() {
 function refreshSqlDatasets() {
   refreshCheckParams()
   const tpl = parseTemplateText()
-  sqlDatasets.value = listSqlDatasets(tpl)
+  // панель правит все виды наборов: SQL — как текст, rest/join — как JSON-секцию (ADR-161)
+  sqlDatasets.value = listEditableDatasets(tpl)
   const current = sqlDatasets.value.find((d) => d.key === sqlKey.value)
   if (current) {
-    setSqlDoc(current.sql)
-    const info = sqlInfo(current.sql)
-    sqlHint.value = `строк: ${info.lines}, символов: ${info.chars}`
+    const spec = datasetSpec(tpl, current.key)
+    setSqlDoc(spec.text)
+    sqlHint.value = hintFor(current.kind, spec.text)
   } else if (sqlDatasets.value.length) {
     pickDataset(sqlDatasets.value[0].key)
   }
 }
 
+// Подсказка под редактором зависит от вида набора.
+function hintFor(kind, text) {
+  if (kind === 'sql') {
+    const info = sqlInfo(text)
+    return `SQL: строк ${info.lines}, символов ${info.chars}`
+  }
+  const lines = String(text || '').split('\n').length
+  return `JSON-секция ${kind}: ${lines} строк — правьте запрос, заголовки и тело здесь, а не в общем JSON`
+}
+
 function pickDataset(key) {
   const ds = sqlDatasets.value.find((d) => d.key === key)
   sqlKey.value = key
+  sqlKind.value = ds ? ds.kind : 'sql'
   sqlCheck.value = null // другой набор — прежний результат неактуален
-  setSqlDoc(ds ? ds.sql : '')
-  const info = sqlInfo(ds ? ds.sql : '')
-  sqlHint.value = ds && ds.kind !== 'sql'
-    ? `набор типа ${ds.kind}: поле sql не используется`
-    : `строк: ${info.lines}, символов: ${info.chars}`
+  const spec = datasetSpec(parseTemplateText(), key)
+  setSqlDoc(spec.text)
+  sqlHint.value = hintFor(spec.kind, spec.text)
   sqlNote.value = ''
 }
 
@@ -699,15 +720,27 @@ function applySql() {
     return
   }
   if (!sqlView) return
-  const sql = sqlView.state.doc.toString()
-  const next = setDatasetSql(tpl, sqlKey.value, sql)
+  const editorText = sqlView.state.doc.toString()
+  let next = tpl
+  if (sqlKind.value === 'sql') {
+    next = setDatasetSql(tpl, sqlKey.value, editorText)
+  } else {
+    const res = setDatasetSpec(tpl, sqlKey.value, sqlKind.value, editorText)
+    if (res.error) {
+      sqlNote.value = res.error
+      return
+    }
+    next = res.template
+  }
   const pretty = JSON.stringify(next, null, 2)
   setDoc(pretty)
   text.value = pretty
   errors.value = []
-  const info = sqlInfo(sql)
-  sqlHint.value = `строк: ${info.lines}, символов: ${info.chars}`
-  sqlNote.value = `SQL набора «${sqlKey.value}» перенесён в шаблон (${info.lines} строк)`
+  sqlHint.value = hintFor(sqlKind.value, editorText)
+  const lines = String(editorText || '').split('\n').length
+  sqlNote.value = sqlKind.value === 'sql'
+    ? `SQL набора «${sqlKey.value}» перенесён в шаблон (${lines} строк)`
+    : `Секция ${sqlKind.value} набора «${sqlKey.value}» перенесена в шаблон`
 }
 
 // Показать место ошибки в тексте: ищем последний сегмент пути (blocks.0.span → "span")
