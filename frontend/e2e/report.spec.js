@@ -3488,3 +3488,26 @@ test('KPI-группа в одном блоке и киоск-режим (ADR-16
   expect(await page.locator('.head').isVisible()).toBe(false)
   expect(await page.locator('.tools').first().isVisible().catch(() => false)).toBe(false)
 })
+
+test('переключатель темы — только иконка в правой части шапки (ADR-165)', async ({ page }) => {
+  for (const url of ['/reports/', '/reports/report.html?report=production-dashboard', '/reports/admin.html']) {
+    await page.goto(url)
+    await page.waitForSelector('.theme-toggle', { timeout: 20000 })
+    await page.waitForTimeout(600)
+    const info = await page.evaluate(() => {
+      const btn = document.querySelector('.theme-toggle')
+      const rect = btn.getBoundingClientRect()
+      const ref =
+        btn.parentElement.className === 'theme-slot' ? btn.parentElement : btn.closest('header') || document.body
+      return {
+        text: btn.textContent.trim(),
+        width: Math.round(rect.width),
+        rightGap: Math.round(ref.getBoundingClientRect().right - rect.right)
+      }
+    })
+    // текста нет — только символ иконки
+    expect(info.text.length).toBeLessThanOrEqual(2)
+    expect(info.width).toBeLessThanOrEqual(40)
+    expect(info.rightGap).toBeLessThanOrEqual(24)
+  }
+})

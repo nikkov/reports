@@ -1,7 +1,6 @@
 <template>
   <div class="page">
     <header class="head">
-      <ThemeToggle />
       <div>
         <h1>Сервер отчётов</h1>
         <p class="sub">
@@ -12,6 +11,7 @@
         <input v-model="query" type="search" placeholder="Поиск по названию, описанию, тегу" />
         <span class="count">{{ pageItems.length }} из {{ total }}</span>
       </div>
+      <ThemeToggle />
     </header>
 
     <div class="catalog">

@@ -1,6 +1,6 @@
 <template>
   <div class="audit">
-    <ThemeToggle />
+    <div class="theme-slot"><ThemeToggle /></div>
     <h1>Журнал действий</h1>
     <p class="muted">
       Кто и когда публиковал шаблоны, менял роли, отправлял рассылку. Записи только добавляются —
@@ -268,5 +268,9 @@ select {
 }
 .more {
   margin-top: 12px;
+}
+.theme-slot {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

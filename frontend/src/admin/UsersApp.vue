@@ -1,6 +1,6 @@
 <template>
   <div class="users">
-    <ThemeToggle />
+    <div class="theme-slot"><ThemeToggle /></div>
     <h1>Пользователи</h1>
     <p class="muted">
       Роли: <b>viewer</b> — читает отчёты, <b>author</b> — создаёт и правит черновики,
@@ -441,5 +441,9 @@ td.roles {
   gap: 4px;
   font-size: 12px;
   white-space: nowrap;
+}
+.theme-slot {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

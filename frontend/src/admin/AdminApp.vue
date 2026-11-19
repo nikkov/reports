@@ -85,7 +85,6 @@
 
     <main class="main">
       <header class="head">
-        <ThemeToggle />
         <div class="head-title">
           <h2>{{ docTitle || currentId || 'Новый отчёт' }}</h2>
           <p class="head-meta">
@@ -129,6 +128,7 @@
             {{ historyOpen ? 'Скрыть историю' : 'История' }}
           </button>
         </div>
+        <ThemeToggle />
       </header>
 
       <div class="statusbar">
@@ -1563,6 +1563,11 @@ body {
 }
 * {
   box-sizing: border-box;
+}
+
+/* переключатель темы — самая правая кнопка шапки (ADR-156) */
+.head > .theme-toggle {
+  margin-left: auto;
 }
 
 /* CodeMirror рисует собственные фоны мимо токенов: в тёмной теме выравниваем (ADR-156) */

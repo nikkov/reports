@@ -1,4 +1,5 @@
 <template>
+  <!-- Переключатель темы (ADR-156): только иконка, стоит в правой части шапки -->
   <button
     class="theme-toggle"
     type="button"
@@ -7,8 +8,7 @@
     :aria-pressed="isDark ? 'true' : 'false'"
     @click="toggle"
   >
-    <span aria-hidden="true">{{ isDark ? '☀' : '☾' }}</span>
-    <span class="label">{{ isDark ? 'Светлая' : 'Тёмная' }}</span>
+    <span class="icon" aria-hidden="true">{{ isDark ? '☀' : '☾' }}</span>
   </button>
 </template>
 
@@ -39,10 +39,13 @@ onBeforeUnmount(() => window.removeEventListener('rep:theme', sync))
 .theme-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   font: inherit;
-  font-size: 12px;
+  font-size: 15px;
+  line-height: 1;
   color: var(--rep-text-muted);
   background: var(--rep-surface);
   border: 1px solid var(--rep-border);
@@ -56,6 +59,9 @@ onBeforeUnmount(() => window.removeEventListener('rep:theme', sync))
 .theme-toggle:focus-visible {
   outline: 2px solid var(--rep-focus);
   outline-offset: 1px;
+}
+.icon {
+  pointer-events: none;
 }
 @media print {
   .theme-toggle {

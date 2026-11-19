@@ -4,7 +4,6 @@
     <header class="head">
       <h1>{{ template?.title || reportId }}</h1>
       <div class="head-right">
-        <ThemeToggle />
         <span class="loader" v-if="loading">загрузка…</span>
         <span class="meta" v-if="status">
           строк: <b>{{ rowCount }}</b> · запрос: <b>{{ elapsedMs }} мс</b> · шаблон v{{ template?.version }}
@@ -28,6 +27,7 @@
             {{ printing ? 'Готовим печать…' : 'Печать / PDF' }}
           </button>
         </div>
+        <ThemeToggle />
       </div>
     </header>
 
@@ -676,6 +676,8 @@ mark.find-hit.active {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  /* шапка прижата вправо, переключатель темы — самая правая кнопка */
+  margin-left: auto;
 }
 .tools {
   display: flex;
