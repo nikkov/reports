@@ -298,7 +298,13 @@
         <h3>Новый отчёт</h3>
         <label>
           id
-          <input v-model.trim="form.id" ref="createIdInput" placeholder="sales-q1" autocomplete="off" />
+          <input
+            v-model.trim="form.id"
+            ref="createIdInput"
+            placeholder="sales-q1"
+            autocomplete="off"
+            @input="normalizeId"
+          />
         </label>
         <label>
           Название
@@ -323,7 +329,7 @@
         <h3>Сохранить как новый отчёт</h3>
         <label>
           Новый id
-          <input v-model.trim="form.id" placeholder="my-report-copy" autocomplete="off" />
+          <input v-model.trim="form.id" placeholder="my-report-copy" autocomplete="off" @input="normalizeId" />
         </label>
         <label>
           Название
@@ -347,7 +353,13 @@
           Текущая версия попадёт в историю. Чтобы подтвердить, введите id отчёта:
           <code>{{ deleteTarget?.id }}</code>
         </p>
-        <input v-model.trim="form.id" placeholder="id отчёта" autocomplete="off" :data-expected="deleteTarget?.id" />
+        <input
+          v-model.trim="form.id"
+          placeholder="id отчёта"
+          autocomplete="off"
+          :data-expected="deleteTarget?.id"
+          @input="normalizeId"
+        />
         <p v-if="form.error" class="banner err">{{ form.error }}</p>
         <div class="dialog-actions">
           <button type="button" class="btn" @click="closeModal">Отмена</button>
@@ -1279,6 +1291,13 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+// id отчёта — только строчная латиница (сервер проверяет ^[a-z][a-z0-9-]*$).
+// Ввод в верхнем регистре приводим к нижнему сразу, чтобы автор не получал ошибку (ADR-167).
+function normalizeId() {
+  const lower = (form.id || '').toLowerCase()
+  if (lower !== form.id) form.id = lower
 }
 
 function openCreate() {

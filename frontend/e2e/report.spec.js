@@ -3539,3 +3539,17 @@ test('план по каждому сектору кольца и легенда
   expect(legend.bottom).not.toBeNull()
   expect(legend.top).toBeNull()
 })
+
+test('id нового отчёта приводится к нижнему регистру без ошибки (ADR-167)', async ({ page }) => {
+  await page.goto('/reports/admin.html')
+  await page.waitForTimeout(1500)
+  await page.getByRole('button', { name: 'Создать', exact: true }).first().click()
+  const input = page.locator('input[placeholder="sales-q1"]')
+  await input.waitFor({ timeout: 10000 })
+  await input.click()
+  await input.type('UpperCase-ID')
+  await page.waitForTimeout(200)
+  expect(await input.inputValue()).toBe('uppercase-id')
+  const errs = await page.locator('.banner.err, .form-error').allInnerTexts().catch(() => [])
+  expect(errs.join(' ')).not.toMatch(/Недопустимый id/i)
+})
