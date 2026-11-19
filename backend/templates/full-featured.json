@@ -193,6 +193,59 @@
     "regions_ref": {
       "connection": "main",
       "sql": "SELECT id, name FROM reports_examples.regions ORDER BY id"
+    },
+    "sales_styled": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region",
+        "category": "$category",
+        "scope": "$scope"
+      },
+      "sql": "SELECT s.region, s.category, s.product, sum(s.amount) AS amount, sum(s.profit) AS profit, sum(s.qty) AS qty FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region, '')::int) AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND (:scope <> 'profit_only' OR s.profit > 0) GROUP BY s.region, s.category, s.product ORDER BY s.region, s.category, s.product",
+      "styles": {
+        "font": {
+          "family": "Georgia",
+          "size": 13,
+          "lineHeight": 1.5
+        },
+        "layout": {
+          "rowHeight": 30,
+          "headerHeight": 34,
+          "zebra": true,
+          "stripeColor": "#f2f6ff",
+          "borders": "grid",
+          "cellPadding": "4px 10px"
+        },
+        "header": {
+          "font": {
+            "weight": 700
+          },
+          "colors": {
+            "background": "#14532d",
+            "text": "#ffffff"
+          }
+        },
+        "subtotal": {
+          "font": {
+            "weight": 600
+          },
+          "colors": {
+            "background": "#eaf5ee",
+            "text": "#14532d"
+          }
+        },
+        "grandtotal": {
+          "font": {
+            "weight": 700
+          },
+          "colors": {
+            "background": "#dbe6f7",
+            "text": "#12324f"
+          }
+        }
+      }
     }
   },
   "blocks": [
@@ -200,7 +253,7 @@
       "type": "text",
       "span": 12,
       "dataKey": "summary",
-      "text": "**Всё в одном.** За период {{from}} — {{to}}, регион {{region}}: строк {{data.lines}}, сумма {{data.total}}, прибыль {{data.profit}}, последняя продажа {{data.last_day}}. Дальше — таблица с группировкой, правилами и drill, план/факт через join двух наборов и все виды диаграмм. Документация: [справка по шаблонам](docs/template-reference.md)."
+      "text": "Всё в одном. За период {{from}} — {{to}}, регион {{region}}: строк {{data.lines}}, сумма {{data.total}}, прибыль {{data.profit}}, последняя продажа {{data.last_day}}. Дальше — таблица с группировкой, правилами и drill, план/факт через join двух наборов и все виды диаграмм. Документация: [справка по шаблонам](docs/template-reference.md)."
     },
     {
       "type": "table",
@@ -456,6 +509,331 @@
           "highField": "high",
           "name": "±10% к среднему дню",
           "color": "#2e7d32"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Варианты оформления. Одна и та же таблица в разных стилях. Слои применяются по порядку: пресет → `styles` набора → `styles` блока → `styles` колонки. Пресеты: `default`, `compact`, `print`, `dark`. Ниже — компактный с зеброй и горизонтальными линиями, стили набора со своим шрифтом и шапкой, блок, перекрывающий набор, и таблица без границ с фиксированными ширинами."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 6,
+      "title": "1. Пресет compact + зебра, только горизонтальные линии",
+      "grandTotal": true,
+      "height": 300,
+      "styles": {
+        "preset": "compact",
+        "layout": {
+          "zebra": true,
+          "borders": "horizontal",
+          "rowHeight": 22
+        }
+      },
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "align": "right"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "sales_styled",
+      "span": 6,
+      "title": "2. Стили набора: шрифт, шапка, высота строк",
+      "grandTotal": true,
+      "height": 300,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "align": "right"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "sales_styled",
+      "span": 6,
+      "title": "3. Блок перекрывает стили набора: зоны подытогов и ИТОГО",
+      "grandTotal": true,
+      "height": 300,
+      "styles": {
+        "header": {
+          "colors": {
+            "background": "#8c1f1f",
+            "text": "#ffffff"
+          },
+          "font": {
+            "weight": 700
+          }
+        },
+        "subtotal": {
+          "colors": {
+            "background": "#fdeaea",
+            "text": "#8c1f1f"
+          },
+          "font": {
+            "weight": 600
+          }
+        },
+        "grandtotal": {
+          "colors": {
+            "background": "#e8eef9",
+            "text": "#1a4fa0"
+          },
+          "font": {
+            "weight": 800
+          }
+        },
+        "layout": {
+          "borders": "grid",
+          "cellPadding": "4px 10px"
+        }
+      },
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "align": "right"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 6,
+      "title": "4. Без границ, фиксированные ширины, числа по центру",
+      "height": 300,
+      "styles": {
+        "layout": {
+          "borders": "none",
+          "tableLayout": "fixed",
+          "numericAlign": "center",
+          "cellPadding": "3px 6px"
+        },
+        "columns": {
+          "region": {
+            "width": "22%"
+          },
+          "category": {
+            "width": "24%"
+          },
+          "amount": {
+            "width": "18%"
+          },
+          "profit": {
+            "width": "18%"
+          }
+        }
+      },
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "align": "right"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 6,
+      "title": "5. Пресет print (чёрно-белая сетка для бумаги)",
+      "grandTotal": true,
+      "height": 300,
+      "styles": {
+        "preset": "print"
+      },
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "align": "right"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 6,
+      "title": "6. Пресет dark (тёмная таблица в светлой теме)",
+      "grandTotal": true,
+      "height": 300,
+      "styles": {
+        "preset": "dark"
+      },
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "align": "right"
         }
       ]
     }
