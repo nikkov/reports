@@ -1906,19 +1906,70 @@ int main() {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
             }
+            // Пагинация как в каталоге (ADR-41, ADR-163): без limit — всё, с limit — страница и total
+            const std::string limitParam = req->getParameter("limit");
+            const std::string offsetParam = req->getParameter("offset");
+            int limit = 0;
+            int offset = 0;
+            if (!limitParam.empty()) {
+                try {
+                    limit = std::stoi(limitParam);
+                } catch (...) {
+                    sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "limit должен быть числом");
+                    return;
+                }
+                if (limit < 1 || limit > 200) {
+                    sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "limit: 1…200");
+                    return;
+                }
+            }
+            if (!offsetParam.empty()) {
+                try {
+                    offset = std::stoi(offsetParam);
+                } catch (...) {
+                    sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "offset должен быть числом");
+                    return;
+                }
+                if (offset < 0) {
+                    sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "offset ≥ 0");
+                    return;
+                }
+            }
+            // count(*) OVER () даёт общее число строк в том же запросе — второй запрос не нужен
+            std::string sql = "SELECT id, title, updated_at, count(*) OVER () AS total FROM report_templates "
+                              "WHERE is_delete = true ORDER BY id";
+            std::vector<std::string> params;
+            if (limit > 0) {
+                sql += " LIMIT $1 OFFSET $2";
+                params.push_back(std::to_string(limit));
+                params.push_back(std::to_string(offset));
+            }
             runQuery(
-                db, "SELECT id, title, updated_at FROM report_templates WHERE is_delete = true ORDER BY id", {},
-                [cb](const orm::Result &res) {
+                db, sql, params,
+                [cb, limit, offset](const orm::Result &res) {
                     Json::Value items(Json::arrayValue);
+                    long long total = 0;
                     for (const auto &row : res) {
                         Json::Value item;
                         item["id"] = row["id"].as<std::string>();
                         item["title"] = row["title"].as<std::string>();
                         item["updatedAt"] = row["updated_at"].as<std::string>();
                         items.append(item);
+                        total = row["total"].as<long long>();
                     }
                     Json::Value out;
                     out["items"] = items;
+                    // total нужен и при пустой странице: считаем его отдельно, если строк не было
+                    if (limit > 0 && res.empty()) {
+                        out["total"] = 0;
+                    } else {
+                        out["total"] = Json::Int64(total);
+                    }
+                    if (limit > 0) {
+                        out["limit"] = limit;
+                        out["offset"] = offset;
+                        out["hasMore"] = offset + static_cast<int>(res.size()) < total;
+                    }
                     cb(jsonResponse(out));
                 },
                 [cb](const std::exception_ptr &e) {

@@ -29,10 +29,13 @@ const props = defineProps({
 
 // Клик по маркеру скрывает серию с тем же именем на графиках набора (ADR-161).
 const forDataKey = computed(() => props.block.forDataKey || '')
-const isHidden = (item) => forDataKey.value && isLegendHidden(forDataKey.value, item.label)
+// Ключ фильтра — имя серии (ADR-161): по умолчанию совпадает с подписью маркера,
+// а items[].series позволяет подписать маркер иначе, чем называется серия.
+const seriesKey = (item) => (item && item.series) || (item && item.label) || ''
+const isHidden = (item) => forDataKey.value && isLegendHidden(forDataKey.value, seriesKey(item))
 function onClick(item) {
   if (!forDataKey.value) return
-  toggleLegend(forDataKey.value, item.label)
+  toggleLegend(forDataKey.value, seriesKey(item))
 }
 
 const FALLBACK = ['var(--rep-ok)', 'var(--rep-accent)', 'var(--rep-danger)', 'var(--rep-warn)']

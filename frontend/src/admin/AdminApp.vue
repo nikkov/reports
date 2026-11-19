@@ -34,6 +34,18 @@
           <span class="dim">{{ d.title }}</span>
           <button type="button" class="src-reset" @click="restoreOne(d.id)">Восстановить</button>
         </div>
+        <div v-if="deletedList.length" class="deleted-foot">
+          <span class="muted">показано {{ deletedList.length }} из {{ deletedTotal }}</span>
+          <button
+            v-if="deletedHasMore"
+            type="button"
+            class="src-reset"
+            :disabled="deletedBusy"
+            @click="loadDeletedMore"
+          >
+            {{ deletedBusy ? 'загружаю…' : 'Показать ещё' }}
+          </button>
+        </div>
       </div>
 
       <p v-if="listLoading" class="muted">загрузка…</p>
@@ -376,6 +388,11 @@ const query = ref('')
 // Удалённые шаблоны (ADR-151): мягкое удаление можно отменить
 const showDeleted = ref(false)
 const deletedList = ref([])
+const deletedTotal = ref(0)
+const deletedHasMore = ref(false)
+const deletedBusy = ref(false)
+// страница списка удалённых (ADR-163): сервер отдаёт limit/offset и total
+const DELETED_PAGE = 50
 
 async function toggleDeleted() {
   showDeleted.value = !showDeleted.value
@@ -384,11 +401,29 @@ async function toggleDeleted() {
 
 async function loadDeleted() {
   try {
-    const data = await api.deletedReports()
+    const data = await api.deletedReports(DELETED_PAGE, 0)
     deletedList.value = (data && data.items) || []
+    deletedTotal.value = (data && typeof data.total === 'number') ? data.total : deletedList.value.length
+    deletedHasMore.value = !!(data && data.hasMore)
   } catch (e) {
     deletedList.value = []
+    deletedTotal.value = 0
+    deletedHasMore.value = false
     setStatus('не удалось получить удалённые: ' + e.message, 'err')
+  }
+}
+
+async function loadDeletedMore() {
+  deletedBusy.value = true
+  try {
+    const data = await api.deletedReports(DELETED_PAGE, deletedList.value.length)
+    deletedList.value = deletedList.value.concat((data && data.items) || [])
+    deletedTotal.value = (data && typeof data.total === 'number') ? data.total : deletedTotal.value
+    deletedHasMore.value = !!(data && data.hasMore)
+  } catch (e) {
+    setStatus('не удалось догрузить удалённые: ' + e.message, 'err')
+  } finally {
+    deletedBusy.value = false
   }
 }
 
@@ -2043,6 +2078,12 @@ body.resizing-horizontal {
   align-items: center;
   gap: 6px;
   margin-bottom: 3px;
+}
+.deleted-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 .deleted-item code {
   font-weight: 600;

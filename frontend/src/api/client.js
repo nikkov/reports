@@ -57,7 +57,14 @@ export const api = {
   // список источников в карантине и сброс одного из них (ADR-148)
   datasources: () => request('/api/admin/datasources'),
   // удалённые шаблоны: мягкое удаление можно отменить (ADR-151)
-  deletedReports: () => request('/api/admin/reports/deleted'),
+  // пагинация списка удалённых (ADR-163): limit без параметра — всё разом
+  deletedReports: (limit, offset) => {
+    const qs = new URLSearchParams()
+    if (limit) qs.set('limit', String(limit))
+    if (offset) qs.set('offset', String(offset))
+    const suffix = qs.toString() ? `?${qs}` : ''
+    return request(`/api/admin/reports/deleted${suffix}`)
+  },
   restoreReport: (id) =>
     request(`/api/admin/reports/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
   resetDatasource: (label) =>

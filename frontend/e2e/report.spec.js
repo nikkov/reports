@@ -3412,3 +3412,64 @@ test('цель по категориям и интерактивная леге�
   await page.waitForTimeout(800)
   expect(await visibleBars()).toBe(before)
 })
+
+test('сбой источника не роняет сервер (ADR-157, ADR-163)', async ({ request }) => {
+  const id = 'bad-source-e2e2'
+  const body = {
+    version: 2,
+    id,
+    title: 'Плохой источник',
+    params: [],
+    connections: { dead: { kind: 'postgres', host: '127.0.0.1', port: 1, user: 'nobody', passwordEnv: 'REP_RO_DB_PASSWORD', database: 'nope', sslmode: 'prefer', connectTimeout: 2 } },
+    datasets: { s: { connection: 'dead', sql: 'SELECT 1 AS x' } },
+    blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }]
+  }
+  expect((await request.post('/api/reports', { data: { id, body } })).ok()).toBeTruthy()
+
+  // запрос к мёртвому источнику: быстрый отказ, а не зависание
+  const started = Date.now()
+  const res = await request.post('/api/report/data', { data: { reportId: id, params: {} } })
+  const took = Date.now() - started
+  expect([503, 422]).toContain(res.status())
+  expect(took).toBeLessThan(8000)
+  const payload = await res.json()
+  const code = payload?.error?.code || ''
+  expect(['DB_UNAVAILABLE', 'CONNECTION_ERROR', 'SQL_TIMEOUT']).toContain(code)
+
+  // сервер жив: health отвечает, обычный отчёт по-прежнему отдаёт данные
+  expect((await request.get('/api/health')).ok()).toBeTruthy()
+  const good = await request.post('/api/report/data', { data: { reportId: 'sales-summary', params: { from: '2026-01-01', to: '2026-01-31' } } })
+  expect(good.ok()).toBeTruthy()
+
+  await request.delete(`/api/reports/${id}`)
+})
+
+test('список удалённых шаблонов постранично (ADR-163)', async ({ request }) => {
+  const ids = ['page-e2e-a', 'page-e2e-b']
+  for (const id of ids) {
+    await request.post('/api/reports', { data: { id, body: { version: 2, id, title: id, params: [], datasets: { s: { sql: 'SELECT 1 AS x' } }, blocks: [{ type: 'table', dataKey: 's', columns: [{ field: 'x', title: 'X' }] }] } } })
+    await request.delete(`/api/reports/${id}`)
+  }
+
+  const page = await (await request.get('/api/admin/reports/deleted?limit=1')).json()
+  expect(page.items.length).toBe(1)
+  expect(page.limit).toBe(1)
+  expect(page.offset).toBe(0)
+  expect(page.total).toBeGreaterThanOrEqual(2)
+  expect(page.hasMore).toBe(true)
+
+  const next = await (await request.get('/api/admin/reports/deleted?limit=1&offset=1')).json()
+  expect(next.items.length).toBe(1)
+  expect(next.items[0].id).not.toBe(page.items[0].id)
+
+  // без limit — всё разом, как раньше
+  const all = await (await request.get('/api/admin/reports/deleted')).json()
+  expect(Array.isArray(all.items)).toBe(true)
+  expect(all.limit).toBeUndefined()
+
+  // границы проверяются
+  expect((await request.get('/api/admin/reports/deleted?limit=0')).status()).toBe(422)
+  expect((await request.get('/api/admin/reports/deleted?limit=abc')).status()).toBe(422)
+
+  for (const id of ids) await request.delete(`/api/reports/${id}`)
+})
