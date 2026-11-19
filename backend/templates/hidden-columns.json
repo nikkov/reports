@@ -1,0 +1,192 @@
+{
+  "version": 2,
+  "id": "hidden-columns",
+  "title": "Скрытые колонки",
+  "description": "Колонки берутся из источника, но не выводятся: участвуют в выражениях и в серверной группировке",
+  "folder": "Примеры",
+  "tags": [
+    "пример",
+    "скрытые колонки",
+    "ADR-158"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "year(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "today(*)",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT region, category, product, customer, qty, amount, profit, order_date FROM reports_examples.sales WHERE order_date BETWEEN :from::date AND :to::date ORDER BY region NULLS LAST, category NULLS LAST, product, id"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Скрытые колонки (hidden: true) читаются из источника, но не выводятся: profit участвует в марже, customer — в серверной группировке, qty — в расчёте «штук на 1000 руб.». В первой таблице видны пять колонок из десяти, во второй — три из пяти; в Excel и CSV скрытые тоже не попадают."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 12,
+      "title": "Таблица со скрытыми колонками",
+      "grandTotal": true,
+      "collapsible": true,
+      "height": 420,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "align": "right"
+        },
+        {
+          "title": "Средний чек",
+          "expression": "avg(amount)",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль (скрыта)",
+          "hidden": true,
+          "aggregate": "sum"
+        },
+        {
+          "field": "customer",
+          "title": "Клиент (скрыт)",
+          "hidden": true
+        },
+        {
+          "field": "qty",
+          "title": "Количество (скрыто)",
+          "hidden": true,
+          "aggregate": "sum"
+        },
+        {
+          "field": "order_date",
+          "title": "Дата (скрыта)",
+          "hidden": true
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 12,
+      "title": "Скрытая колонка в серверной группировке (aggregate.groupBy)",
+      "height": 300,
+      "aggregate": {
+        "groupBy": [
+          "region",
+          "customer"
+        ],
+        "measures": [
+          {
+            "field": "amount",
+            "agg": "sum"
+          },
+          {
+            "field": "qty",
+            "agg": "sum"
+          }
+        ]
+      },
+      "detailOrder": [
+        {
+          "field": "amount",
+          "dir": "desc"
+        }
+      ],
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "customer",
+          "title": "Клиент (скрыт, но в группировке)",
+          "hidden": true
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Штук на 1000 руб.",
+          "expression": "sum(qty) * 1000 / sum(amount)",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "qty",
+          "title": "Количество (скрыто)",
+          "hidden": true,
+          "aggregate": "sum"
+        }
+      ]
+    }
+  ]
+}

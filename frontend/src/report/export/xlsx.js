@@ -10,6 +10,8 @@ import { ruleStyleFor } from '../rules.js'
 export function leafColumns(block) {
   const out = []
   const walk = (col, path) => {
+    // скрытая колонка (ADR-158): в книгу не попадает, но её значения нужны выражениям
+    if (col.hidden) return
     if (Array.isArray(col.children)) {
       for (const child of col.children) walk(child, path.concat(col.title))
       return

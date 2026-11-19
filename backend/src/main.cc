@@ -3787,6 +3787,8 @@ int main() {
         std::vector<std::size_t> groupColumns;
         std::vector<int> subtotalLevels;
         std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
+            // скрытая колонка (ADR-158) не попадает ни на экран, ни в книгу и ни в CSV
+            if (col["hidden"].asBool()) return;
             if (col["children"].isArray()) {
                 for (const auto &child : col["children"]) walk(child);
                 return;

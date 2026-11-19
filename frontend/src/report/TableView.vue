@@ -166,7 +166,10 @@ const loadedNote = computed(() => {
 // данные и агрегаты считаются только по листьям.
 const leaves = computed(() => {
   const out = []
+  // Скрытая колонка (ADR-158): значение есть в строке (по нему считаются выражения и агрегаты),
+  // но ни заголовка, ни ячейки на экране нет — поэтому в листья она не попадает.
   const walk = (col, path) => {
+    if (col.hidden) return
     if (Array.isArray(col.children)) {
       for (const child of col.children) walk(child, path.concat(col.title))
       return

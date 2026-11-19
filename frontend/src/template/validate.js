@@ -1105,6 +1105,19 @@ function checkGaugeZones(block, base, errors) {
         if (col.subtotal && !col.group) {
           errors.push({ path: cpath, message: 'подытог допустим только у групповой колонки' })
         }
+        // Скрытая колонка (ADR-158): значения берутся из источника, но на экран не попадают.
+        // Группой она быть не может: подпись группы выводится в её же ячейку, а ячейки нет.
+        if (col.hidden) {
+          if (!hasField) {
+            errors.push({ path: cpath, message: 'у скрытой колонки должен быть field: значения нужны для вычислений' })
+          }
+          if (col.group || col.subtotal) {
+            errors.push({
+              path: cpath,
+              message: 'скрытая колонка не может быть группой или подытогом — группировка выводится по видимым колонкам'
+            })
+          }
+        }
         if (!col.group && col.aggregate && !hasField) {
           errors.push({ path: cpath, message: 'агрегат требует поля field' })
         }

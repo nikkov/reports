@@ -678,6 +678,9 @@ export default {
         "subtotal": {
           "type": "boolean"
         },
+        "hidden": {
+          "type": "boolean"
+        },
         "aggregate": {
           "enum": [
             "sum",

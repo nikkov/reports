@@ -355,6 +355,68 @@
       }
     },
     {
+      "type": "text",
+      "span": 12,
+      "text": "Скрытые колонки (ADR-158): profit, customer и qty приходят из набора, но на экране их нет — они работают в выражениях «Маржа» и «Средний чек» и не попадают ни в Excel, ни в CSV."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 12,
+      "title": "Скрытые колонки: значения читаются, но не выводятся",
+      "grandTotal": true,
+      "height": 320,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "align": "right"
+        },
+        {
+          "title": "Средний чек",
+          "expression": "avg(amount)",
+          "format": "number",
+          "align": "right"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль (скрыта)",
+          "hidden": true,
+          "aggregate": "sum"
+        },
+        {
+          "field": "customer",
+          "title": "Клиент (скрыт)",
+          "hidden": true
+        },
+        {
+          "field": "qty",
+          "title": "Количество (скрыто)",
+          "hidden": true,
+          "aggregate": "sum"
+        }
+      ]
+    },
+    {
       "type": "table",
       "dataKey": "sales_plan",
       "span": 6,

@@ -3282,3 +3282,23 @@ test('тема: печать всегда светлая, независимо �
   expect(printBg.toLowerCase()).toBe('#ffffff')
   expect(screenBg.toLowerCase()).not.toBe('#ffffff')
 })
+
+test('скрытые колонки: не видны на экране и в выгрузке, но участвуют в выражениях (ADR-158)', async ({ page, request }) => {
+  await page.goto('/reports/report.html?report=hidden-columns')
+  await page.waitForSelector('.rt-table', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+  const headers = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('.blocks .rt-table thead th')).map((th) => th.innerText.trim())
+  )
+  expect(headers.join('|')).not.toContain('скрыт')
+  expect(headers).toContain('Маржа')
+  // значение скрытой колонки profit участвует в марже: в таблице есть проценты
+  expect(await page.locator('.blocks').innerText()).toMatch(/\d+[.,]\d+\s*%/)
+
+  // в CSV скрытых колонок нет, а вычисляемая «Штук на 1000 руб.» есть
+  const csv = await request.post('/api/report/export.csv', { data: { reportId: 'hidden-columns', params: { from: '2026-01-01', to: '2026-01-31' } } })
+  const text = await csv.text()
+  const header = text.split('\r\n')[0]
+  expect(header).not.toContain('скрыт')
+  expect(header).toContain('Штук на 1000 руб.')
+})
