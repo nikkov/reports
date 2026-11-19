@@ -336,11 +336,13 @@
         }
       ],
       "aggregate": {
-        "groupBy": "region",
+        "groupBy": [
+          "region"
+        ],
         "measures": [
           {
             "field": "amount",
-            "fn": "sum"
+            "agg": "sum"
           }
         ]
       }
