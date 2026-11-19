@@ -165,7 +165,8 @@ function buildOption() {
       animation: false,
       textStyle: textStyle(),
       grid: { left: 70, right: 24, top: 32, bottom: 56, containLabel: false },
-      legend: { data: ['Значение'], top: 0, right: 8, textStyle: textStyle() },
+      // легенда внизу: сверху она наезжала на заголовок блока (ADR-166)
+      legend: { data: ['Значение'], bottom: 0, left: 'center', textStyle: textStyle() },
       tooltip: {
         trigger: 'axis',
         formatter: (items) => {
@@ -283,6 +284,15 @@ function buildOption() {
   if (props.block.chartType === 'pie') {
     const first = series[0] || { data: [] }
     const donut = props.block.donut === true
+    // цель по конкретному сектору (ADR-166): берём значение goalField из строки с этой категорией
+    const goalByCategory = new Map()
+    if (props.block.goalField) {
+      for (const r of props.rows || []) {
+        const key = String(r[props.block.xField])
+        const goal = Number(r[props.block.goalField])
+        if (Number.isFinite(goal)) goalByCategory.set(key, (goalByCategory.get(key) || 0) + goal)
+      }
+    }
     const total = first.data.reduce((acc, v) => acc + (Number(v) || 0), 0)
     // Число в центре кольца (ADR-160): сумма секторов и доля от цели, если цель задана.
     const centerValue = props.block.centerField && props.rows?.length
@@ -299,7 +309,18 @@ function buildOption() {
       : ''
     return {
       animation: false,
-      tooltip: { trigger: 'item', valueFormatter: fmt },
+      tooltip: {
+        trigger: 'item',
+        formatter: (p) => {
+          const lines = [`<b>${p.name}</b>`, `значение: ${fmt(p.value)}`]
+          const goal = goalByCategory.get(String(p.name))
+          if (Number.isFinite(goal) && goal > 0) {
+            const pct = (Number(p.value) / goal) * 100
+            lines.push(`план: ${fmt(goal)}`, `выполнение: ${pct.toFixed(1)}%`)
+          }
+          return lines.join('<br/>')
+        }
+      },
       legend: { type: 'scroll', bottom: 0, textStyle: textStyle() },
       textStyle: textStyle(),
       // подпись в центре кольца: число и доля от цели рисуются graphic-слоем —

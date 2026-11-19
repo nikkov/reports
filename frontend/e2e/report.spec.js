@@ -3511,3 +3511,31 @@ test('переключатель темы — только иконка в пр�
     expect(info.rightGap).toBeLessThanOrEqual(24)
   }
 })
+
+test('план по каждому сектору кольца и легенда band внизу (ADR-166)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=production-dashboard')
+  await page.waitForSelector('.kpi', { timeout: 30000 })
+  await page.waitForTimeout(2000)
+  const tip = await page.evaluate(async () => {
+    const chart = (window.__charts || []).find((c) => c.block?.donut === true)
+    if (!chart) return ''
+    chart.instance.dispatchAction({ type: 'showTip', seriesIndex: 0, dataIndex: 0 })
+    await new Promise((r) => setTimeout(r, 350))
+    const el = chart.instance.getDom().querySelector('div[style*="position: absolute"]')
+    return el ? el.innerText : ''
+  })
+  expect(tip).toContain('план')
+  expect(tip).toContain('выполнение')
+
+  await page.goto('/reports/report.html?report=full-featured')
+  await page.waitForSelector('.rt-table', { timeout: 30000 })
+  await page.waitForTimeout(2500)
+  const legend = await page.evaluate(() => {
+    const chart = (window.__charts || []).find((c) => c.block?.chartType === 'band')
+    if (!chart) return null
+    const l = (chart.instance.getOption().legend || [])[0] || {}
+    return { bottom: l.bottom ?? null, top: l.top ?? null }
+  })
+  expect(legend.bottom).not.toBeNull()
+  expect(legend.top).toBeNull()
+})
