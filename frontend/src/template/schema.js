@@ -1239,12 +1239,64 @@ export default {
       "additionalProperties": false,
       "required": [
         "type",
-        "dataKey",
-        "valueField"
+        "dataKey"
       ],
       "properties": {
         "type": {
           "const": "kpi"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "description": "несколько показателей в одном блоке: каждая карточка со своими полями (ADR-164)",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "valueField"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "valueField": {
+                "type": "string",
+                "minLength": 1
+              },
+              "compareField": {
+                "type": "string",
+                "minLength": 1
+              },
+              "compareLabel": {
+                "type": "string",
+                "minLength": 1
+              },
+              "deltaField": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sparkField": {
+                "type": "string",
+                "minLength": 1
+              },
+              "unit": {
+                "type": "string"
+              },
+              "decimals": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 6
+              },
+              "goodWhen": {
+                "enum": [
+                  "up",
+                  "down"
+                ]
+              }
+            }
+          }
         },
         "dataKey": {
           "type": "string",

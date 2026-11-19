@@ -3473,3 +3473,18 @@ test('список удалённых шаблонов постранично (A
 
   for (const id of ids) await request.delete(`/api/reports/${id}`)
 })
+
+test('KPI-группа в одном блоке и киоск-режим (ADR-164)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=production-dashboard')
+  await page.waitForSelector('.kpi', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+  expect(await page.locator('.kpi').count()).toBe(4)
+  expect(await page.locator('.kpi-wrap.multi .kpi').count()).toBe(4)
+  expect(await page.locator('.kpi-wrap').first().innerText()).toMatch(/[▲▼]\s*\d+[.,]\d+%/)
+
+  await page.goto('/reports/report.html?report=production-dashboard&kiosk=1')
+  await page.waitForSelector('.kpi', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+  expect(await page.locator('.head').isVisible()).toBe(false)
+  expect(await page.locator('.tools').first().isVisible().catch(() => false)).toBe(false)
+})

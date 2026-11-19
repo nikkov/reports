@@ -1182,7 +1182,20 @@ function checkGaugeZones(block, base, errors) {
           errors.push({ path: `${base}.${field}`, message: `KPI-карточке нужно поле ${field}` })
         }
       }
-      needField('valueField')
+      // Либо одна карточка (valueField), либо список показателей items[] (ADR-164)
+      const hasItems = Array.isArray(block.items) && block.items.length > 0
+      if (hasItems) {
+        block.items.forEach((item, i) => {
+          if (!item || typeof item !== 'object' || typeof item.valueField !== 'string' || !item.valueField) {
+            errors.push({ path: `${base}.items.${i}.valueField`, message: 'у показателя нужно поле valueField' })
+          }
+        })
+        if (block.valueField) {
+          warnings.push({ path: `${base}.valueField`, message: 'valueField блока игнорируется: задан items[]' })
+        }
+      } else {
+        needField('valueField')
+      }
       if (block.deltaField && !block.compareField) {
         warnings.push({
           path: `${base}.deltaField`,

@@ -405,7 +405,7 @@ function buildOption() {
   return {
     animation: false,
     grid: horizontal
-      ? { left: 110, right: 32, top: 16, bottom: 24, containLabel: false }
+      ? { left: 110, right: 96, top: 16, bottom: 24, containLabel: false }
       : { left: 90, right: 24, top: 24, bottom: 48, containLabel: false },
     tooltip: { trigger: 'axis', valueFormatter: fmt },
     legend: series.length > 1 ? { type: 'scroll', bottom: 0, textStyle: textStyle() } : undefined,
@@ -429,7 +429,13 @@ function buildOption() {
       // подписи значений у полос: без них «bullet» нечитаем
       label:
         horizontal && props.block.showValues === true
-          ? { show: true, position: 'right', formatter: (p) => fmt(p.value), color: textStyle()?.color }
+          ? {
+              show: true,
+              position: 'right',
+              distance: 6,
+              formatter: (p) => fmt(p.value),
+              color: textStyle()?.color
+            }
           : undefined,
       markLine: refPoints.length
         ? {

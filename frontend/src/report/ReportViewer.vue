@@ -1,5 +1,6 @@
 <template>
-  <div class="page">
+  <!-- Киоск (ADR-164): ?kiosk=1 убирает шапку, параметры и кнопки — табло на стене цеха -->
+  <div class="page" :class="{ kiosk: kioskMode }">
     <header class="head">
       <h1>{{ template?.title || reportId }}</h1>
       <div class="head-right">
@@ -131,6 +132,8 @@ import { drillAllowed, resolveDrill } from '../engine/drill.js'
 
 const params = new URLSearchParams(location.search)
 const reportId = params.get('report') || 'sales-summary'
+// Киоск (ADR-164): табло без шапки и органов управления; включается ссылкой ?kiosk=1
+const kioskMode = params.get('kiosk') === '1' || params.get('kiosk') === 'true'
 // Просмотр черновика (ADR-82): данные и справочники считаются по телу черновика,
 // а не по опубликованной версии. Иначе новый отчёт (опубликован каркас) падал
 // с «в шаблоне не задан datasets» и «нет source.dataset».
@@ -838,5 +841,18 @@ body {
     width: auto !important;
     margin-bottom: 16px;
   }
+}
+
+/* Киоск (ADR-164): табло на стене — только данные, без шапки и органов управления */
+.page.kiosk {
+  padding: 8px;
+}
+.page.kiosk .head,
+.page.kiosk .params,
+.page.kiosk .no-print {
+  display: none !important;
+}
+.page.kiosk .blocks {
+  gap: 10px;
 }
 </style>

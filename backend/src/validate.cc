@@ -1588,7 +1588,28 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                 } else if (!root["datasets"].isObject() || !root["datasets"].isMember(kpiKey)) {
                     addError(r, base + ".dataKey", "набор данных «" + kpiKey + "» не объявлен в datasets");
                 }
-                if (asString(block["valueField"]).empty()) {
+                // Либо одна карточка (valueField), либо список показателей items[] (ADR-164)
+                const bool hasItems = block["items"].isArray() && !block["items"].empty();
+                if (hasItems) {
+                    Json::ArrayIndex i = 0;
+                    for (const auto &item : block["items"]) {
+                        if (!item.isObject() || asString(item["valueField"]).empty()) {
+                            addError(r, base + ".items." + std::to_string(i) + ".valueField",
+                                     "у показателя нужно поле valueField");
+                        }
+                        if (item.isMember("decimals") && !item["decimals"].isNull()) {
+                            const auto d = item["decimals"];
+                            if (!d.isInt() || d.asInt() < 0 || d.asInt() > 6) {
+                                addError(r, base + ".items." + std::to_string(i) + ".decimals",
+                                         "decimals: целое 0…6");
+                            }
+                        }
+                        ++i;
+                    }
+                    if (!asString(block["valueField"]).empty()) {
+                        addWarning(r, base + ".valueField", "valueField блока игнорируется: задан items[]");
+                    }
+                } else if (asString(block["valueField"]).empty()) {
                     addError(r, base + ".valueField", "KPI-карточке нужно поле valueField");
                 }
                 if (block.isMember("decimals") && !block["decimals"].isNull()) {

@@ -765,6 +765,17 @@ function applySql() {
       sqlNote.value = res.error
       return
     }
+    // Проверка по схеме (ADR-164): синтаксиса JSON мало — rest/join должны пройти те же правила,
+    // что применяет сервер при сохранении шаблона. Иначе в шаблон попадёт {"path": 5}.
+    const check = validateTemplate(res.template)
+    const prefix = `datasets.${sqlKey.value}.${sqlKind.value}`
+    const own = (check.errors || []).filter((e) => (e.path || '').startsWith(prefix))
+    if (own.length) {
+      sqlNote.value =
+        `секция ${sqlKind.value} не проходит проверку: ` +
+        own.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join('; ')
+      return
+    }
     next = res.template
   }
   const pretty = JSON.stringify(next, null, 2)

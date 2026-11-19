@@ -1,33 +1,34 @@
 <template>
-  <!-- KPI-карточка (ADR-159): значение, сравнение с планом/лучшим, отклонение со стрелкой
-       и мини-график. Числа берутся из первой строки набора: одна карточка — один показатель. -->
-  <div class="kpi" :class="tone" :style="{ height: heightPx }">
-    <div class="kpi-head">
-      <span class="kpi-title">{{ block.title || valueField }}</span>
-      <span v-if="unit" class="kpi-unit">{{ unit }}</span>
+  <!-- KPI (ADR-159, ADR-164): одна карточка или несколько в одном блоке.
+       Числа берутся из первой строки набора; items[] задаёт показатели одной карточки-группы. -->
+  <div class="kpi-wrap" :class="{ multi: cards.length > 1 }">
+    <div v-for="(c, i) in cards" :key="i" class="kpi" :class="c.tone" :style="{ height: heightPx }">
+      <div class="kpi-head">
+        <span class="kpi-title">{{ c.title }}</span>
+        <span v-if="c.unit" class="kpi-unit">{{ c.unit }}</span>
+      </div>
+
+      <div class="kpi-value">{{ c.valueText }}</div>
+
+      <div class="kpi-row">
+        <span v-if="c.compareText" class="kpi-compare">
+          <span v-if="c.compareLabel">{{ c.compareLabel }}:</span> {{ c.compareText }}
+        </span>
+        <span v-if="c.deltaText" class="kpi-delta" :class="c.deltaTone">
+          {{ c.arrow }} {{ c.deltaText }}
+        </span>
+      </div>
+
+      <svg
+        v-if="c.sparkPoints"
+        class="kpi-spark"
+        :viewBox="`0 0 ${SPARK_W} ${SPARK_H}`"
+        preserveAspectRatio="none"
+      >
+        <polyline :points="c.sparkPoints" fill="none" :stroke="c.sparkColor" stroke-width="1.5" />
+        <circle v-if="c.sparkLast" :cx="c.sparkLast.x" :cy="c.sparkLast.y" r="2" :fill="c.sparkColor" />
+      </svg>
     </div>
-
-    <div class="kpi-value">{{ valueText }}</div>
-
-    <div class="kpi-row">
-      <span v-if="compareText" class="kpi-compare">
-        <span v-if="compareLabel">{{ compareLabel }}:</span> {{ compareText }}
-      </span>
-      <span v-if="deltaText" class="kpi-delta" :class="deltaTone">
-        {{ arrow }} {{ deltaText }}
-      </span>
-    </div>
-
-    <svg v-if="sparkPoints" class="kpi-spark" :viewBox="`0 0 ${sparkWidth} ${sparkHeight}`" preserveAspectRatio="none">
-      <polyline :points="sparkPoints" fill="none" :stroke="sparkColor" stroke-width="1.5" />
-      <circle
-        v-if="sparkLast"
-        :cx="sparkLast.x"
-        :cy="sparkLast.y"
-        r="2"
-        :fill="sparkColor"
-      />
-    </svg>
   </div>
 </template>
 
@@ -42,117 +43,108 @@ const props = defineProps({
   height: { type: Number, default: 160 }
 })
 
-const valueField = computed(() => props.block.valueField || '')
-const compareField = computed(() => props.block.compareField || '')
-const deltaField = computed(() => props.block.deltaField || '')
-const sparkField = computed(() => props.block.sparkField || valueField.value)
-const unit = computed(() => props.block.unit || '')
-const compareLabel = computed(() => props.block.compareLabel || 'план')
-const decimals = computed(() => (Number.isInteger(props.block.decimals) ? props.block.decimals : 2))
-const goodWhen = computed(() => (props.block.goodWhen === 'down' ? 'down' : 'up'))
+const SPARK_W = 100
+const SPARK_H = 24
 
-const row = computed(() => (props.rows && props.rows.length ? props.rows[0] : null))
 const num = (value) => {
   const n = Number(value)
   return Number.isFinite(n) ? n : null
 }
 
-const formatNumber = (value) => {
+const formatNumber = (value, decimals) => {
   const n = num(value)
   if (n === null) return '—'
   return n.toLocaleString('ru-RU', {
-    minimumFractionDigits: decimals.value,
-    maximumFractionDigits: decimals.value
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
   })
 }
 
-const valueText = computed(() => formatNumber(row.value?.[valueField.value]))
-const compareText = computed(() => {
-  if (!compareField.value || !row.value) return ''
-  const n = num(row.value[compareField.value])
-  return n === null ? '' : formatNumber(n)
-})
+// Спецификация одного показателя: блок сам или элемент items[] (ADR-164).
+function buildCard(spec) {
+  const row = props.rows && props.rows.length ? props.rows[0] : null
+  const valueField = spec.valueField || ''
+  const compareField = spec.compareField || ''
+  const deltaField = spec.deltaField || ''
+  const sparkField = spec.sparkField || valueField
+  const unit = spec.unit || ''
+  const compareLabel = spec.compareLabel || 'план'
+  const decimals = Number.isInteger(spec.decimals) ? spec.decimals : 2
+  const goodWhen = spec.goodWhen === 'down' ? 'down' : 'up'
 
-// отклонение: готовое поле в процентах или расчёт от значения сравнения
-const delta = computed(() => {
-  if (!row.value) return null
-  if (deltaField.value) {
-    const n = num(row.value[deltaField.value])
-    return n === null ? null : n
+  const valueText = formatNumber(row?.[valueField], decimals)
+  const compareText = compareField && row ? formatNumber(row[compareField], decimals) : ''
+
+  let delta = null
+  if (row) {
+    if (deltaField) {
+      delta = num(row[deltaField])
+    } else if (compareField) {
+      const value = num(row[valueField])
+      const base = num(row[compareField])
+      if (value !== null && base !== null && base !== 0) delta = ((value - base) / Math.abs(base)) * 100
+    }
   }
-  if (!compareField.value) return null
-  const value = num(row.value[valueField.value])
-  const base = num(row.value[compareField.value])
-  if (value === null || base === null || base === 0) return null
-  return ((value - base) / Math.abs(base)) * 100
-})
 
-const deltaText = computed(() => {
-  if (delta.value === null) return ''
-  return `${Math.abs(delta.value).toFixed(1)}%`
-})
+  const deltaTone = delta === null || delta === 0 ? 'neutral' : (goodWhen === 'up' ? delta > 0 : delta < 0) ? 'good' : 'bad'
+  const tone = delta === null ? '' : deltaTone === 'bad' ? 'is-bad' : deltaTone === 'good' ? 'is-good' : ''
+  const sparkColor = deltaTone === 'bad' ? 'var(--rep-danger)' : deltaTone === 'good' ? 'var(--rep-ok)' : 'var(--rep-accent)'
 
-const arrow = computed(() => (delta.value === null ? '' : delta.value > 0 ? '▲' : delta.value < 0 ? '▼' : '='))
-
-// цвет отклонения: рост хорош или плох — задаёт шаблон (goodWhen)
-const deltaTone = computed(() => {
-  if (delta.value === null || delta.value === 0) return 'neutral'
-  const better = goodWhen.value === 'up' ? delta.value > 0 : delta.value < 0
-  return better ? 'good' : 'bad'
-})
-
-// вся карточка подкрашивается по тому же правилу
-const tone = computed(() => {
-  if (delta.value === null) return ''
-  return deltaTone.value === 'bad' ? 'is-bad' : deltaTone.value === 'good' ? 'is-good' : ''
-})
-
-const sparkColor = computed(() => {
-  if (deltaTone.value === 'bad') return 'var(--rep-danger)'
-  if (deltaTone.value === 'good') return 'var(--rep-ok)'
-  return 'var(--rep-accent)'
-})
-
-const SPARK_W = 100
-const SPARK_H = 24
-const sparkWidth = SPARK_W
-const sparkHeight = SPARK_H
-
-const sparkValues = computed(() => {
-  if (!sparkField.value) return []
   const source = props.sparkRows && props.sparkRows.length ? props.sparkRows : props.rows || []
-  return source.map((r) => num(r[sparkField.value])).filter((v) => v !== null)
-})
+  const values = sparkField ? source.map((r) => num(r[sparkField])).filter((v) => v !== null) : []
+  let sparkPoints = ''
+  let sparkLast = null
+  if (values.length >= 2) {
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const span = max - min || 1
+    sparkPoints = values
+      .map((v, i) => {
+        const x = (i / (values.length - 1)) * SPARK_W
+        const y = SPARK_H - ((v - min) / span) * (SPARK_H - 2) - 1
+        return `${x.toFixed(1)},${y.toFixed(1)}`
+      })
+      .join(' ')
+    const last = values[values.length - 1]
+    sparkLast = { x: SPARK_W, y: SPARK_H - ((last - min) / span) * (SPARK_H - 2) - 1 }
+  }
 
-const sparkPoints = computed(() => {
-  const values = sparkValues.value
-  if (values.length < 2) return ''
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const span = max - min || 1
-  return values
-    .map((v, i) => {
-      const x = (i / (values.length - 1)) * SPARK_W
-      const y = SPARK_H - ((v - min) / span) * (SPARK_H - 2) - 1
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
-})
+  return {
+    title: spec.title || props.block.title || valueField,
+    unit,
+    valueText,
+    compareText,
+    compareLabel,
+    deltaText: delta === null ? '' : `${Math.abs(delta).toFixed(1)}%`,
+    arrow: delta === null ? '' : delta > 0 ? '▲' : delta < 0 ? '▼' : '=',
+    deltaTone,
+    tone,
+    sparkPoints,
+    sparkLast,
+    sparkColor
+  }
+}
 
-const sparkLast = computed(() => {
-  const values = sparkValues.value
-  if (values.length < 2) return null
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const span = max - min || 1
-  const v = values[values.length - 1]
-  return { x: SPARK_W, y: SPARK_H - ((v - min) / span) * (SPARK_H - 2) - 1 }
+// items[] — несколько показателей в одном блоке; без него блок описывает одну карточку.
+const cards = computed(() => {
+  const items = Array.isArray(props.block.items) ? props.block.items : null
+  if (items && items.length) return items.map((item) => buildCard(item))
+  return [buildCard(props.block)]
 })
 
 const heightPx = computed(() => (Number.isFinite(props.height) ? `${props.height}px` : undefined))
 </script>
 
 <style scoped>
+.kpi-wrap {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+}
+/* несколько показателей — в ряд, на узком экране по одному */
+.kpi-wrap.multi {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
 .kpi {
   display: flex;
   flex-direction: column;
