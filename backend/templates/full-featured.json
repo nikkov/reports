@@ -1,0 +1,461 @@
+{
+  "version": 2,
+  "id": "full-featured",
+  "title": "Всё в одном: все возможности шаблонов",
+  "description": "Один отчёт, где собраны все функции: параметры (дата-выражения, справочник, каскад, мультивыбор, статический список с пустым пунктом), SQL-наборы, join двух наборов, текст с подстановками, таблицы с группировкой/подытогами/правилами/drill, все виды диаграмм, стили набора и блока. REST-наборы и public/accessRoles показаны в отдельных шаблонах crm-* и public-demo.",
+  "folder": "Примеры",
+  "tags": [
+    "пример",
+    "всё",
+    "ADR-156"
+  ],
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "year(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "today(*)",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "region",
+      "type": "select",
+      "label": "Регион (справочник ID→NAME)",
+      "default": "",
+      "source": {
+        "kind": "lookup",
+        "dataset": "region_lookup"
+      },
+      "emptyOption": {
+        "value": "",
+        "label": "— все регионы —"
+      }
+    },
+    {
+      "name": "category",
+      "type": "select",
+      "label": "Категории (мультивыбор, каскад от региона)",
+      "multiple": true,
+      "source": {
+        "kind": "lookup",
+        "dataset": "category_lookup",
+        "dependsOn": "region"
+      }
+    },
+    {
+      "name": "scope",
+      "type": "select",
+      "label": "Состав строк",
+      "default": "all",
+      "source": {
+        "kind": "static",
+        "options": [
+          {
+            "value": "all",
+            "label": "Все строки"
+          },
+          {
+            "value": "profit_only",
+            "label": "Только прибыльные"
+          }
+        ]
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "summary": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region",
+        "category": "$category",
+        "scope": "$scope"
+      },
+      "sql": "SELECT count(*) AS lines, coalesce(sum(s.amount), 0) AS total, coalesce(sum(s.profit), 0) AS profit, coalesce(max(s.order_date)::text, '—') AS last_day FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region, '')::int) AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND (:scope <> 'profit_only' OR s.profit > 0)"
+    },
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region",
+        "category": "$category",
+        "scope": "$scope"
+      },
+      "sql": "SELECT s.region, s.category, s.product, sum(s.amount) AS amount, sum(s.profit) AS profit, sum(s.qty) AS qty FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region, '')::int) AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND (:scope <> 'profit_only' OR s.profit > 0) GROUP BY s.region, s.category, s.product ORDER BY s.region, s.category, s.product"
+    },
+    "plan": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT f.cost_center AS region, sum(f.plan_amount) AS plan_amount FROM reports_examples.finance f WHERE f.period BETWEEN :from::date AND :to::date GROUP BY f.cost_center"
+    },
+    "region_lookup": {
+      "connection": "main",
+      "sql": "SELECT id::text AS value, name AS label FROM reports_examples.regions ORDER BY name"
+    },
+    "category_lookup": {
+      "connection": "main",
+      "params": {
+        "region": "$region"
+      },
+      "sql": "SELECT DISTINCT s.category AS value, s.category AS label FROM reports_examples.sales s WHERE (:region = '' OR s.region_id = nullif(:region, '')::int) AND s.category IS NOT NULL ORDER BY 1"
+    },
+    "flows": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region",
+        "category": "$category",
+        "scope": "$scope"
+      },
+      "sql": "SELECT s.category, s.region, sum(s.amount) AS amount FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region, '')::int) AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND (:scope <> 'profit_only' OR s.profit > 0) GROUP BY s.category, s.region"
+    },
+    "margin": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region",
+        "category": "$category",
+        "scope": "$scope"
+      },
+      "sql": "SELECT round(100.0 * sum(s.profit) / nullif(sum(s.amount), 0), 1) AS margin_pct FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region, '')::int) AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND (:scope <> 'profit_only' OR s.profit > 0)"
+    },
+    "days": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to",
+        "region": "$region",
+        "category": "$category",
+        "scope": "$scope"
+      },
+      "sql": "SELECT s.order_date::text AS day, sum(s.amount) AS value, (sum(s.amount) * 0.9)::bigint AS low, (sum(s.amount) * 1.1)::bigint AS high FROM reports_examples.sales s WHERE s.order_date BETWEEN :from::date AND :to::date AND (:region = '' OR s.region_id = nullif(:region, '')::int) AND (:category = '' OR s.category = ANY(string_to_array(:category, ','))) AND (:scope <> 'profit_only' OR s.profit > 0) GROUP BY s.order_date ORDER BY s.order_date"
+    },
+    "sales_plan": {
+      "join": {
+        "left": {
+          "dataset": "sales"
+        },
+        "right": {
+          "dataset": "regions_ref"
+        },
+        "on": [
+          {
+            "left": "region",
+            "right": "name",
+            "type": "text"
+          }
+        ],
+        "type": "left",
+        "columns": [
+          {
+            "field": "name",
+            "as": "region_name",
+            "title": "Регион из справочника",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "regions_ref": {
+      "connection": "main",
+      "sql": "SELECT id, name FROM reports_examples.regions ORDER BY id"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "dataKey": "summary",
+      "text": "**Всё в одном.** За период {{from}} — {{to}}, регион {{region}}: строк {{data.lines}}, сумма {{data.total}}, прибыль {{data.profit}}, последняя продажа {{data.last_day}}. Дальше — таблица с группировкой, правилами и drill, план/факт через join двух наборов и все виды диаграмм. Документация: [справка по шаблонам](docs/template-reference.md)."
+    },
+    {
+      "type": "table",
+      "dataKey": "sales",
+      "span": 12,
+      "title": "Продажи: группировка, подытоги, правила, drill",
+      "collapsible": true,
+      "grandTotal": true,
+      "height": 420,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "title": "Финансы",
+          "children": [
+            {
+              "field": "amount",
+              "title": "Сумма",
+              "type": "int",
+              "aggregate": "sum",
+              "format": "number",
+              "width": 120
+            },
+            {
+              "field": "profit",
+              "title": "Прибыль",
+              "type": "int",
+              "aggregate": "sum",
+              "format": "number",
+              "width": 120
+            }
+          ]
+        },
+        {
+          "title": "Маржа",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent",
+          "width": 90
+        }
+      ],
+      "rules": [
+        {
+          "when": {
+            "column": "profit",
+            "op": "<",
+            "value": 0
+          },
+          "apply": {
+            "colors": {
+              "text": "danger"
+            },
+            "font": {
+              "weight": 600
+            }
+          },
+          "zones": [
+            "detail"
+          ]
+        },
+        {
+          "when": {
+            "column": "amount",
+            "op": ">=",
+            "value": 50000
+          },
+          "apply": {
+            "colors": {
+              "background": "rowHighlight"
+            }
+          },
+          "scope": "row",
+          "zones": [
+            "detail"
+          ]
+        }
+      ],
+      "drill": {
+        "report": "sales-drill",
+        "label": "Детали по группе",
+        "params": {
+          "region": "group.region",
+          "category": "group.category",
+          "from": "param.from",
+          "to": "param.to"
+        }
+      }
+    },
+    {
+      "type": "table",
+      "dataKey": "sales_plan",
+      "span": 6,
+      "title": "Объединение наборов (join SQL + SQL): продажи и справочник регионов",
+      "grandTotal": true,
+      "height": 260,
+      "styles": {
+        "header": {
+          "colors": {
+            "background": "#1a4fa0",
+            "text": "#ffffff"
+          }
+        }
+      },
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "region_name",
+          "title": "Из справочника"
+        },
+        {
+          "field": "amount",
+          "title": "Факт",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        }
+      ],
+      "aggregate": {
+        "groupBy": "region",
+        "measures": [
+          {
+            "field": "amount",
+            "fn": "sum"
+          }
+        ]
+      }
+    },
+    {
+      "type": "chart",
+      "chartType": "line",
+      "dataKey": "days",
+      "span": 6,
+      "height": 260,
+      "title": "Линия: сумма по дням",
+      "xField": "day",
+      "yField": "value",
+      "aggregate": "sum"
+    },
+    {
+      "type": "chart",
+      "chartType": "bar",
+      "dataKey": "sales",
+      "span": 6,
+      "height": 300,
+      "title": "Столбцы: категории в разрезе регионов",
+      "xField": "category",
+      "seriesField": "region",
+      "yField": "amount",
+      "aggregate": "sum"
+    },
+    {
+      "type": "chart",
+      "chartType": "pie",
+      "dataKey": "sales",
+      "span": 6,
+      "height": 300,
+      "title": "Круг: доля категорий в сумме",
+      "xField": "category",
+      "yField": "amount",
+      "aggregate": "sum"
+    },
+    {
+      "type": "chart",
+      "chartType": "area",
+      "dataKey": "days",
+      "span": 6,
+      "height": 260,
+      "title": "Область: сумма по дням",
+      "xField": "day",
+      "yField": "value",
+      "aggregate": "sum"
+    },
+    {
+      "type": "chart",
+      "chartType": "scatter",
+      "dataKey": "sales",
+      "span": 6,
+      "height": 260,
+      "title": "Точки: сумма и прибыль по строкам",
+      "xField": "amount",
+      "yField": "profit",
+      "aggregate": "sum"
+    },
+    {
+      "type": "chart",
+      "chartType": "gauge",
+      "dataKey": "margin",
+      "span": 4,
+      "height": 260,
+      "title": "Gauge: маржа за период",
+      "yField": "margin_pct",
+      "aggregate": "max",
+      "min": 0,
+      "max": 60,
+      "unit": "%",
+      "thresholds": [
+        10,
+        20,
+        35,
+        45
+      ],
+      "zoneColors": [
+        "#c62828",
+        "#f9a825",
+        "#2e7d32",
+        "#f9a825",
+        "#c62828"
+      ]
+    },
+    {
+      "type": "chart",
+      "chartType": "sankey",
+      "dataKey": "flows",
+      "span": 8,
+      "height": 320,
+      "title": "Sankey: категория → регион",
+      "sourceField": "category",
+      "targetField": "region",
+      "valueField": "amount",
+      "aggregate": "sum"
+    },
+    {
+      "type": "chart",
+      "chartType": "band",
+      "dataKey": "days",
+      "span": 12,
+      "height": 280,
+      "title": "Коридор: сумма по дням и ±10%",
+      "xField": "day",
+      "yField": "value",
+      "bands": [
+        {
+          "lowField": "low",
+          "highField": "high",
+          "name": "±10% к среднему дню",
+          "color": "#2e7d32"
+        }
+      ]
+    }
+  ]
+}

@@ -261,8 +261,14 @@ void ConnRegistry::markFailed(const std::string &dsn, const std::string &error,
                     error};
     failedLabel_[dsn] = label;
     // Клиент с мёртвым соединением выбрасываем: drogon иначе бесконечно переподключается
-    // и пишет в журнал по строке каждые несколько миллисекунд
-    cache_.erase(dsn);
+    // и пишет в журнал по строке каждые несколько миллисекунд.
+    // Разрушать его в текущем IO-потоке нельзя: ~DbClientImpl → ~EventLoopThread делает
+    // std::thread::detach() самого себя и бросает «Resource deadlock avoided» → abort (ADR-157).
+    std::shared_ptr<drogon::orm::DbClient> dead;
+    if (const auto it = cache_.find(dsn); it != cache_.end()) {
+        dead = it->second;
+        cache_.erase(it);
+    }
     for (auto it = keyDsn_.begin(); it != keyDsn_.end();) {
         if (it->second == dsn) {
             it = keyDsn_.erase(it);
@@ -270,6 +276,9 @@ void ConnRegistry::markFailed(const std::string &dsn, const std::string &error,
             ++it;
         }
     }
+    if (!dead) return;
+    // разрушение — в отдельном потоке, чтобы не трогать loop, из которого нас вызвали
+    std::thread([client = std::move(dead)]() mutable { client.reset(); }).detach();
 }
 
 bool ConnRegistry::failed(const std::string &dsn, std::string &error) const {
