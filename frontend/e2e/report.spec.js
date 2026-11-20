@@ -3952,3 +3952,28 @@ test('журнал использует ширину экрана (ADR-177)', as
   // прежние 1200 px ограничивали полезную область, хотя экран шире
   expect(width).toBeGreaterThan(1400)
 })
+
+test('рассылка: поля формы не выходят за подложку (ADR-178)', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/reports/admin.html#subscriptions')
+  await page.waitForSelector('form.form', { timeout: 20000 })
+  await page.waitForTimeout(1500)
+  const overflow = await page.evaluate(() => {
+    const form = document.querySelector('form.form')
+    const f = form.getBoundingClientRect()
+    return [...form.querySelectorAll('input, select, textarea')]
+      .map((el) => ({ tag: el.tagName.toLowerCase(), over: Math.round(el.getBoundingClientRect().right - f.right) }))
+      .filter((x) => x.over > 0)
+  })
+  console.log('поля за подложкой:', JSON.stringify(overflow))
+  expect(overflow).toEqual([])
+  // и слева тоже не вылезают
+  const left = await page.evaluate(() => {
+    const form = document.querySelector('form.form')
+    const f = form.getBoundingClientRect()
+    return [...form.querySelectorAll('input, select, textarea')]
+      .map((el) => Math.round(f.left - el.getBoundingClientRect().left))
+      .filter((d) => d > 0)
+  })
+  expect(left).toEqual([])
+})

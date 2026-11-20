@@ -321,6 +321,7 @@ h3 {
 }
 .filters input,
 .filters select {
+  box-sizing: border-box;
   padding: 4px 6px;
   border: 1px solid var(--rep-border-input);
   border-radius: 5px;
@@ -457,6 +458,7 @@ h3 {
   color: var(--rep-text-muted);
 }
 .dialog input {
+  box-sizing: border-box; /* padding не должен расширять поле за подложку (ADR-178) */
   padding: 5px 8px;
   border: 1px solid var(--rep-border-input);
   border-radius: 6px;

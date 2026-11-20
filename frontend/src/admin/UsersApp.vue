@@ -393,6 +393,7 @@ h3 {
 }
 .filters input,
 .filters select {
+  box-sizing: border-box;
   padding: 4px 6px;
   border: 1px solid var(--rep-border-input);
   border-radius: 5px;

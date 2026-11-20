@@ -478,6 +478,16 @@ textarea {
   border: 1px solid var(--rep-border-input);
   border-radius: 6px;
   font: inherit;
+  /* Без border-box поля ввода в grid-форме выходят за подложку на величину padding (ADR-178) */
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+}
+label.inline input {
+  width: auto;
+}
+label.inline select {
+  width: auto;
 }
 .hint {
   color: var(--rep-text-faint);
