@@ -10,7 +10,11 @@
 
 #include <algorithm>
 #include <atomic>
+// execinfo.h есть только в glibc/macOS — под Windows заголовка нет, поэтому включаем
+// по платформе; сама диагностика мьютекса тоже собрана под __linux__ (ADR-153)
+#if defined(__linux__)
 #include <execinfo.h>
+#endif
 #include <filesystem>
 #include <fstream>
 #include <cctype>
