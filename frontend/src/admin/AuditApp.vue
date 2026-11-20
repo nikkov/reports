@@ -215,9 +215,10 @@ onMounted(reload)
 
 <style scoped>
 .audit {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 18px 16px 16px;
+  /* журнал занимает всю доступную ширину: колонок семь, а «Детали» бывают длинными (ADR-177) */
+  width: 100%;
+  max-width: none;
+  padding: 18px 20px 16px;
   font: 14px/1.45 system-ui, sans-serif;
   color: var(--rep-text);
   /* Панель вписывается в высоту экрана: прокручивается только таблица (ADR-175) */

@@ -3939,3 +3939,16 @@ test('журнал: период по умолчанию — текущий ме
   expect(layout.panelScrolls).toBe(false)
 
 })
+
+test('журнал использует ширину экрана (ADR-177)', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/reports/admin.html#audit')
+  await page.waitForSelector('[data-table-wrap]', { timeout: 20000 })
+  await page.waitForTimeout(1500)
+  const width = await page.evaluate(() =>
+    Math.round(document.querySelector('[data-table-wrap]').getBoundingClientRect().width)
+  )
+  console.log('ширина таблицы при экране 1600:', width)
+  // прежние 1200 px ограничивали полезную область, хотя экран шире
+  expect(width).toBeGreaterThan(1400)
+})
