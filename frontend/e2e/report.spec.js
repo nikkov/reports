@@ -3553,3 +3553,44 @@ test('id нового отчёта приводится к нижнему рег
   const errs = await page.locator('.banner.err, .form-error').allInnerTexts().catch(() => [])
   expect(errs.join(' ')).not.toMatch(/Недопустимый id/i)
 })
+
+test('блок рисунка: экран, Excel и админка (ADR-169)', async ({ page, request }) => {
+  await page.goto('/reports/report.html?report=brand-logo')
+  await page.waitForSelector('.img-block img', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+  const imgs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('.img-block img')).map((i) => ({
+      alt: i.alt,
+      h: Math.round(i.getBoundingClientRect().height),
+      loaded: i.naturalWidth > 0
+    }))
+  )
+  expect(imgs.length).toBe(2)
+  expect(imgs.every((i) => i.loaded && i.alt.length > 0)).toBe(true)
+  expect(imgs[0].h).toBe(56)
+
+  // Excel: картинка вставляется в книгу (в zip есть xl/media)
+  const xlsx = await request.post('/api/report/export.xlsx', {
+    data: { reportId: 'brand-logo', params: { from: '2026-01-01', to: '2026-03-31' } }
+  })
+  expect(xlsx.status()).toBe(200)
+  const body = (await xlsx.body()).toString('latin1')
+  expect(body).toContain('xl/media/image1.png')
+
+  // админка: панель рисунков и вставка блока в шаблон
+  await page.goto('/reports/admin.html')
+  await page.waitForTimeout(1500)
+  // блок вставляется в открытый шаблон — выбираем отчёт с рисунком
+  await page.getByText('brand-logo', { exact: false }).first().click()
+  await page.waitForTimeout(1200)
+  await page.getByRole('button', { name: 'Рисунки' }).click()
+  await page.waitForSelector('.asset-item', { timeout: 15000 })
+  expect(await page.locator('.asset-item').count()).toBeGreaterThanOrEqual(1)
+  await page.getByRole('button', { name: 'Вставить блок' }).first().click()
+  await page.waitForTimeout(500)
+  const doc = await page.evaluate(() => {
+    const ed = document.querySelector('.cm-content')
+    return ed ? ed.innerText : ''
+  })
+  expect(doc).toContain('/api/assets/')
+})

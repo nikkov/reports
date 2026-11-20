@@ -57,7 +57,7 @@
       <div class="blocks">
       <template v-for="(block, index) in template.blocks" :key="index">
       <section
-        v-if="block.type === 'text' || block.type === 'legend' || loadedOnce"
+        v-if="block.type === 'text' || block.type === 'legend' || block.type === 'image' || loadedOnce"
         class="block"
         :class="{ card: block.card === true }"
         :style="{ gridColumn: `span ${spanOf(block)}` }"
@@ -89,6 +89,8 @@
         />
 
         <LegendBlock v-else-if="block.type === 'legend'" :block="block" />
+
+        <ImageBlock v-else-if="block.type === 'image'" :block="block" />
 
         <KpiBlock
           v-else-if="block.type === 'kpi'"
@@ -126,6 +128,7 @@ import { columnFormat, formatCell } from './format.js'
 import ChartBlock from './ChartBlock.vue'
 import KpiBlock from './KpiBlock.vue'
 import LegendBlock from './LegendBlock.vue'
+import ImageBlock from './ImageBlock.vue'
 import { resolveStyles } from '../template/styles.js'
 import { looksLikeDateExpr, resolveDefaultValue } from '../template/dates.js'
 import { drillAllowed, resolveDrill } from '../engine/drill.js'

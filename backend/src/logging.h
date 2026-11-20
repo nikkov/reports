@@ -36,6 +36,8 @@ enum class Action {
     PublishTemplate,
     ChangeSubscription,
     RunSubscription,
+    UploadAsset,
+    DeleteAsset,
     AccessDenied,
     // технические события сервера
     ServerStart,

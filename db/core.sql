@@ -149,3 +149,21 @@ CREATE INDEX IF NOT EXISTS subscription_runs_open_idx
 
 COMMENT ON COLUMN reports.subscription_runs.finished_at IS
     'NULL — попытка ещё идёт или процесс упал во время отправки';
+
+-- Рисунки отчётов (ADR-169): логотипы и прочие изображения для блоков type=image.
+-- Храним в БД, чтобы резервная копия была одна и не появлялось файлов-сирот.
+-- Только растровые форматы: SVG не принимаем (XSS через встроенный скрипт).
+CREATE TABLE IF NOT EXISTS reports.report_assets (
+    id          text        PRIMARY KEY,
+    name        text        NOT NULL,
+    mime        text        NOT NULL,
+    size        integer     NOT NULL,
+    width       integer     NOT NULL,
+    height      integer     NOT NULL,
+    bytes       bytea       NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    created_by  text
+);
+
+COMMENT ON TABLE reports.report_assets IS 'Изображения шаблонов (ADR-169), отдаются по /api/assets/{id}';
+COMMENT ON COLUMN reports.report_assets.mime IS 'image/png, image/jpeg, image/gif, image/webp';

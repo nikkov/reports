@@ -95,6 +95,8 @@ if [ "${REP_SKIP_TEMPLATES:-0}" = "1" ]; then
   echo "templates: пропущены (REP_SKIP_TEMPLATES=1)"
 elif [ "$CORE" = 1 ]; then
   REP_DB="$DB" "$ROOT/db/load-examples.sh" >/dev/null
+  # рисунки примеров (ADR-169): на них ссылаются шаблоны вида brand-logo
+  REP_DB="$DB" "$ROOT/db/load-assets.sh" >/dev/null
   echo "templates: $(${PSQL[@]} -d "$DB" -tAc "SELECT count(*) FROM reports.report_templates")"
 fi
 

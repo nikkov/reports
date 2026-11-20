@@ -1161,6 +1161,9 @@ export default {
         },
         {
           "$ref": "#/$defs/legendBlock"
+        },
+        {
+          "$ref": "#/$defs/imageBlock"
         }
       ]
     },
@@ -1231,6 +1234,73 @@ export default {
           "type": "integer",
           "minimum": 1,
           "maximum": 12
+        }
+      }
+    },
+    "imageBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "src",
+        "alt"
+      ],
+      "properties": {
+        "type": {
+          "const": "image"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "src": {
+          "type": "string",
+          "pattern": "^/api/assets/[a-z0-9]{16}$",
+          "description": "рисунок из хранилища сервера: /api/assets/{id} (ADR-169)"
+        },
+        "alt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "текст для незрячих и для случая, когда картинка не загрузилась"
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 24,
+          "maximum": 600,
+          "description": "высота рисунка в пикселях; ширина подстраивается по пропорциям"
+        },
+        "fit": {
+          "enum": [
+            "contain",
+            "cover"
+          ],
+          "description": "contain — целиком в рамке, cover — заполнить рамку с обрезкой"
+        },
+        "align": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "link": {
+          "type": "string",
+          "pattern": "^https?://",
+          "description": "куда ведёт клик по рисунку (открывается в новой вкладке)"
+        },
+        "card": {
+          "type": "boolean",
+          "description": "оформление карточки: фон, рамка, скругление и внутренние отступы"
+        },
+        "span": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "ширина блока в 12-колоночной сетке (ADR-96)"
+        },
+        "styles": {
+          "$ref": "#/$defs/styles"
         }
       }
     },

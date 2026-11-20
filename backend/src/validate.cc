@@ -1571,10 +1571,58 @@ ValidationResult validateTemplateJson(const Json::Value &root,
             const bool isChart = type == "chart";
             const bool isKpi = type == "kpi";
             const bool isLegend = type == "legend";
+            const bool isImage = type == "image";
 
-            if (type != "text" && !isTable && !isChart && !isKpi && !isLegend) {
+            if (type != "text" && !isTable && !isChart && !isKpi && !isLegend && !isImage) {
                 addError(r, base + ".type", "неизвестный тип блока «" + (type.empty() ? "—" : type) +
-                                                "» (допустимо: text, table, chart, kpi, legend)");
+                                                "» (допустимо: text, table, chart, kpi, legend, image)");
+                ++index;
+                continue;
+            }
+
+            // Рисунок (ADR-169): ссылка на хранилище сервера, alt обязателен. Внешние URL
+            // не принимаем — иначе сервер не знает, что отрисует браузер, и картинка
+            // может пропасть вместе с чужим сайтом.
+            if (isImage) {
+                static const std::regex assetSrcRe("^/api/assets/[a-z0-9]{16}$");
+                const std::string src = asString(block["src"]);
+                if (src.empty()) {
+                    addError(r, base + ".src", "src обязателен: /api/assets/{id}");
+                } else if (!std::regex_match(src, assetSrcRe)) {
+                    addError(r, base + ".src",
+                             "src должен быть ссылкой на рисунок сервера: /api/assets/{id}");
+                }
+                const std::string alt = asString(block["alt"]);
+                if (alt.empty()) {
+                    addError(r, base + ".alt", "alt обязателен: текст для незрячих");
+                } else if (alt.size() > 200) {
+                    addError(r, base + ".alt", "alt: не длиннее 200 символов");
+                }
+                if (block.isMember("height") && !block["height"].isNull()) {
+                    const auto h = block["height"];
+                    if (!h.isInt() || h.asInt() < 24 || h.asInt() > 600) {
+                        addError(r, base + ".height", "height рисунка: целое 24…600");
+                    }
+                }
+                if (block.isMember("fit") && !block["fit"].isNull()) {
+                    const std::string fit = asString(block["fit"]);
+                    if (fit != "contain" && fit != "cover") {
+                        addError(r, base + ".fit", "fit: contain или cover");
+                    }
+                }
+                if (block.isMember("align") && !block["align"].isNull()) {
+                    const std::string align = asString(block["align"]);
+                    if (align != "left" && align != "center" && align != "right") {
+                        addError(r, base + ".align", "align: left, center или right");
+                    }
+                }
+                if (block.isMember("link") && !block["link"].isNull()) {
+                    static const std::regex linkRe("^https?://[^\\s]+$");
+                    const std::string link = asString(block["link"]);
+                    if (!link.empty() && !std::regex_match(link, linkRe)) {
+                        addError(r, base + ".link", "link: ссылка http(s)://");
+                    }
+                }
                 ++index;
                 continue;
             }

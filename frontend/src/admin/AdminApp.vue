@@ -102,6 +102,9 @@
           <button class="btn" :disabled="!canEdit" @click="toggleSqlPanel">
             {{ sqlOpen ? 'Скрыть SQL' : 'Наборы данных (SQL)' }}
           </button>
+          <button class="btn" @click="toggleAssetsPanel">
+            {{ assetsOpen ? 'Скрыть рисунки' : 'Рисунки' }}
+          </button>
           <button v-if="!currentId" class="btn primary" :disabled="!canEdit || saving" @click="save">
             {{ saving ? 'Сохранение…' : 'Создать' }}
           </button>
@@ -269,6 +272,45 @@
             </template>
           </div>
         </div>
+      </section>
+
+
+      <!-- Рисунки отчёта (ADR-169): загрузка в хранилище сервера и вставка блока в шаблон -->
+      <section v-if="assetsOpen" class="assets-panel">
+        <div class="assets-head">
+          <h3>Рисунки</h3>
+          <label class="btn small" :class="{ disabled: assetBusy }">
+            {{ assetBusy ? 'Загрузка…' : 'Загрузить рисунок' }}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              hidden
+              :disabled="assetBusy || !canEdit"
+              @change="onAssetPicked"
+            />
+          </label>
+          <span class="muted">PNG, JPEG, GIF, WebP — до 2 МБ</span>
+          <span v-if="assetNote" class="muted">{{ assetNote }}</span>
+        </div>
+        <p v-if="assetError" class="banner err">{{ assetError }}</p>
+        <p v-if="!assets.length" class="muted">
+          Рисунков пока нет: загрузите логотип — он появится здесь и в блоке type=image.
+        </p>
+        <ul v-else class="assets-list">
+          <li v-for="a in assets" :key="a.id" class="asset-item">
+            <img :src="assetPreview(a)" :alt="a.name" class="asset-thumb" />
+            <span class="asset-name">{{ a.name }}</span>
+            <span class="dim">{{ a.width }}×{{ a.height }} · {{ Math.round(a.size / 1024) }} КБ</span>
+            <code class="asset-src">{{ a.src }}</code>
+            <button class="btn small" type="button" :disabled="!canEdit" @click="insertImageBlock(a)">
+              Вставить блок
+            </button>
+            <button class="btn small" type="button" @click="copyAssetSrc(a)">Ссылка</button>
+            <button class="btn small" type="button" :disabled="!canEdit" @click="removeAsset(a)">
+              Удалить
+            </button>
+          </li>
+        </ul>
       </section>
 
       <section v-if="historyOpen" class="history">
@@ -628,6 +670,92 @@ function stopSqlResize() {
     localStorage.setItem(SQL_HEIGHT_KEY, String(sqlHeight.value))
   } catch {
     // без сохранения: высота просто не запомнится
+  }
+}
+
+// === Панель «Рисунки» (ADR-169) ===
+const assetsOpen = ref(false)
+const assets = ref([])
+const assetBusy = ref(false)
+const assetNote = ref('')
+const assetError = ref('')
+
+async function loadAssets() {
+  try {
+    const res = await api.assets()
+    assets.value = res.items || []
+    assetError.value = ''
+  } catch (e) {
+    assetError.value = e.message
+  }
+}
+
+function toggleAssetsPanel() {
+  assetsOpen.value = !assetsOpen.value
+  if (assetsOpen.value) loadAssets()
+}
+
+function assetPreview(a) {
+  return api.assetUrl(a.src)
+}
+
+async function onAssetPicked(event) {
+  const file = event.target.files && event.target.files[0]
+  event.target.value = ''
+  if (!file) return
+  assetBusy.value = true
+  assetError.value = ''
+  assetNote.value = ''
+  try {
+    const res = await api.uploadAsset(file)
+    assetNote.value = `загружен «${res.name}» (${res.width}×${res.height})`
+    await loadAssets()
+  } catch (e) {
+    assetError.value = e.message
+  } finally {
+    assetBusy.value = false
+  }
+}
+
+// Вставка блока: рисунок уже в хранилище, в шаблон уходит только ссылка и высота
+function insertImageBlock(a) {
+  const tpl = parseTemplateText()
+  if (!tpl) {
+    assetError.value = 'JSON не разбирается — исправьте его в редакторе'
+    return
+  }
+  tpl.blocks = Array.isArray(tpl.blocks) ? tpl.blocks : []
+  tpl.blocks.push({
+    type: 'image',
+    src: a.src,
+    alt: a.name || 'рисунок',
+    height: Math.min(200, a.height || 64),
+    span: 3
+  })
+  const pretty = JSON.stringify(tpl, null, 2)
+  setDoc(pretty)
+  text.value = pretty
+  errors.value = []
+  assetNote.value = `блок добавлен в конец: ${a.src}`
+}
+
+async function copyAssetSrc(a) {
+  try {
+    await navigator.clipboard.writeText(a.src)
+    assetNote.value = `ссылка скопирована: ${a.src}`
+  } catch {
+    assetNote.value = `ссылка: ${a.src}`
+  }
+}
+
+async function removeAsset(a) {
+  assetError.value = ''
+  try {
+    await api.deleteAsset(a.id)
+    assetNote.value = 'рисунок удалён'
+    await loadAssets()
+  } catch (e) {
+    assetError.value = e.message
   }
 }
 
@@ -1604,6 +1732,58 @@ body {
 :root[data-theme='dark'] .cm-editor .cm-activeLine,
 :root[data-theme='dark'] .cm-editor .cm-activeLineGutter {
   background: var(--rep-surface-hover);
+}
+.assets-panel {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--rep-border);
+  background: var(--rep-surface);
+  padding: 10px 14px 14px;
+  max-height: 280px;
+  overflow: auto;
+}
+.assets-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.assets-head h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.assets-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.asset-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.asset-thumb {
+  height: 32px;
+  width: auto;
+  max-width: 96px;
+  object-fit: contain;
+  border: 1px solid var(--rep-border);
+  border-radius: 4px;
+  background: #fff;
+}
+.asset-name {
+  min-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asset-src {
+  color: var(--rep-text-muted);
+  font-size: 11px;
 }
 </style>
 

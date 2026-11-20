@@ -81,6 +81,9 @@ Role requiredRole(const std::string &method, const std::string &path) {
     const bool del = method == "DELETE";
 
     if (path == "/api/health") return Role::Public;
+    // рисунки отчётов (ADR-169): не данные, а картинка; нужны и в публичном отчёте.
+    // id случайный, перечислить содержимое нельзя — сессии не требуем.
+    if (get && path.rfind("/api/assets/", 0) == 0) return Role::Public;
     if (path.rfind("/api/auth/", 0) == 0) return Role::Public;
     // Статика и SPA-страницы (ADR-79): отдаются без авторизации, иначе страница входа
     // не загрузится. Защищены данные, а не оболочка: все /api-маршруты остаются под ролью.

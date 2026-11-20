@@ -25,6 +25,14 @@ struct ExportMerge {
 // которому строки итогов мешают (машинный формат).
 enum class RowKind : unsigned char { Detail = 0, Subtotal = 1, Grand = 2 };
 
+// Рисунок в книге (ADR-169): логотип из шаблона. data — готовые байты PNG/JPEG,
+// col — колонка, scale — доля от натурального размера.
+struct ExportImage {
+    std::string data;
+    int col = 0;
+    double scale = 1.0;
+};
+
 struct ExportSheet {
     std::string title;
     std::vector<ExportColumn> columns;
@@ -34,6 +42,8 @@ struct ExportSheet {
     std::vector<ExportMerge> merges;                            // объединения групповых колонок
     std::vector<unsigned char> rowKind;                         // RowKind по строке; пусто — все детальные
     std::vector<int> rowSubtotalLevel;                          // для подытога — уровень группы, иначе -1
+    std::vector<ExportImage> images;                            // рисунки над таблицей (ADR-169)
+    int imageRows = 0;                                          // сколько строк сверху занять рисунками
 };
 
 // Раскладывает строки по группам: устойчивая сортировка по групповым колонкам, объединения

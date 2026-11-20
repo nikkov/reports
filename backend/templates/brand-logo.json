@@ -1,0 +1,131 @@
+{
+  "version": 2,
+  "id": "brand-logo",
+  "title": "Отчёт с логотипом",
+  "description": "Блок type=image: логотип компании в шапке отчёта (ADR-169). Рисунок хранится на сервере, в шаблоне только ссылка /api/assets/{id}.",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "by_region": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, sum(s.amount) AS amount, sum(s.profit) AS profit FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name ORDER BY 2 DESC"
+    }
+  },
+  "blocks": [
+    {
+      "type": "image",
+      "src": "/api/assets/logo0000sample16",
+      "alt": "Логотип компании «Ромашка»",
+      "height": 56,
+      "span": 3,
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "span": 9,
+      "text": "Коммерческий отчёт за период {{from}} — {{to}}.\nСуммы по регионам, рентабельность и структура выручки."
+    },
+    {
+      "type": "table",
+      "title": "Продажи по регионам",
+      "dataKey": "by_region",
+      "grandTotal": true,
+      "span": 7,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "format": "number"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "format": "number"
+        },
+        {
+          "title": "Рентабельность",
+          "expression": "profit / amount",
+          "format": "percent"
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "title": "Сумма по регионам",
+      "dataKey": "by_region",
+      "chartType": "bar",
+      "orientation": "horizontal",
+      "showValues": true,
+      "xField": "region",
+      "yField": "amount",
+      "span": 5,
+      "height": 260
+    },
+    {
+      "type": "image",
+      "title": "Рисунок в карточке, по центру",
+      "src": "/api/assets/logo0000sample16",
+      "alt": "Логотип компании «Ромашка» крупно",
+      "height": 96,
+      "span": 4,
+      "align": "center",
+      "card": true,
+      "link": "https://example.com"
+    },
+    {
+      "type": "text",
+      "span": 8,
+      "text": "Рисунок можно поставить слева, по центру или справа, задать высоту в пикселях и включить оформление карточки. Клик по рисунку можно связать со ссылкой. В Excel логотип вставляется над таблицей, в печать идёт как есть."
+    }
+  ],
+  "folder": "Оформление",
+  "tags": [
+    "логотип",
+    "рисунок"
+  ]
+}

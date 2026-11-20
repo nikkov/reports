@@ -86,7 +86,7 @@ if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
 
-add_executable(rep src/main.cc src/xlsx_export.cc src/group_rows.cc)
+add_executable(rep src/main.cc src/xlsx_export.cc src/group_rows.cc src/assets.cc)
 target_compile_definitions(rep PRIVATE REP_VERSION="${REP_VERSION}")
 target_link_libraries(rep PRIVATE rep_core libxlsxwriter::libxlsxwriter)
 # имена функций в backtrace диагностики мьютекса (ADR-153)
@@ -119,6 +119,8 @@ add_executable(rep_tests
   tests/params_test.cc
   tests/validate_test.cc
   tests/smtp_cron_test.cc
+  src/assets.cc
+  tests/assets_test.cc
 )
 target_link_libraries(rep_tests PRIVATE rep_core Catch2::Catch2WithMain libxlsxwriter::libxlsxwriter)
 # фикстуры parity лежат в репозитории: тест читает их по этому пути

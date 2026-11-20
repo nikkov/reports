@@ -101,22 +101,39 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
     format_set_bg_color(header, 0xF2F4F7);
     format_set_border(header, LXW_BORDER_THIN);
 
+    // рисунки занимают верхние строки, таблица начинается под ними
+    const int top = sheet.imageRows > 0 ? sheet.imageRows : 0;
     for (size_t c = 0; c < sheet.columns.size(); ++c) {
-        worksheet_write_string(ws, 0, static_cast<lxw_col_t>(c), sheet.columns[c].title.c_str(), header);
+        worksheet_write_string(ws, static_cast<lxw_row_t>(top), static_cast<lxw_col_t>(c),
+                               sheet.columns[c].title.c_str(), header);
     }
-    worksheet_freeze_panes(ws, 1, 0);
+    worksheet_freeze_panes(ws, top + 1, 0);
+    for (const auto &image : sheet.images) {
+        if (image.data.empty()) continue;
+        lxw_image_options opt = {};
+        opt.x_offset = 4;
+        opt.y_offset = 4;
+        opt.x_scale = image.scale;
+        opt.y_scale = image.scale;
+        // libxlsxwriter разбирает PNG/JPEG из буфера сам — конвертация не нужна
+        worksheet_insert_image_buffer_opt(ws, 0, static_cast<lxw_col_t>(image.col),
+                                          reinterpret_cast<const unsigned char *>(image.data.data()),
+                                          image.data.size(), &opt);
+    }
     // сводные строки (заголовки групп) стоят над деталями, как в браузерном экспорте
     worksheet_outline_settings(ws, 0 /*сводные строки над деталями*/, 0, 0, 0);
     for (const auto &merge : sheet.merges) {
         if (merge.lastRow <= merge.firstRow) continue;
         if (merge.col < 0 || merge.col >= static_cast<int>(sheet.columns.size())) continue;
-        worksheet_merge_range(ws, static_cast<lxw_row_t>(merge.firstRow + 1), static_cast<lxw_col_t>(merge.col),
-                              static_cast<lxw_row_t>(merge.lastRow + 1), static_cast<lxw_col_t>(merge.col), "",
-                              nullptr);
+        worksheet_merge_range(ws, static_cast<lxw_row_t>(merge.firstRow + 1 + top),
+                              static_cast<lxw_col_t>(merge.col),
+                              static_cast<lxw_row_t>(merge.lastRow + 1 + top),
+                              static_cast<lxw_col_t>(merge.col), "", nullptr);
     }
 
     if (!sheet.params.empty()) {
-        worksheet_autofilter(ws, 0, 0, static_cast<lxw_row_t>(sheet.rows.size()),
+        worksheet_autofilter(ws, static_cast<lxw_row_t>(top), 0,
+                             static_cast<lxw_row_t>(sheet.rows.size() + top),
                              static_cast<lxw_col_t>(sheet.columns.size() - 1));
     }
 
@@ -175,7 +192,8 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
             lxw_row_col_options options = {.hidden = 0,
                                            .level = static_cast<uint8_t>(std::min(sheet.rowLevels[r], 7)),
                                            .collapsed = 0};
-            worksheet_set_row_opt(ws, static_cast<lxw_row_t>(r + 1), LXW_DEF_ROW_HEIGHT, nullptr, &options);
+            worksheet_set_row_opt(ws, static_cast<lxw_row_t>(r + 1 + top), LXW_DEF_ROW_HEIGHT, nullptr,
+                                  &options);
         }
         const unsigned char kind = sheet.rowKind.empty() ? 0 : sheet.rowKind[r];
         for (size_t c = 0; c < sheet.columns.size() && c < row.size(); ++c) {
@@ -183,7 +201,7 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
             if (value.empty()) continue;
             const auto &skip = mergeStart[r];
             if (std::find(skip.begin(), skip.end(), static_cast<int>(c)) != skip.end()) continue;
-            const auto rowIdx = static_cast<lxw_row_t>(r + 1);
+            const auto rowIdx = static_cast<lxw_row_t>(r + 1 + top);
             const auto colIdx = static_cast<lxw_col_t>(c);
             lxw_format *fmt = formats[c];
             if (kind == static_cast<unsigned char>(RowKind::Subtotal)) fmt = subtotalFormats[c];

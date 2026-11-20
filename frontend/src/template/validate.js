@@ -50,7 +50,8 @@ const branchValidator = {
   table: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/tableBlock' }),
   chart: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/chartBlock' }),
   kpi: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/kpiBlock' }),
-  legend: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/legendBlock' })
+  legend: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/legendBlock' }),
+  image: ajv.compile({ $schema: schema.$schema, $defs: schema.$defs, $ref: '#/$defs/imageBlock' })
 }
 
 const translate = {
@@ -1015,8 +1016,8 @@ function checkGaugeZones(block, base, errors) {
       return
     }
 
-    // легенда — оформление, набор данных ей не нужен (ADR-160)
-    if (block.type === 'legend') return
+    // легенда и рисунок — оформление, набор данных им не нужен (ADR-160, ADR-169)
+    if (block.type === 'legend' || block.type === 'image') return
 
     if (!datasetNames.includes(block.dataKey)) {
       errors.push({
@@ -1468,6 +1469,8 @@ function checkGaugeZones(block, base, errors) {
 
   // Высота блоков (ADR-85): у таблицы, диаграммы, KPI-карточки и легенды — пиксели или процент
   ;(template.blocks || []).forEach((block, i) => {
+    // у рисунка height — высота картинки (24…600, проверена схемой), а не высота блока
+    if (block.type === 'image') return
     if (block.type !== 'table' && block.type !== 'chart' && block.type !== 'kpi' && block.type !== 'legend') {
       if (block.height !== undefined) {
         errors.push({ path: `blocks.${i}.height`, message: 'height допустим только у таблицы и диаграммы' })

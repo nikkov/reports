@@ -119,6 +119,8 @@ const char *actionName(Action action) {
         case Action::PublishTemplate: return "publish_template";
         case Action::ChangeSubscription: return "change_subscription";
         case Action::RunSubscription: return "run_subscription";
+        case Action::UploadAsset: return "asset_upload";
+        case Action::DeleteAsset: return "asset_delete";
         case Action::AccessDenied: return "access_denied";
         case Action::ServerStart: return "server_start";
         case Action::ServerStop: return "server_stop";

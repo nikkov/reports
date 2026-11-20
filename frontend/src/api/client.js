@@ -75,6 +75,29 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ sql, params, connection, connections })
     }),
+  // рисунки отчётов (ADR-169): файл лежит в БД, в шаблоне только /api/assets/{id}
+  assets: () => request('/api/admin/assets'),
+  uploadAsset: async (file) => {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    const resp = await fetch(`${BASE}/api/admin/assets`, { method: 'POST', body: form })
+    const text = await resp.text()
+    let body = null
+    try {
+      body = text ? JSON.parse(text) : null
+    } catch {
+      body = null
+    }
+    if (!resp.ok) {
+      const error = new Error(body?.error?.message || `HTTP ${resp.status}`)
+      error.code = body?.error?.code || 'HTTP_' + resp.status
+      error.status = resp.status
+      throw error
+    }
+    return body
+  },
+  deleteAsset: (id) => request(`/api/admin/assets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  assetUrl: (src) => `${BASE}${src}`,
   reports: () => request('/api/reports'),
   template: (id) => request(`/api/reports/${encodeURIComponent(id)}`),
   // справочник параметра: SQL живёт в шаблоне, адрес — отчёт + имя параметра (ADR-24)

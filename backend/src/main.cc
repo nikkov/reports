@@ -33,6 +33,7 @@
 #include <string>
 #include <vector>
 
+#include "assets.h"
 #include "auth.h"
 #include "cache.h"
 #include "aggregate.h"
@@ -2054,6 +2055,208 @@ int main() {
         },
         {Get});
 
+    // ---- Рисунки отчётов (ADR-169) ------------------------------------------------
+    // Логотипы и прочие изображения для блоков type=image. Файл лежит в базе: резервная
+    // копия одна, файлов-сирот нет. Принимаем только растровые форматы — SVG умеет
+    // исполнять скрипт и отдавать его со своего домена нельзя.
+    const std::size_t assetMaxBytes = static_cast<std::size_t>(
+        std::max(1, std::stoi(rep::envOr("REP_ASSET_MAX_BYTES", "2097152"))));
+
+    app().registerHandler(
+        "/api/admin/assets",
+        [db, adminEnabled, assetMaxBytes](const HttpRequestPtr &req,
+                                          std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req);
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            if (req->contentType() != CT_MULTIPART_FORM_DATA) {
+                sendError(cb, k400BadRequest, "INVALID_REQUEST",
+                          "нужен multipart/form-data с файлом в поле file");
+                return;
+            }
+            MultiPartParser parser;
+            if (parser.parse(req) != 0 || parser.getFiles().empty()) {
+                sendError(cb, k400BadRequest, "INVALID_REQUEST", "файл не передан (поле file)");
+                return;
+            }
+            const auto &file = parser.getFiles().front();
+            const std::string bytes(file.fileContent().data(), file.fileContent().length());
+            if (bytes.empty()) {
+                sendError(cb, k400BadRequest, "INVALID_REQUEST", "пустой файл");
+                return;
+            }
+            if (bytes.size() > assetMaxBytes) {
+                sendError(cb, k413RequestEntityTooLarge, "ASSET_TOO_LARGE",
+                          "файл больше " + std::to_string(assetMaxBytes / 1024) + " КБ");
+                return;
+            }
+            const auto info = rep::assets::sniffImage(bytes);
+            if (!info.ok) {
+                sendError(cb, k422UnprocessableEntity, "INVALID_IMAGE",
+                          "поддерживаются только PNG, JPEG, GIF и WebP");
+                return;
+            }
+            // имя файла показываем в списке — длину и управляющие символы ограничиваем
+            std::string name = file.getFileName();
+            if (name.size() > 120) name.resize(120);
+            for (char &ch : name) {
+                if (static_cast<unsigned char>(ch) < 0x20) ch = ' ';
+            }
+            if (name.empty()) name = "рисунок";
+            const std::string id = rep::assets::newAssetId();
+            const std::string actor = currentActor;
+            runQuery(db,
+                     "INSERT INTO report_assets (id, name, mime, size, width, height, bytes, created_by) "
+                     "VALUES ($1, $2, $3, $4, $5, $6, decode($7, 'hex'), $8)",
+                     {id, name, info.mime, std::to_string(bytes.size()), std::to_string(info.width),
+                      std::to_string(info.height), rep::assets::toHex(bytes), actor},
+                     [cb, id, name, info, bytes, actor](const orm::Result &) {
+                         Json::Value out;
+                         out["id"] = id;
+                         out["src"] = "/api/assets/" + id;
+                         out["name"] = name;
+                         out["mime"] = info.mime;
+                         out["width"] = info.width;
+                         out["height"] = info.height;
+                         out["size"] = static_cast<Json::UInt64>(bytes.size());
+                         rep::log::event(rep::log::Level::Info, rep::log::Action::UploadAsset, actor,
+                                         "рисунок " + id + " (" + info.mime + ", " +
+                                             std::to_string(bytes.size()) + " байт)");
+                         cb(jsonResponse(out));
+                     },
+                     [cb](const std::exception_ptr &) {
+                         sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", "база недоступна");
+                     });
+        },
+        {Post});
+
+    app().registerHandler(
+        "/api/admin/assets",
+        [db, adminEnabled](const HttpRequestPtr &req,
+                           std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req);
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            runQuery(db,
+                     "SELECT id, name, mime, size, width, height, created_at FROM report_assets "
+                     "ORDER BY created_at DESC, id",
+                     {},
+                     [cb](const orm::Result &res) {
+                         Json::Value items(Json::arrayValue);
+                         for (const auto &row : res) {
+                             Json::Value item;
+                             item["id"] = row["id"].as<std::string>();
+                             item["src"] = "/api/assets/" + row["id"].as<std::string>();
+                             item["name"] = row["name"].as<std::string>();
+                             item["mime"] = row["mime"].as<std::string>();
+                             item["size"] = static_cast<Json::UInt64>(row["size"].as<long long>());
+                             item["width"] = row["width"].as<int>();
+                             item["height"] = row["height"].as<int>();
+                             item["createdAt"] = row["created_at"].as<std::string>();
+                             items.append(item);
+                         }
+                         Json::Value out;
+                         out["items"] = items;
+                         cb(jsonResponse(out));
+                     },
+                     [cb](const std::exception_ptr &) {
+                         sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", "база недоступна");
+                     });
+        },
+        {Get});
+
+    // Удаление рисунка: если он уже стоит в шаблоне, отказываем — иначе отчёт покажет
+    // битую картинку, и автор не поймёт, почему.
+    app().registerHandler(
+        "/api/admin/assets/{id}",
+        [db, adminEnabled, &templatesRaw, &templatesMutex](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
+            const std::string &id) {
+            currentActor = actorOf(req);
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            if (!rep::assets::isAssetId(id)) {
+                sendError(cb, k404NotFound, "ASSET_NOT_FOUND", "рисунок не найден");
+                return;
+            }
+            std::vector<std::string> used;
+            const std::string needle = "/api/assets/" + id;
+            {
+                std::lock_guard<TracedMutex> lock(templatesMutex);
+                for (const auto &entry : templatesRaw) {
+                    if (entry.second.find(needle) != std::string::npos) used.push_back(entry.first);
+                }
+            }
+            if (!used.empty()) {
+                std::sort(used.begin(), used.end());
+                std::string list;
+                for (const auto &rid : used) list += (list.empty() ? "" : ", ") + rid;
+                sendError(cb, k409Conflict, "ASSET_IN_USE",
+                          "рисунок используется в шаблонах: " + list);
+                return;
+            }
+            runQuery(db, "DELETE FROM report_assets WHERE id = $1 RETURNING id", {id},
+                     [cb, id](const orm::Result &res) {
+                         if (res.empty()) {
+                             sendError(cb, k404NotFound, "ASSET_NOT_FOUND", "рисунок не найден");
+                             return;
+                         }
+                         rep::log::event(rep::log::Level::Info, rep::log::Action::DeleteAsset,
+                                         currentActor, "рисунок " + id);
+                         Json::Value out;
+                         out["deleted"] = id;
+                         cb(jsonResponse(out));
+                     },
+                     [cb](const std::exception_ptr &) {
+                         sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", "база недоступна");
+                     });
+        },
+        {Delete});
+
+    // Отдача рисунка. Без сессии: картинка не содержит данных отчёта, а логотип нужен
+    // и в публичном отчёте. id случайный (16 символов), перечислить его нельзя.
+    app().registerHandler(
+        "/api/assets/{id}",
+        [db](const HttpRequestPtr &, std::function<void(const HttpResponsePtr &)> &&cb,
+             const std::string &id) {
+            if (!rep::assets::isAssetId(id)) {
+                sendError(cb, k404NotFound, "ASSET_NOT_FOUND", "рисунок не найден");
+                return;
+            }
+            runQuery(db, "SELECT mime, encode(bytes, 'hex') AS data FROM report_assets WHERE id = $1",
+                     {id},
+                     [cb](const orm::Result &res) {
+                         if (res.empty()) {
+                             sendError(cb, k404NotFound, "ASSET_NOT_FOUND", "рисунок не найден");
+                             return;
+                         }
+                         std::string bytes;
+                         if (!rep::assets::fromHex(res[0]["data"].as<std::string>(), bytes)) {
+                             sendError(cb, k500InternalServerError, "ASSET_CORRUPTED",
+                                       "не удалось прочитать рисунок");
+                             return;
+                         }
+                         auto resp = HttpResponse::newHttpResponse();
+                         resp->setContentTypeString(res[0]["mime"].as<std::string>());
+                         resp->setBody(std::move(bytes));
+                         // Содержимое по одному id может обновиться (db/load-assets.sh
+                         // перезаливает примеры), поэтому «immutable» не ставим: 5 минут кэша
+                         resp->addHeader("Cache-Control", "public, max-age=300");
+                         resp->addHeader("X-Content-Type-Options", "nosniff");
+                         cb(resp);
+                     },
+                     [cb](const std::exception_ptr &) {
+                         sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", "база недоступна");
+                     });
+        },
+        {Get});
+
     // Сброс карантина внешних источников: после правки шаблона или починки базы
     // не нужно ждать 30 секунд или перезапускать сервер (ADR-130).
     // {label} — снять карантин с одного источника (ADR-148)
@@ -4012,16 +4215,95 @@ int main() {
                    });
     };
 
-    auto buildXlsx = [buildSheet](const std::string &reportId, const std::string &requestedDataset,
+    // Рисунки шаблона в книгу (ADR-169): картинки берём из хранилища и ставим над таблицей.
+    // Если рисунок удалили или он битый — книга всё равно собирается, просто без него.
+    auto attachImages = [db, &templatesRaw, &templatesMutex](
+                            const std::string &reportId, rep::ExportSheet sheet,
+                            std::function<void(rep::ExportSheet)> done) {
+        std::string raw;
+        {
+            std::lock_guard<TracedMutex> lock(templatesMutex);
+            const auto it = templatesRaw.find(reportId);
+            if (it != templatesRaw.end()) raw = it->second;
+        }
+        struct Want {
+            std::string id;
+            int height = 64;
+        };
+        std::vector<Want> wants;
+        if (!raw.empty()) {
+            Json::CharReaderBuilder reader;
+            Json::Value tpl;
+            std::string errs;
+            std::istringstream in(raw);
+            if (Json::parseFromStream(reader, in, &tpl, &errs) && tpl["blocks"].isArray()) {
+                for (const auto &b : tpl["blocks"]) {
+                    if (b.get("type", "").asString() != "image") continue;
+                    const std::string src = b.get("src", "").asString();
+                    if (src.rfind("/api/assets/", 0) != 0) continue;
+                    Want w;
+                    // "/api/assets/" — 12 символов, дальше идёт id
+                    w.id = src.substr(12);
+                    if (b["height"].isInt()) w.height = b["height"].asInt();
+                    wants.push_back(w);
+                }
+            }
+        }
+        if (wants.empty()) {
+            done(std::move(sheet));
+            return;
+        }
+        std::string inList;
+        for (const auto &w : wants) {
+            if (!rep::assets::isAssetId(w.id)) continue;
+            inList += (inList.empty() ? "'" : ",'") + w.id + "'";
+        }
+        if (inList.empty()) {
+            done(std::move(sheet));
+            return;
+        }
+        runQuery(
+            db, "SELECT id, encode(bytes, 'hex') AS data, height FROM report_assets WHERE id IN (" +
+                    inList + ")", {},
+            [sheet, wants, done](const orm::Result &res) mutable {
+                std::map<std::string, std::pair<std::string, int>> byId;
+                for (const auto &row : res) {
+                    std::string bytes;
+                    if (!rep::assets::fromHex(row["data"].as<std::string>(), bytes)) continue;
+                    byId[row["id"].as<std::string>()] = {bytes, row["height"].as<int>()};
+                }
+                int rows = 0;
+                int col = 0;
+                for (const auto &w : wants) {
+                    const auto it = byId.find(w.id);
+                    if (it == byId.end() || it->second.second <= 0) continue;
+                    rep::ExportImage image;
+                    image.data = it->second.first;
+                    image.col = col++;
+                    // высота в шаблоне — в пикселях, масштаб — относительно натуральной
+                    image.scale = static_cast<double>(w.height) / it->second.second;
+                    rows = std::max(rows, static_cast<int>(w.height / 20) + 1);
+                    sheet.images.push_back(std::move(image));
+                }
+                sheet.imageRows = rows;
+                done(std::move(sheet));
+            },
+            [sheet, done](const std::exception_ptr &) mutable { done(std::move(sheet)); });
+    };
+
+    auto buildXlsx = [buildSheet, attachImages](const std::string &reportId, const std::string &requestedDataset,
                                   const Json::Value &rawParams, const bool wantDraft,
                                   std::function<void(int, const std::string &, const std::string &, int)> done) {
         buildSheet(reportId, requestedDataset, rawParams, wantDraft,
-                   [done, reportId](int status, const std::string &code, const rep::ExportSheet &sheet,
-                                    const std::string &message) {
+                   [done, reportId, attachImages](int status, const std::string &code,
+                                                  const rep::ExportSheet &sheetOriginal,
+                                                  const std::string &message) {
                        if (status != 200) {
                            done(status, code, message, 0);
                            return;
                        }
+                       attachImages(reportId, sheetOriginal,
+                                    [done, reportId](rep::ExportSheet sheet) {
                        const std::string dir = rep::envOr("TMPDIR", "/tmp");
                        const std::string path = dir + "/rep-mail-" + reportId + "-" +
                                                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
@@ -4037,6 +4319,7 @@ int main() {
                        file.close();
                        std::remove(path.c_str());
                        done(200, "", buffer.str(), static_cast<int>(sheet.rows.size()));
+                                    });
                    });
     };
 
@@ -5996,6 +6279,8 @@ const std::string from = req->getParameter("from");
     startLogRetention();
 
     try {
+        // загрузка рисунков идёт multipart: тело до 4 МБ (файл до REP_ASSET_MAX_BYTES + обвязка)
+        app().setClientMaxBodySize(4 * 1024 * 1024);
         app().addListener(host, port).setThreadNum(threads).run();
     } catch (const std::exception &e) {
         // Планировщик и SMTP-поток живут отдельно от drogon: при фатальной ошибке
