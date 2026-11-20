@@ -356,9 +356,12 @@ onMounted(async () => {
 .subs {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 18px 16px 60px;
+  padding: 18px 16px 24px;
   font: 14px/1.45 system-ui, sans-serif;
   color: var(--rep-text);
+  /* подписки и их история бывают длинными — прокрутка внутри вкладки (ADR-174) */
+  height: 100%;
+  overflow: auto;
 }
 h1 {
   font-size: 20px;

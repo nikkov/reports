@@ -3847,3 +3847,51 @@ test('роли: компактная таблица, фильтры, модал�
   await page.waitForTimeout(1000)
   await expect(page.locator('tr[data-role="e2e_r"]')).toHaveCount(0)
 })
+
+test('журнал прокручивается внутри вкладки (ADR-174)', async ({ page }) => {
+  await page.goto('/reports/admin.html#audit')
+  await page.waitForSelector('.audit', { timeout: 20000 })
+  await page.waitForTimeout(2000)
+
+  const before = await page.evaluate(() => {
+    const el = document.querySelector('.audit')
+    const style = getComputedStyle(el)
+    return {
+      overflowY: style.overflowY,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      rows: document.querySelectorAll('.audit tbody tr').length
+    }
+  })
+  console.log('журнал:', JSON.stringify(before))
+
+  // прокручиваем до конца и проверяем, что последняя строка реально видна
+  const lastVisible = await page.evaluate(async () => {
+    const el = document.querySelector('.audit')
+    el.scrollTop = el.scrollHeight
+    await new Promise((r) => setTimeout(r, 400))
+    const rows = document.querySelectorAll('.audit tbody tr')
+    const last = rows[rows.length - 1]
+    if (!last) return null
+    const r = last.getBoundingClientRect()
+    const c = el.getBoundingClientRect()
+    return { text: last.innerText.slice(0, 40), inView: r.top >= c.top - 2 && r.bottom <= c.bottom + 2 }
+  })
+  console.log('последняя строка:', JSON.stringify(lastVisible))
+
+
+  expect(before.rows).toBeGreaterThan(10)
+  expect(['auto', 'scroll']).toContain(before.overflowY)
+  expect(before.scrollHeight).toBeGreaterThan(before.clientHeight)
+  expect(lastVisible.inView).toBe(true)
+
+  // у рассылки тоже есть прокрутка
+  await page.goto('/reports/admin.html#subscriptions')
+  await page.waitForTimeout(1500)
+  const subs = await page.evaluate(() => {
+    const el = document.querySelector('.subs')
+    return { overflowY: getComputedStyle(el).overflowY, h: el.scrollHeight, c: el.clientHeight }
+  })
+  console.log('рассылка:', JSON.stringify(subs))
+  expect(['auto', 'scroll']).toContain(subs.overflowY)
+})

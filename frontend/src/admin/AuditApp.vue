@@ -185,13 +185,27 @@ onMounted(reload)
 .audit {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 18px 16px 60px;
+  /* верхний отступ — у заголовка, а не у контейнера: иначе прилипшая шапка таблицы
+     оставляет полоску, в которой видна прокручиваемая строка */
+  padding: 0 16px 24px;
   font: 14px/1.45 system-ui, sans-serif;
   color: var(--rep-text);
+  /* Таблица журнала выше экрана: прокрутка должна быть у самой вкладки, иначе
+     оболочка (overflow: hidden) обрезает хвост и добраться до записей нельзя (ADR-174) */
+  height: 100%;
+  overflow: auto;
+}
+/* Шапка таблицы остаётся на виду при прокрутке длинного журнала */
+.list thead th {
+  position: sticky;
+  top: 0;
+  background: var(--rep-bg);
+  z-index: 2;
+  box-shadow: inset 0 -1px 0 var(--rep-border);
 }
 h1 {
   font-size: 20px;
-  margin: 0 0 6px;
+  margin: 18px 0 6px;
 }
 .muted {
   color: var(--rep-text-muted);

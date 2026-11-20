@@ -151,6 +151,8 @@ const session = computed(() => props.session)
   flex: 1;
   min-width: 0;
   min-height: 0;
+  /* панель, которая не умеет прокручиваться сама, всё равно не обрежется (ADR-174) */
+  overflow: auto;
 }
 @media print {
   .shell-bar {
