@@ -3848,50 +3848,54 @@ test('роли: компактная таблица, фильтры, модал�
   await expect(page.locator('tr[data-role="e2e_r"]')).toHaveCount(0)
 })
 
-test('журнал прокручивается внутри вкладки (ADR-174)', async ({ page }) => {
+test('журнал: прокручивается таблица, а не страница (ADR-175)', async ({ page }) => {
   await page.goto('/reports/admin.html#audit')
-  await page.waitForSelector('.audit', { timeout: 20000 })
+  await page.waitForSelector('[data-table-wrap]', { timeout: 20000 })
   await page.waitForTimeout(2000)
 
-  const before = await page.evaluate(() => {
-    const el = document.querySelector('.audit')
-    const style = getComputedStyle(el)
+  const pageState = await page.evaluate(() => {
+    const panel = document.querySelector('.audit')
     return {
-      overflowY: style.overflowY,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
+      panelOverflow: getComputedStyle(panel).overflow,
+      panelScrolls: panel.scrollHeight > panel.clientHeight + 1,
+      docScrolls: document.documentElement.scrollHeight > window.innerHeight + 1
+    }
+  })
+  console.log('страница:', JSON.stringify(pageState))
+  expect(pageState.panelScrolls).toBe(false)
+  expect(pageState.docScrolls).toBe(false)
+
+  const table = await page.evaluate(() => {
+    const wrap = document.querySelector('[data-table-wrap]')
+    return {
+      overflowY: getComputedStyle(wrap).overflowY,
+      scrollHeight: wrap.scrollHeight,
+      clientHeight: wrap.clientHeight,
       rows: document.querySelectorAll('.audit tbody tr').length
     }
   })
-  console.log('журнал:', JSON.stringify(before))
+  console.log('таблица:', JSON.stringify(table))
+  expect(['auto', 'scroll']).toContain(table.overflowY)
+  expect(table.scrollHeight).toBeGreaterThan(table.clientHeight)
+  expect(table.rows).toBeGreaterThan(10)
 
-  // прокручиваем до конца и проверяем, что последняя строка реально видна
-  const lastVisible = await page.evaluate(async () => {
-    const el = document.querySelector('.audit')
-    el.scrollTop = el.scrollHeight
+  // прокручиваем таблицу до конца: последняя строка видна, а шапка колонок осталась наверху
+  const bottom = await page.evaluate(async () => {
+    const wrap = document.querySelector('[data-table-wrap]')
+    wrap.scrollTop = wrap.scrollHeight
     await new Promise((r) => setTimeout(r, 400))
     const rows = document.querySelectorAll('.audit tbody tr')
     const last = rows[rows.length - 1]
-    if (!last) return null
+    const head = wrap.querySelector('thead th')
+    const c = wrap.getBoundingClientRect()
     const r = last.getBoundingClientRect()
-    const c = el.getBoundingClientRect()
-    return { text: last.innerText.slice(0, 40), inView: r.top >= c.top - 2 && r.bottom <= c.bottom + 2 }
+    const h = head.getBoundingClientRect()
+    return {
+      lastInView: r.top >= c.top - 2 && r.bottom <= c.bottom + 2,
+      headPinned: Math.abs(h.top - c.top) <= 2
+    }
   })
-  console.log('последняя строка:', JSON.stringify(lastVisible))
-
-
-  expect(before.rows).toBeGreaterThan(10)
-  expect(['auto', 'scroll']).toContain(before.overflowY)
-  expect(before.scrollHeight).toBeGreaterThan(before.clientHeight)
-  expect(lastVisible.inView).toBe(true)
-
-  // у рассылки тоже есть прокрутка
-  await page.goto('/reports/admin.html#subscriptions')
-  await page.waitForTimeout(1500)
-  const subs = await page.evaluate(() => {
-    const el = document.querySelector('.subs')
-    return { overflowY: getComputedStyle(el).overflowY, h: el.scrollHeight, c: el.clientHeight }
-  })
-  console.log('рассылка:', JSON.stringify(subs))
-  expect(['auto', 'scroll']).toContain(subs.overflowY)
+  console.log('низ таблицы:', JSON.stringify(bottom))
+  expect(bottom.lastInView).toBe(true)
+  expect(bottom.headPinned).toBe(true)
 })

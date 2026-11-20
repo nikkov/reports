@@ -1,5 +1,6 @@
 <template>
   <div class="audit">
+    <div class="audit-head">
     <h1>Журнал действий</h1>
     <p class="muted">
       Кто и когда публиковал шаблоны, менял роли, отправлял рассылку. Записи только добавляются —
@@ -40,8 +41,10 @@
     </div>
 
     <p v-if="error" class="err">{{ error }}</p>
+    </div>
 
-    <table class="list" v-if="items.length">
+    <div class="table-wrap" v-if="items.length" data-table-wrap>
+    <table class="list">
       <thead>
         <tr>
           <th>Когда</th>
@@ -65,6 +68,7 @@
         </tr>
       </tbody>
     </table>
+    </div>
     <p v-else class="muted">Записей нет.</p>
 
     <div v-if="items.length < total" class="more">
@@ -185,17 +189,31 @@ onMounted(reload)
 .audit {
   max-width: 1200px;
   margin: 0 auto;
-  /* верхний отступ — у заголовка, а не у контейнера: иначе прилипшая шапка таблицы
-     оставляет полоску, в которой видна прокручиваемая строка */
-  padding: 0 16px 24px;
+  padding: 18px 16px 16px;
   font: 14px/1.45 system-ui, sans-serif;
   color: var(--rep-text);
-  /* Таблица журнала выше экрана: прокрутка должна быть у самой вкладки, иначе
-     оболочка (overflow: hidden) обрезает хвост и добраться до записей нельзя (ADR-174) */
+  /* Панель вписывается в высоту экрана: прокручивается только таблица (ADR-175) */
   height: 100%;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
 }
-/* Шапка таблицы остаётся на виду при прокрутке длинного журнала */
+.audit-head {
+  flex: 0 0 auto;
+}
+/* Единственная прокручиваемая область: сообщения журнала */
+.table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--rep-border);
+  background: var(--rep-surface);
+}
+.table-wrap .list {
+  border: none;
+}
+/* Шапка таблицы остаётся на виду при прокрутке сообщений */
 .list thead th {
   position: sticky;
   top: 0;
