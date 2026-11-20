@@ -3690,3 +3690,90 @@ test('роли — отдельная вкладка, пользователи �
   await page.goto('/reports/admin.html#roles')
   await page.waitForTimeout(1200)
 })
+
+test('пользователи: компактная таблица, фильтры, модалка (ADR-172)', async ({ page, request }) => {
+  // готовим двух пользователей разных ролей
+  const users = await (await request.get('/api/admin/users')).json()
+  for (const u of users.items.filter((x) => x.login.startsWith('e2e_f_'))) {
+    await request.delete(`/api/admin/users/${u.id}`)
+  }
+  const a = await request.post('/api/admin/users', {
+    data: { login: 'e2e_f_viewer', role: 'viewer', password: 'e2e-pass-123' }
+  })
+  expect(a.ok()).toBeTruthy()
+  const b = await request.post('/api/admin/users', {
+    data: { login: 'e2e_f_author', role: 'author', password: 'e2e-pass-123', roles: ['finance'] }
+  })
+  expect(b.ok()).toBeTruthy()
+
+  await page.goto('/reports/admin.html#users')
+  await page.waitForSelector('[data-users-table]', { timeout: 20000 })
+  await page.waitForTimeout(1200)
+
+  // высота строки минимальная (в старом варианте её раздували чекбоксы ролей)
+  const row = page.locator('tr[data-user="e2e_f_viewer"]')
+  const box = await row.boundingBox()
+  console.log('высота строки:', Math.round(box.height))
+  expect(box.height).toBeLessThanOrEqual(40)
+
+  // фильтр по логину
+  const counter = page.locator('[data-counter]')
+  await page.locator('[data-filter-login]').fill('e2e_f_')
+  await page.waitForTimeout(300)
+  console.log('после фильтра по логину:', await counter.innerText())
+  expect(await counter.innerText()).toContain('2 из')
+  expect(await page.locator('tbody tr').count()).toBe(2)
+
+  // фильтр по системной роли
+  await page.locator('[data-filter-login]').fill('')
+  await page.locator('[data-filter-role]').selectOption('author')
+  await page.waitForTimeout(300)
+  console.log('после фильтра по роли:', await counter.innerText())
+  expect(await page.locator('tbody tr').count()).toBe(1)
+
+  // фильтр по роли доступа
+  await page.locator('[data-filter-role]').selectOption('')
+  await page.locator('[data-filter-access]').selectOption('finance')
+  await page.waitForTimeout(300)
+  // роли доступа есть и у других учётных записей — проверяем, что наш автор остался, а viewer без ролей ушёл
+  expect(await page.locator('tr[data-user="e2e_f_author"]').count()).toBe(1)
+  expect(await page.locator('tr[data-user="e2e_f_viewer"]').count()).toBe(0)
+
+  // фильтр по состоянию: оба включены
+  await page.locator('[data-filter-access]').selectOption('')
+  await page.locator('[data-filter-state]').selectOption('off')
+  await page.waitForTimeout(300)
+  console.log('отключённых:', await page.locator('tbody tr').count())
+  expect(await page.locator('tr[data-user="e2e_f_viewer"]').count()).toBe(0)
+
+  await page.locator('[data-reset-filters]').click()
+  await page.waitForTimeout(300)
+  expect(await page.locator('tbody tr').count()).toBeGreaterThanOrEqual(3)
+
+  // модальное окно создания
+  await page.locator('[data-open-create]').click()
+  await page.waitForSelector('.dialog', { timeout: 5000 })
+  await page.locator('[data-form-login]').fill('e2e_f_created')
+  await page.locator('[data-form-role]').selectOption('viewer')
+  await page.locator('[data-form-password]').fill('e2e-pass-123')
+  await page.locator('[data-form-submit]').click()
+  await page.waitForTimeout(1200)
+  await expect(page.locator('.dialog')).toHaveCount(0)
+  await expect(page.locator('tr[data-user="e2e_f_created"]')).toHaveCount(1)
+
+  // правка через модалку: включаем роль доступа
+  await page.locator('tr[data-user="e2e_f_created"]').getByRole('button', { name: 'Изменить' }).click()
+  await page.waitForSelector('.dialog', { timeout: 5000 })
+  await page.locator('.dialog .role-check', { hasText: 'finance' }).locator('input').check()
+  await page.locator('[data-form-submit]').click()
+  await page.waitForTimeout(1200)
+  const edited = await (await request.get('/api/admin/users')).json()
+  const created = edited.items.find((u) => u.login === 'e2e_f_created')
+  console.log('роли после правки:', JSON.stringify(created.roles))
+  expect(created.roles).toContain('finance')
+
+
+  for (const u of edited.items.filter((x) => x.login.startsWith('e2e_f_'))) {
+    await request.delete(`/api/admin/users/${u.id}`)
+  }
+})
