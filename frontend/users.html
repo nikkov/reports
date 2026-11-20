@@ -4,9 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Пользователи</title>
+    <!-- Раздел переехал во вкладку админки (ADR-170): старые ссылки и закладки продолжают работать -->
+    <script>
+      location.replace('admin.html#users')
+    </script>
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/admin/users.js"></script>
+    <p style="font: 14px system-ui; padding: 24px">
+      Раздел «Пользователи» открывается во вкладке администрирования:
+      <a href="admin.html#users">перейти</a>.
+    </p>
   </body>
 </html>

@@ -4,9 +4,6 @@
       <div class="brand">
         <div>
           <h1>Шаблоны отчётов</h1>
-      <a class="subs-link" href="subscriptions.html">Рассылка отчётов →</a>
-      <a class="subs-link" href="users.html">Пользователи →</a>
-      <a class="subs-link" href="audit.html">Журнал действий →</a>
       <button class="subs-link" type="button" :disabled="sourcesBusy" @click="resetSources">
         {{ sourcesBusy ? 'Проверяю источники…' : 'Проверить источники данных' }}
       </button>
@@ -131,7 +128,6 @@
             {{ historyOpen ? 'Скрыть историю' : 'История' }}
           </button>
         </div>
-        <ThemeToggle />
       </header>
 
       <div class="statusbar">
@@ -419,7 +415,6 @@
 </template>
 
 <script setup>
-import ThemeToggle from '../components/ThemeToggle.vue'
 // Админка шаблонов: список отчётов, редактор JSON на CodeMirror 6, проверка и история версий.
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { basicSetup } from 'codemirror'
@@ -1883,7 +1878,7 @@ body {
 .shell {
   display: flex;
   height: 100%;
-  min-height: 100vh;
+  min-height: 100%;
 }
 
 /* ---------- левая колонка ---------- */
@@ -2018,7 +2013,7 @@ h1 {
   flex-direction: column;
   gap: 10px;
   padding: 16px 20px 20px;
-  height: 100vh;
+  height: 100%;
 }
 .head {
   display: flex;

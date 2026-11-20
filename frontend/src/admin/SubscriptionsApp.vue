@@ -1,6 +1,5 @@
 <template>
   <div class="subs">
-    <div class="theme-slot"><ThemeToggle /></div>
     <h1>Рассылка отчётов</h1>
     <p class="muted">
       Подписка отправляет файл отчёта (CSV или XLSX) на почту по расписанию. Время cron считается
@@ -149,7 +148,6 @@
 </template>
 
 <script setup>
-import ThemeToggle from '../components/ThemeToggle.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { api } from '../api/client.js'
 
@@ -485,9 +483,5 @@ textarea {
 .buttons {
   display: flex;
   gap: 8px;
-}
-.theme-slot {
-  display: flex;
-  justify-content: flex-end;
 }
 </style>

@@ -1,6 +1,5 @@
 <template>
   <div class="users">
-    <div class="theme-slot"><ThemeToggle /></div>
     <h1>Пользователи</h1>
     <p class="muted">
       Роли: <b>viewer</b> — читает отчёты, <b>author</b> — создаёт и правит черновики,
@@ -128,7 +127,6 @@
 </template>
 
 <script setup>
-import ThemeToggle from '../components/ThemeToggle.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { api } from '../api/client.js'
 
@@ -441,9 +439,5 @@ td.roles {
   gap: 4px;
   font-size: 12px;
   white-space: nowrap;
-}
-.theme-slot {
-  display: flex;
-  justify-content: flex-end;
 }
 </style>

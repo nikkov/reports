@@ -1,6 +1,5 @@
 <template>
   <div class="audit">
-    <div class="theme-slot"><ThemeToggle /></div>
     <h1>Журнал действий</h1>
     <p class="muted">
       Кто и когда публиковал шаблоны, менял роли, отправлял рассылку. Записи только добавляются —
@@ -77,7 +76,6 @@
 </template>
 
 <script setup>
-import ThemeToggle from '../components/ThemeToggle.vue'
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client.js'
 
@@ -116,11 +114,19 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ru-RU')
 }
 
+// Детали события: раньше объект context печатался как «[object Object]», и в журнале было
+// нечитаемо. Теперь показываем текст события, а служебные поля (context/level/ts), которые
+// дублируют колонки, не выводим (ADR-170).
 function details(value) {
-  if (!value || !Object.keys(value).length) return '—'
-  return Object.entries(value)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join(' · ')
+  if (!value || typeof value !== 'object') return value ? String(value) : '—'
+  const skip = new Set(['context', 'level', 'ts', 'message'])
+  const parts = []
+  if (value.message) parts.push(String(value.message))
+  for (const [k, v] of Object.entries(value)) {
+    if (skip.has(k)) continue
+    parts.push(`${k}: ${v && typeof v === 'object' ? JSON.stringify(v) : v}`)
+  }
+  return parts.length ? parts.join(' · ') : '—'
 }
 
 // Выгрузка идёт по тем же фильтрам, что и список (ADR-67): архив должен совпадать с тем,
@@ -268,9 +274,5 @@ select {
 }
 .more {
   margin-top: 12px;
-}
-.theme-slot {
-  display: flex;
-  justify-content: flex-end;
 }
 </style>

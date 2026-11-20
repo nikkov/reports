@@ -3594,3 +3594,52 @@ test('блок рисунка: экран, Excel и админка (ADR-169)', a
   })
   expect(doc).toContain('/api/assets/')
 })
+
+test('админка: разделы — вкладки одной страницы (ADR-170)', async ({ page }) => {
+  await page.goto('/reports/admin.html')
+  await page.waitForSelector('.shell-tabs', { timeout: 20000 })
+  await page.waitForTimeout(1500)
+
+  const tabs = await page.locator('.shell-tab').allInnerTexts()
+  expect(tabs).toEqual(['Шаблоны', 'Пользователи', 'Рассылка', 'Журнал'])
+
+  // шаблоны по умолчанию: сайдбар с отчётами на месте, раскладка не поехала
+  expect(await page.locator('.sidebar').count()).toBe(1)
+  const sidebar = await page.locator('.sidebar').boundingBox()
+  console.log('сайдбар:', JSON.stringify(sidebar))
+  expect(sidebar.height).toBeGreaterThan(500)
+  
+
+  // пользователи
+  await page.locator('.shell-tab', { hasText: 'Пользователи' }).click()
+  await page.waitForTimeout(1200)
+  expect(page.url()).toContain('#users')
+  expect(await page.locator('.users h1').innerText()).toBe('Пользователи')
+
+  // рассылка
+  await page.locator('.shell-tab', { hasText: 'Рассылка' }).click()
+  await page.waitForTimeout(1200)
+  expect(await page.locator('h1', { hasText: 'Рассылка' }).count()).toBeGreaterThanOrEqual(1)
+
+  // журнал: детали события читаемые, без «[object Object]»
+  await page.locator('.shell-tab', { hasText: 'Журнал' }).click()
+  await page.waitForTimeout(2000)
+  const audit = await page.locator('.audit').innerText()
+  expect(audit).not.toContain('[object Object]')
+  console.log('детали журнала:', audit.split('\n').filter((l) => l.includes('·')).slice(0, 2).join(' | ').slice(0, 200))
+  
+
+  // возврат на шаблоны: состояние сайдбара сохраняется (keep-alive)
+  await page.locator('.shell-tab', { hasText: 'Шаблоны' }).click()
+  await page.waitForTimeout(1000)
+  expect(await page.locator('.sidebar').count()).toBe(1)
+
+  // старая страница перенаправляет во вкладку
+  await page.goto('/reports/audit.html')
+  await page.waitForTimeout(1800)
+  console.log('после audit.html:', page.url())
+  expect(page.url()).toContain('#audit')
+
+  // переключатель темы один — в полосе вкладок
+  expect(await page.locator('.theme-toggle').count()).toBe(1)
+})

@@ -4,9 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Рассылка отчётов</title>
+    <!-- Раздел переехал во вкладку админки (ADR-170): старые ссылки и закладки продолжают работать -->
+    <script>
+      location.replace('admin.html#subscriptions')
+    </script>
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/admin/subscriptions.js"></script>
+    <p style="font: 14px system-ui; padding: 24px">
+      Раздел «Рассылка отчётов» открывается во вкладке администрирования:
+      <a href="admin.html#subscriptions">перейти</a>.
+    </p>
   </body>
 </html>
