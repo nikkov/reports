@@ -3661,17 +3661,20 @@ test('роли — отдельная вкладка, пользователи �
   console.log('finance:', (await finance.innerText()).replace(/\n/g, ' | '))
 
   // создаём роль
-  await page.locator('[data-new-role-key]').fill('e2e-role')
-  await page.locator('[data-new-role-title]').fill('Роль для теста')
-  await page.locator('[data-add-role]').click()
+  await page.locator('[data-open-create]').click()
+  await page.waitForSelector('.dialog', { timeout: 5000 })
+  await page.locator('[data-form-key]').fill('e2e-role')
+  await page.locator('[data-form-title]').fill('Роль для теста')
+  await page.locator('[data-form-submit]').click()
   await page.waitForTimeout(1200)
   const created = page.locator('tr[data-role="e2e-role"]')
   await expect(created).toHaveCount(1)
 
   // переименовываем
-  await created.getByRole('button', { name: 'Переименовать' }).click()
-  await created.locator('input.inline-input').fill('Роль для теста (изм.)')
-  await created.getByRole('button', { name: 'Сохранить' }).click()
+  await created.getByRole('button', { name: 'Изменить' }).click()
+  await page.waitForSelector('.dialog', { timeout: 5000 })
+  await page.locator('[data-form-title]').fill('Роль для теста (изм.)')
+  await page.locator('[data-form-submit]').click()
   await page.waitForTimeout(1200)
   expect(await page.locator('tr[data-role="e2e-role"]').innerText()).toContain('изм.')
 
@@ -3776,4 +3779,71 @@ test('пользователи: компактная таблица, фильт�
   for (const u of edited.items.filter((x) => x.login.startsWith('e2e_f_'))) {
     await request.delete(`/api/admin/users/${u.id}`)
   }
+})
+
+test('роли: компактная таблица, фильтры, модалка (ADR-173)', async ({ page, request }) => {
+  await page.goto('/reports/admin.html#roles')
+  await page.waitForSelector('[data-roles-table]', { timeout: 20000 })
+  await page.waitForTimeout(1200)
+
+  // строка минимальной высоты
+  const box = await page.locator('tr[data-role="finance"]').boundingBox()
+  console.log('высота строки роли:', Math.round(box.height))
+  expect(box.height).toBeLessThanOrEqual(40)
+
+  // фильтр по ключу
+  const counter = page.locator('[data-counter]')
+  await page.locator('[data-filter-q]').fill('fin')
+  await page.waitForTimeout(300)
+  console.log('фильтр по ключу:', await counter.innerText())
+  expect(await page.locator('tbody tr').count()).toBe(1)
+  expect(await page.locator('tr[data-role="finance"]').count()).toBe(1)
+
+  // фильтр по названию (кириллица)
+  await page.locator('[data-filter-q]').fill('Продаж')
+  await page.waitForTimeout(300)
+  expect(await page.locator('tr[data-role="sales"]').count()).toBe(1)
+  expect(await page.locator('tr[data-role="finance"]').count()).toBe(0)
+
+  // фильтр по использованию: «закрывает отчёты» оставляет только используемые
+  await page.locator('[data-filter-q]').fill('')
+  await page.locator('[data-filter-usage]').selectOption('reports')
+  await page.waitForTimeout(300)
+  const withReports = await page.locator('tbody tr').count()
+  console.log('роли с отчётами:', withReports)
+  expect(withReports).toBeGreaterThanOrEqual(1)
+
+  // «не используется» — только пустые роли
+  await page.locator('[data-filter-usage]').selectOption('unused')
+  await page.waitForTimeout(300)
+  const unused = await page.locator('tbody tr').count()
+  console.log('не используется:', unused)
+
+  await page.locator('[data-reset-filters]').click()
+  await page.waitForTimeout(300)
+
+  // модалка создания
+  await page.locator('[data-open-create]').click()
+  await page.waitForSelector('.dialog', { timeout: 5000 })
+  await page.locator('[data-form-key]').fill('e2e_r')
+  await page.locator('[data-form-title]').fill('Тестовая роль')
+  await page.locator('[data-form-submit]').click()
+  await page.waitForTimeout(1200)
+  await expect(page.locator('.dialog')).toHaveCount(0)
+  await expect(page.locator('tr[data-role="e2e_r"]')).toHaveCount(1)
+
+  // модалка правки показывает, кому выдана роль и какие отчёты закрывает
+  await page.locator('tr[data-role="finance"]').getByRole('button', { name: 'Изменить' }).click()
+  await page.waitForSelector('.dialog', { timeout: 5000 })
+  const usage = await page.locator('.dialog .usage').innerText()
+  console.log('использование finance:', usage.replace(/\n/g, ' | '))
+  expect(usage).toContain('Пользователи:')
+  await page.locator('.dialog .tool', { hasText: 'Отмена' }).click()
+
+
+  // уборка
+  page.once('dialog', (d) => d.accept())
+  await page.locator('tr[data-role="e2e_r"]').getByRole('button', { name: 'Удалить' }).click()
+  await page.waitForTimeout(1000)
+  await expect(page.locator('tr[data-role="e2e_r"]')).toHaveCount(0)
 })

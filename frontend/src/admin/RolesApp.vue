@@ -1,10 +1,15 @@
 <template>
-  <!-- Роли доступа (ADR-171): отдельная вкладка. Ключ роли указывается в шаблоне (accessRoles)
-       и выдаётся пользователям; здесь — справочник, кто и что этой ролью закрыто. -->
+  <!-- Роли доступа (ADR-171, ADR-173): компактная таблица, фильтры и модальное создание/правка,
+       как на вкладке «Пользователи». Ключ роли после создания не меняется. -->
   <div class="roles-page">
-    <h1>Роли доступа</h1>
+    <header class="page-head">
+      <h1>Роли доступа</h1>
+      <button type="button" class="tool primary" data-open-create @click="openCreate">
+        Добавить роль
+      </button>
+    </header>
     <p class="muted">
-      Роль — это ключ, который указывается в шаблоне отчёта (<code>accessRoles</code>) и выдаётся
+      Роль — ключ, который указывается в шаблоне отчёта (<code>accessRoles</code>) и выдаётся
       пользователям во вкладке «Пользователи». Пустой список у отчёта — доступ всем авторизованным,
       администратор видит всё. Удаление роли снимает её у всех пользователей.
     </p>
@@ -12,7 +17,35 @@
     <p v-if="error" class="err">{{ error }}</p>
     <p v-if="notice" class="ok">{{ notice }}</p>
 
-    <table class="list" v-if="items.length">
+    <!-- Фильтры: ключ или название, использование -->
+    <div class="filters" data-filters>
+      <label class="f-search">
+        <span>Ключ или название</span>
+        <input
+          v-model.trim="filters.q"
+          placeholder="finance или Финансы"
+          autocomplete="off"
+          data-filter-q
+        />
+      </label>
+      <label>
+        <span>Использование</span>
+        <select v-model="filters.usage" data-filter-usage>
+          <option value="">все</option>
+          <option value="users">выдана пользователям</option>
+          <option value="reports">закрывает отчёты</option>
+          <option value="unused">не используется</option>
+        </select>
+      </label>
+      <button v-if="hasFilters" type="button" class="link" data-reset-filters @click="resetFilters">
+        сбросить
+      </button>
+      <span class="muted small counter" data-counter>
+        показано {{ filtered.length }} из {{ items.length }}
+      </span>
+    </div>
+
+    <table class="list" v-if="filtered.length" data-roles-table>
       <thead>
         <tr>
           <th>Ключ</th>
@@ -23,12 +56,9 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="r in items" :key="r.id" :data-role="r.key">
-          <td><code>{{ r.key }}</code></td>
-          <td>
-            <input v-if="editId === r.id" v-model.trim="editTitle" class="inline-input" />
-            <span v-else>{{ r.title }}</span>
-          </td>
+        <tr v-for="r in filtered" :key="r.id" :data-role="r.key">
+          <td><code class="key">{{ r.key }}</code></td>
+          <td class="title">{{ r.title }}</td>
           <td>
             <button
               v-if="usersIn(r.key).length"
@@ -39,55 +69,74 @@
             <span v-else class="muted">0</span>
           </td>
           <td>
-            <span v-if="reportsIn(r.key).length" :title="reportsIn(r.key).join(', ')">
-              {{ reportsIn(r.key).length }}
-            </span>
+            <span
+              v-if="reportsIn(r.key).length"
+              class="count-static"
+              :title="reportsIn(r.key).join(', ')"
+            >{{ reportsIn(r.key).length }}</span>
             <span v-else class="muted">0</span>
           </td>
           <td class="actions">
-            <template v-if="editId === r.id">
-              <button type="button" class="tool primary" :disabled="saving" @click="saveTitle(r)">
-                Сохранить
-              </button>
-              <button type="button" class="tool" @click="cancelEdit">Отмена</button>
-            </template>
-            <template v-else>
-              <button type="button" class="tool" :disabled="saving" @click="startEdit(r)">
-                Переименовать
-              </button>
-              <button type="button" class="tool danger" :disabled="saving" @click="remove(r)">
-                Удалить
-              </button>
-            </template>
+            <button type="button" class="tool" :disabled="busy === r.id" @click="openEdit(r)">
+              Изменить
+            </button>
+            <button type="button" class="tool danger" :disabled="busy === r.id" @click="remove(r)">
+              Удалить
+            </button>
           </td>
         </tr>
       </tbody>
     </table>
-    <p v-else class="muted">Ролей пока нет — добавьте первую ниже.</p>
+    <p v-else-if="items.length" class="muted">Ничего не нашли — измените фильтры.</p>
+    <p v-else class="muted">Ролей пока нет — добавьте первую.</p>
 
-    <form class="form" @submit.prevent="add">
-      <h2>Новая роль</h2>
-      <label>
-        Ключ
-        <input v-model.trim="form.key" placeholder="finance" autocomplete="off" data-new-role-key />
-        <span class="hint">
-          латиница в нижнем регистре, цифры, «_» и «-», от 2 до 32 символов; по ключу роль
-          указывается в шаблоне
-        </span>
-      </label>
-      <label>
-        Название
-        <input v-model.trim="form.title" placeholder="Финансы" autocomplete="off" data-new-role-title />
-      </label>
-      <button type="submit" class="tool primary" :disabled="saving" data-add-role>
-        {{ saving ? 'Сохранение…' : 'Добавить роль' }}
-      </button>
-    </form>
+    <!-- Диалог создания и переименования -->
+    <div v-if="modal" class="overlay" @click.self="closeModal">
+      <form class="dialog" @submit.prevent="submit">
+        <h3>{{ modal === 'create' ? 'Новая роль доступа' : `Роль ${edit.key}` }}</h3>
+
+        <label v-if="modal === 'create'">
+          Ключ
+          <input v-model.trim="form.key" placeholder="finance" autocomplete="off" data-form-key />
+          <span class="hint">
+            латиница в нижнем регистре, цифры, «_» и «-», от 2 до 32 символов. Ключ указывается в
+            шаблоне (<code>accessRoles</code>) и после создания не меняется.
+          </span>
+        </label>
+        <p v-else class="form-meta"><code class="key">{{ edit.key }}</code></p>
+
+        <label>
+          Название
+          <input v-model.trim="form.title" placeholder="Финансы" autocomplete="off" data-form-title />
+        </label>
+
+        <div v-if="modal === 'edit'" class="usage">
+          <p>
+            <b>Пользователи:</b>
+            <span v-if="usersIn(edit.key).length">{{ usersIn(edit.key).join(', ') }}</span>
+            <span v-else class="muted">никому не выдана</span>
+          </p>
+          <p>
+            <b>Отчёты:</b>
+            <span v-if="reportsIn(edit.key).length">{{ reportsIn(edit.key).join(', ') }}</span>
+            <span v-else class="muted">не закрывает ни одного отчёта</span>
+          </p>
+        </div>
+
+        <p v-if="modalError" class="err">{{ modalError }}</p>
+        <div class="buttons">
+          <button type="submit" class="tool primary" :disabled="saving" data-form-submit>
+            {{ saving ? 'Сохранение…' : modal === 'create' ? 'Создать' : 'Сохранить' }}
+          </button>
+          <button type="button" class="tool" @click="closeModal">Отмена</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../api/client.js'
 
 const items = ref([])
@@ -96,10 +145,44 @@ const reports = ref([])
 const error = ref(null)
 const notice = ref(null)
 const saving = ref(false)
-const editId = ref(null)
-const editTitle = ref('')
+const busy = ref(null)
 
+const filters = reactive({ q: '', usage: '' })
+
+const modal = ref(null) // 'create' | 'edit'
+const edit = ref(null)
+const modalError = ref(null)
 const form = reactive({ key: '', title: '' })
+
+// кто носит роль и какие отчёты ею закрыты — видно сразу, без перехода на другие вкладки
+function usersIn(key) {
+  return users.value.filter((u) => (u.roles || []).includes(key)).map((u) => u.login)
+}
+function reportsIn(key) {
+  return reports.value.filter((r) => (r.accessRoles || []).includes(key)).map((r) => r.id)
+}
+
+const hasFilters = computed(() => Boolean(filters.q || filters.usage))
+
+const filtered = computed(() => {
+  const q = filters.q.toLowerCase()
+  return items.value.filter((r) => {
+    if (q && !r.key.toLowerCase().includes(q) && !(r.title || '').toLowerCase().includes(q)) {
+      return false
+    }
+    const hasUsers = usersIn(r.key).length > 0
+    const hasReports = reportsIn(r.key).length > 0
+    if (filters.usage === 'users' && !hasUsers) return false
+    if (filters.usage === 'reports' && !hasReports) return false
+    if (filters.usage === 'unused' && (hasUsers || hasReports)) return false
+    return true
+  })
+})
+
+function resetFilters() {
+  filters.q = ''
+  filters.usage = ''
+}
 
 async function load() {
   error.value = null
@@ -113,77 +196,65 @@ async function load() {
   }
 }
 
-// кто носит роль и какие отчёты ею закрыты — видно сразу, без перехода на другие вкладки
-function usersIn(key) {
-  return users.value.filter((u) => (u.roles || []).includes(key)).map((u) => u.login)
-}
-function reportsIn(key) {
-  return reports.value.filter((r) => (r.accessRoles || []).includes(key)).map((r) => r.id)
+function openCreate() {
+  modalError.value = null
+  edit.value = null
+  Object.assign(form, { key: '', title: '' })
+  modal.value = 'create'
 }
 
-async function add() {
+function openEdit(role) {
+  modalError.value = null
+  edit.value = role
+  Object.assign(form, { key: role.key, title: role.title })
+  modal.value = 'edit'
+}
+
+function closeModal() {
+  modal.value = null
+  edit.value = null
+  modalError.value = null
+}
+
+async function submit() {
   saving.value = true
-  error.value = null
+  modalError.value = null
   notice.value = null
   try {
-    await api.createAccessRole({ key: form.key.trim(), title: form.title.trim() })
-    notice.value = `Роль ${form.key} добавлена`
-    form.key = ''
-    form.title = ''
+    if (modal.value === 'create') {
+      await api.createAccessRole({ key: form.key.trim(), title: form.title.trim() })
+      notice.value = `Роль ${form.key} добавлена`
+    } else {
+      await api.updateAccessRole(edit.value.id, { title: form.title })
+      notice.value = `Роль ${edit.value.key} переименована`
+    }
     await load()
+    closeModal()
   } catch (e) {
-    error.value = e.message
-  } finally {
-    saving.value = false
-  }
-}
-
-function startEdit(role) {
-  editId.value = role.id
-  editTitle.value = role.title
-  error.value = null
-}
-
-function cancelEdit() {
-  editId.value = null
-  editTitle.value = ''
-}
-
-async function saveTitle(role) {
-  if (!editTitle.value) {
-    error.value = 'название роли не может быть пустым'
-    return
-  }
-  saving.value = true
-  error.value = null
-  try {
-    await api.updateAccessRole(role.id, { title: editTitle.value })
-    notice.value = `Роль ${role.key} переименована`
-    cancelEdit()
-    await load()
-  } catch (e) {
-    error.value = e.message
+    modalError.value = e.message
   } finally {
     saving.value = false
   }
 }
 
 async function remove(role) {
-  const inUse = reportsIn(role.key)
-  const warning = inUse.length
-    ? `Роль «${role.key}» закрывает отчёты: ${inUse.join(', ')}. После удаления они станут доступны всем авторизованным.`
-    : `Удалить роль «${role.key}»? Она снимется у всех пользователей.`
-  if (!window.confirm(warning)) return
-  saving.value = true
+  const inReports = reportsIn(role.key)
+  const inUsers = usersIn(role.key)
+  const parts = [`Удалить роль «${role.key}»?`]
+  if (inUsers.length) parts.push(`Она снимется у пользователей: ${inUsers.join(', ')}.`)
+  if (inReports.length) parts.push(`Отчёты ${inReports.join(', ')} станут доступны всем авторизованным.`)
+  if (!window.confirm(parts.join(' '))) return
+  busy.value = role.id
   error.value = null
   try {
     await api.deleteAccessRole(role.id)
     notice.value = `Роль ${role.key} удалена`
+    if (edit.value && edit.value.id === role.id) closeModal()
     await load()
   } catch (e) {
     error.value = e.message
   } finally {
-    saving.value = false
+    busy.value = null
   }
 }
 
@@ -192,122 +263,227 @@ onMounted(load)
 
 <style scoped>
 .roles-page {
-  padding: 16px 20px 20px;
-  max-width: 1040px;
-  overflow: auto;
+  padding: 16px 16px 48px;
+  max-width: 1100px;
+  margin: 0 auto;
   height: 100%;
+  overflow: auto;
+  font: 13px/1.45 system-ui, sans-serif;
   color: var(--rep-text);
+}
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 h1 {
   font-size: 18px;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
-h2 {
-  font-size: 14px;
-  margin: 0 0 8px;
+h3 {
+  font-size: 15px;
+  margin: 0 0 6px;
 }
 .muted {
   color: var(--rep-text-muted);
   font-size: 12.5px;
-  margin: 0 0 12px;
+}
+.small {
+  font-size: 12px;
 }
 .err {
-  color: var(--rep-danger, #8c1f1f);
-  font-size: 13px;
+  color: var(--rep-danger-strong);
 }
 .ok {
-  color: var(--rep-success, #1f6f3f);
-  font-size: 13px;
+  color: var(--rep-ok);
 }
+
+/* Фильтры */
+.filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--rep-border);
+  margin-bottom: 8px;
+}
+.filters label {
+  display: grid;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--rep-text-muted);
+}
+.f-search input {
+  min-width: 220px;
+}
+.filters input,
+.filters select {
+  padding: 4px 6px;
+  border: 1px solid var(--rep-border-input);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12.5px;
+  background: var(--rep-surface);
+  color: var(--rep-text);
+}
+.link {
+  border: none;
+  background: none;
+  padding: 0 0 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--rep-focus);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.counter {
+  margin-left: auto;
+  padding-bottom: 4px;
+}
+
+/* Таблица: строка минимальной высоты */
 .list {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
-  margin-bottom: 18px;
+  background: var(--rep-surface);
+  border: 1px solid var(--rep-border);
+}
+.list th,
+.list td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--rep-code-bg);
+  vertical-align: middle;
+  line-height: 1.25;
 }
 .list th {
-  text-align: left;
+  background: var(--rep-bg);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: var(--rep-text-muted);
-  border-bottom: 1px solid var(--rep-border);
-  padding: 6px 8px;
 }
 .list td {
-  border-bottom: 1px solid var(--rep-border);
-  padding: 6px 8px;
-  vertical-align: middle;
+  height: 28px;
 }
-.actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
+.key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  padding: 1px 6px;
+  border: 1px solid var(--rep-border);
+  border-radius: 999px;
+}
+.title {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .count {
   border: none;
   background: none;
   padding: 0;
   font: inherit;
-  color: var(--rep-accent);
+  color: var(--rep-focus);
   text-decoration: underline dotted;
   cursor: help;
 }
-.inline-input {
-  font: inherit;
-  padding: 3px 6px;
-  border: 1px solid var(--rep-border);
-  border-radius: 5px;
-  background: var(--rep-surface);
-  color: var(--rep-text);
+.count-static {
+  cursor: help;
 }
-.form {
+.actions {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 460px;
-}
-.form label {
-  display: flex;
-  flex-direction: column;
   gap: 4px;
-  font-size: 12.5px;
-  color: var(--rep-text-muted);
-}
-.form input {
-  font: inherit;
-  padding: 6px 8px;
-  border: 1px solid var(--rep-border);
-  border-radius: 6px;
-  background: var(--rep-surface);
-  color: var(--rep-text);
-}
-.hint {
-  font-size: 11.5px;
-  color: var(--rep-text-muted);
+  justify-content: flex-end;
+  white-space: nowrap;
 }
 .tool {
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 10px;
-  border: 1px solid var(--rep-border);
-  border-radius: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--rep-border-input);
   background: var(--rep-surface);
-  color: var(--rep-text);
+  border-radius: 5px;
   cursor: pointer;
+  font-size: 12px;
+  color: var(--rep-text);
 }
 .tool:hover {
   background: var(--rep-surface-hover);
 }
 .tool.primary {
-  border-color: var(--rep-accent);
-  color: var(--rep-accent);
-  align-self: flex-start;
+  background: var(--rep-focus);
+  border-color: var(--rep-focus);
+  color: var(--rep-surface);
 }
 .tool.danger {
-  color: var(--rep-danger, #8c1f1f);
+  color: var(--rep-danger-strong);
 }
 .tool:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* Диалог */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 20, 25, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 50;
+}
+.dialog {
+  background: var(--rep-surface);
+  color: var(--rep-text);
+  border: 1px solid var(--rep-border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  width: min(520px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+.dialog label {
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--rep-text-muted);
+}
+.dialog input {
+  padding: 5px 8px;
+  border: 1px solid var(--rep-border-input);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--rep-surface);
+  color: var(--rep-text);
+}
+.form-meta {
+  margin: 0;
+}
+.usage {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--rep-text-muted);
+}
+.usage p {
+  margin: 0;
+}
+.hint {
+  color: var(--rep-text-faint);
+  font-size: 11.5px;
+}
+.buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 </style>
