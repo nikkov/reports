@@ -3899,3 +3899,43 @@ test('журнал: прокручивается таблица, а не стр�
   expect(bottom.lastInView).toBe(true)
   expect(bottom.headPinned).toBe(true)
 })
+
+test('журнал: период по умолчанию — текущий месяц (ADR-176)', async ({ page }) => {
+  await page.goto('/reports/admin.html#audit')
+  await page.waitForSelector('[data-table-wrap]', { timeout: 20000 })
+  await page.waitForTimeout(2000)
+
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const first = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+
+  const from = await page.locator('[data-filter-from]').inputValue()
+  const to = await page.locator('[data-filter-to]').inputValue()
+  console.log('период:', from, '—', to, '| ожидалось:', first, '—', today)
+  expect(from).toBe(first)
+  expect(to).toBe(today)
+
+  // кнопка возврата к текущему месяцу видна только после ручной правки периода
+  expect(await page.locator('[data-reset-period]').count()).toBe(0)
+  await page.locator('[data-filter-from]').fill('2026-01-01')
+  await page.locator('[data-filter-from]').blur()
+  await page.waitForTimeout(1500)
+  expect(await page.locator('[data-reset-period]').count()).toBe(1)
+
+  await page.locator('[data-reset-period]').click()
+  await page.waitForTimeout(1500)
+  expect(await page.locator('[data-filter-from]').inputValue()).toBe(first)
+  // панель по-прежнему вписана в экран, прокручивается таблица
+  const layout = await page.evaluate(() => {
+    const panel = document.querySelector('.audit')
+    const wrap = document.querySelector('[data-table-wrap]')
+    return {
+      panelScrolls: panel.scrollHeight > panel.clientHeight + 1,
+      tableScrolls: wrap ? wrap.scrollHeight > wrap.clientHeight + 1 : false
+    }
+  })
+  console.log('раскладка:', JSON.stringify(layout))
+  expect(layout.panelScrolls).toBe(false)
+
+})

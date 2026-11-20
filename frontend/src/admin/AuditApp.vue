@@ -28,12 +28,19 @@
       </label>
       <label>
         С
-        <input v-model="from" type="date" @change="reload" />
+        <input v-model="from" type="date" @change="reload" data-filter-from />
       </label>
       <label>
         по
-        <input v-model="to" type="date" @change="reload" />
+        <input v-model="to" type="date" @change="reload" data-filter-to />
       </label>
+      <button
+        v-if="!isDefaultPeriod"
+        type="button"
+        class="tool"
+        data-reset-period
+        @click="resetPeriod"
+      >текущий месяц</button>
       <button type="button" class="tool" @click="reload">Обновить</button>
       <a class="tool" :href="exportUrl(false)" download="audit-log.csv" data-export="csv">Выгрузить CSV</a>
       <a class="tool" :href="exportUrl(true)" download="audit-log.csv" data-export="excel">Excel</a>
@@ -80,7 +87,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '../api/client.js'
 
 const items = ref([])
@@ -89,8 +96,15 @@ const action = ref('')
 const level = ref('')
 const levels = ['trace', 'debug', 'info', 'warning', 'error']
 const actor = ref('')
-const from = ref('')
-const to = ref('')
+// По умолчанию журнал открывается за текущий месяц: с 1-го числа по сегодня (ADR-176).
+// Сервер трактует «по» включительно (at < date + 1), поэтому сегодняшние записи попадают.
+function isoDate(date) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+const today = new Date()
+const from = ref(isoDate(new Date(today.getFullYear(), today.getMonth(), 1)))
+const to = ref(isoDate(today))
 const error = ref(null)
 const loading = ref(false)
 const pageSize = 50
@@ -166,6 +180,20 @@ async function fetchPage(offset) {
   } finally {
     loading.value = false
   }
+}
+
+// «С» и «по» по умолчанию — текущий месяц; кнопка возвращает к нему после ручных правок
+const isDefaultPeriod = computed(() => {
+  const now = new Date()
+  return from.value === isoDate(new Date(now.getFullYear(), now.getMonth(), 1)) &&
+    to.value === isoDate(now)
+})
+
+function resetPeriod() {
+  const now = new Date()
+  from.value = isoDate(new Date(now.getFullYear(), now.getMonth(), 1))
+  to.value = isoDate(now)
+  return reload()
 }
 
 function reload() {
