@@ -35,6 +35,7 @@ enum class Action {
     ChangeTemplate,
     PublishTemplate,
     ChangeSubscription,
+    ChangeContactGroup,
     RunSubscription,
     UploadAsset,
     DeleteAsset,

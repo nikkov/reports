@@ -34,7 +34,10 @@
               повтор {{ formatDate(s.retryAt) }} (попытка {{ s.retryCount + 1 }})
             </div>
           </td>
-          <td class="small">{{ s.recipients.join(', ') }}</td>
+          <td class="small">
+            <span v-for="k in (s.recipientGroups || [])" :key="k" class="chip">{{ k }}</span>
+            {{ s.recipients.join(', ') }}
+          </td>
           <td class="small">{{ formatDate(s.nextRunAt) || '—' }}</td>
           <td class="small">
             <span v-if="s.lastRunAt">{{ formatDate(s.lastRunAt) }}</span>
@@ -118,11 +121,25 @@
         </datalist>
         <span class="hint">IANA-идентификатор: «0 9 * * 1-5» + Europe/Moscow = 9:00 по Москве</span>
       </label>
-      <label>
-        Получатели
-        <input v-model="form.recipients" placeholder="po@example.test, analyst@example.test" required />
-        <span class="hint">через запятую</span>
-      </label>
+      <fieldset class="recipients">
+        <legend>Получатели</legend>
+        <div v-if="groups.length" class="group-list" data-group-list>
+          <label v-for="g in groups" :key="g.key" class="group-check">
+            <input type="checkbox" :value="g.key" v-model="form.recipientGroups" data-group-check />
+            <b>{{ g.title }}</b>
+            <span class="muted small">{{ g.key }} · адресов: {{ g.emails.length }}</span>
+          </label>
+        </div>
+        <p v-else class="muted small">
+          Групп адресатов пока нет — создайте их во вкладке «Адресаты».
+        </p>
+        <label>
+          Отдельные адреса
+          <input v-model="form.recipients" placeholder="po@example.test, analyst@example.test" />
+          <span class="hint">через запятую; можно не заполнять, если выбрана группа</span>
+        </label>
+        <p class="hint" data-recipients-count>итого получателей: {{ recipientsCount }}</p>
+      </fieldset>
       <label>
         Формат вложения
         <select v-model="form.format">
@@ -148,11 +165,12 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../api/client.js'
 
 const items = ref([])
 const reports = ref([])
+const groups = ref([])
 const error = ref(null)
 const notice = ref(null)
 const busy = ref(null)
@@ -168,11 +186,27 @@ const emptyForm = () => ({
   cron: '0 9 * * 1-5',
   timezone: 'UTC',
   recipients: '',
+  recipientGroups: [],
   params: '{}',
   format: 'csv',
   enabled: true
 })
 const form = reactive(emptyForm())
+
+// сколько человек получит письмо: адреса из поля плюс адреса выбранных групп, без повторов
+const recipientsCount = computed(() => {
+  const set = new Set(
+    form.recipients
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)
+  )
+  for (const g of groups.value) {
+    if (!form.recipientGroups.includes(g.key)) continue
+    for (const mail of g.emails || []) set.add(mail)
+  }
+  return set.size
+})
 
 function reset() {
   Object.assign(form, emptyForm())
@@ -205,7 +239,10 @@ function parseForm() {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  if (!recipients.length) throw new Error('укажите хотя бы одного получателя')
+  // достаточно группы: адреса из неё сервер подставит при отправке (ADR-179)
+  if (!recipients.length && !form.recipientGroups.length) {
+    throw new Error('укажите хотя бы одного получателя или группу адресатов')
+  }
   return {
     reportId: form.reportId,
     title: form.title || form.reportId,
@@ -213,6 +250,7 @@ function parseForm() {
     timezone: form.timezone.trim() || 'UTC',
     params,
     recipients,
+    recipientGroups: [...form.recipientGroups],
     format: form.format,
     enabled: form.enabled
   }
@@ -336,6 +374,7 @@ function edit(s) {
     cron: s.cron,
     timezone: s.timezone || 'UTC',
     recipients: s.recipients.join(', '),
+    recipientGroups: [...(s.recipientGroups || [])],
     params: JSON.stringify(s.params || {}, null, 0),
     format: s.format || 'csv',
     enabled: s.enabled
@@ -344,6 +383,12 @@ function edit(s) {
 
 onMounted(async () => {
   await load()
+  try {
+    const data = await api.contactGroups()
+    groups.value = data.items || []
+  } catch (e) {
+    error.value = e.message
+  }
   try {
     reports.value = await api.reports()
   } catch (e) {
@@ -466,6 +511,38 @@ label {
   gap: 4px;
   font-size: 13px;
 }
+.recipients {
+  border: 1px solid var(--rep-border);
+  border-radius: 8px;
+  padding: 8px 10px 10px;
+  display: grid;
+  gap: 8px;
+}
+.recipients legend {
+  font-size: 12px;
+  color: var(--rep-text-muted);
+  padding: 0 4px;
+}
+.group-list {
+  display: grid;
+  gap: 4px;
+}
+.group-check {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--rep-text) !important;
+}
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  padding: 0 6px;
+  margin-right: 4px;
+  border-radius: 999px;
+  background: var(--rep-code-bg);
+  white-space: nowrap;
+}
 label.inline {
   display: flex;
   align-items: center;
@@ -482,6 +559,12 @@ textarea {
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
+}
+/* чекбоксы не должны наследовать width: 100% от полей ввода (ADR-179) */
+input[type='checkbox'],
+input[type='radio'] {
+  width: auto;
+  max-width: none;
 }
 label.inline input {
   width: auto;

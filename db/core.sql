@@ -167,3 +167,21 @@ CREATE TABLE IF NOT EXISTS reports.report_assets (
 
 COMMENT ON TABLE reports.report_assets IS 'Изображения шаблонов (ADR-169), отдаются по /api/assets/{id}';
 COMMENT ON COLUMN reports.report_assets.mime IS 'image/png, image/jpeg, image/gif, image/webp';
+
+-- Группы адресатов (ADR-179): набор адресов под именем. В подписке указывается группа,
+-- а не список адресов — правка состава группы меняет всех её получателей сразу.
+CREATE TABLE IF NOT EXISTS reports.contact_groups (
+    id         bigserial   PRIMARY KEY,
+    key        text        NOT NULL UNIQUE,
+    title      text        NOT NULL,
+    emails     text[]      NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE reports.contact_groups IS 'Группы адресатов рассылки (ADR-179)';
+COMMENT ON COLUMN reports.contact_groups.key IS 'ключ, который указывается в подписке (recipientGroups)';
+
+-- Подписка может ссылаться на группы; recipients остаётся для отдельных адресов.
+ALTER TABLE reports.report_subscriptions
+    ADD COLUMN IF NOT EXISTS recipient_groups text[] NOT NULL DEFAULT '{}';

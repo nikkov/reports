@@ -34,6 +34,7 @@ import AdminApp from './AdminApp.vue'
 import UsersApp from './UsersApp.vue'
 import RolesApp from './RolesApp.vue'
 import SubscriptionsApp from './SubscriptionsApp.vue'
+import ContactGroupsApp from './ContactGroupsApp.vue'
 import AuditApp from './AuditApp.vue'
 
 const props = defineProps({
@@ -45,6 +46,7 @@ const tabs = [
   { key: 'users', label: 'Пользователи' },
   { key: 'roles', label: 'Роли' },
   { key: 'subscriptions', label: 'Рассылка' },
+  { key: 'contacts', label: 'Адресаты' },
   { key: 'audit', label: 'Журнал' }
 ]
 const keys = tabs.map((t) => t.key)
@@ -56,6 +58,7 @@ const views = {
   users: UsersApp,
   roles: RolesApp,
   subscriptions: SubscriptionsApp,
+  contacts: ContactGroupsApp,
   audit: AuditApp
 }
 const current = shallowRef(AdminApp)

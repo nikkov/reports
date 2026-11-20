@@ -118,6 +118,7 @@ const char *actionName(Action action) {
         case Action::ChangeTemplate: return "change_template";
         case Action::PublishTemplate: return "publish_template";
         case Action::ChangeSubscription: return "change_subscription";
+        case Action::ChangeContactGroup: return "contact_group_change";
         case Action::RunSubscription: return "run_subscription";
         case Action::UploadAsset: return "asset_upload";
         case Action::DeleteAsset: return "asset_delete";

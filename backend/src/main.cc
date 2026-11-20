@@ -4980,6 +4980,10 @@ int main() {
             item["timezone"] = PQgetvalue(res, i, 12);
             item["retryAt"] = PQgetvalue(res, i, 13);
             item["retryCount"] = std::atoi(PQgetvalue(res, i, 14));
+            // группы адресатов (ADR-179): в подписке хранятся ключи, состав — в справочнике
+            Json::Value groups(Json::arrayValue);
+            for (const auto &key : parseTextArray(PQgetvalue(res, i, 15))) groups.append(key);
+            item["recipientGroups"] = groups;
             list.append(item);
         }
         return list;
@@ -4991,7 +4995,7 @@ int main() {
         " to_char(s.last_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
         " r.ok, r.error, s.timezone,"
         " coalesce(to_char(s.retry_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), ''),"
-        " s.retry_count"
+        " s.retry_count, s.recipient_groups::text"
         " FROM report_subscriptions s"
         " LEFT JOIN LATERAL (SELECT ok, error FROM subscription_runs WHERE subscription_id = s.id"
         "                    ORDER BY started_at DESC LIMIT 1) r ON true";
@@ -5002,9 +5006,34 @@ int main() {
         const std::string cronExpr = body.get("cron", "").asString();
         if (!rep::parseCron(cronExpr, cron, err)) return false;
         const Json::Value &recipients = body["recipients"];
-        if (!recipients.isArray() || recipients.empty()) {
-            err = "нужен непустой список recipients";
+        const Json::Value &groups = body["recipientGroups"];
+        const bool hasRecipients = recipients.isArray() && !recipients.empty();
+        const bool hasGroups = groups.isArray() && !groups.empty();
+        // либо отдельные адреса, либо группы адресатов — хотя бы что-то одно (ADR-179)
+        if (!hasRecipients && !hasGroups) {
+            err = "нужен список адресов или группа адресатов";
             return false;
+        }
+        if (hasGroups) {
+            for (const auto &g : groups) {
+                if (!g.isString() || g.asString().empty()) {
+                    err = "ключ группы адресатов должен быть строкой";
+                    return false;
+                }
+                const std::string key = g.asString();
+                const char *v[] = {key.c_str()};
+                PGresult *gRes = PQexecParams(conn, "SELECT 1 FROM contact_groups WHERE key = $1", 1, nullptr,
+                                              v, nullptr, nullptr, 0);
+                const bool found = PQresultStatus(gRes) == PGRES_TUPLES_OK && PQntuples(gRes) > 0;
+                PQclear(gRes);
+                if (!found) {
+                    err = "группа адресатов «" + key + "» не найдена";
+                    return false;
+                }
+            }
+        }
+        if (!recipients.isArray() && hasGroups) {
+            // адресов нет — это допустимо, группы проверены
         }
         for (const auto &mail : recipients) {
             const std::string address = mail.asString();
@@ -5037,6 +5066,257 @@ int main() {
         }
         return true;
     };
+
+    // --- Группы адресатов рассылки (ADR-179) ------------------------------------------
+    // Группа — именованный список адресов; в подписке хранится ключ группы, поэтому правка
+    // состава в одном месте меняет получателей всех подписок с этой группой.
+    const std::string contactGroupsSelect =
+        "SELECT g.id, g.key, g.title, g.emails::text,"
+        " (SELECT count(*) FROM report_subscriptions s WHERE g.key = ANY(s.recipient_groups)) AS subs"
+        " FROM contact_groups g";
+
+    auto jsonContactGroups = [parseTextArray](PGresult *res) {
+        Json::Value items(Json::arrayValue);
+        for (int i = 0; i < PQntuples(res); ++i) {
+            Json::Value item;
+            item["id"] = static_cast<Json::Int64>(std::stoll(PQgetvalue(res, i, 0)));
+            item["key"] = PQgetvalue(res, i, 1);
+            item["title"] = PQgetvalue(res, i, 2);
+            Json::Value emails(Json::arrayValue);
+            for (const auto &mail : parseTextArray(PQgetvalue(res, i, 3))) emails.append(mail);
+            item["emails"] = emails;
+            item["subscriptions"] = std::atoi(PQgetvalue(res, i, 4));
+            items.append(item);
+        }
+        return items;
+    };
+
+    auto validateGroupKey = [](const std::string &key, std::string &err) {
+        if (key.size() < 2 || key.size() > 32) {
+            err = "ключ группы: от 2 до 32 символов";
+            return false;
+        }
+        if (!(key[0] >= 'a' && key[0] <= 'z')) {
+            err = "ключ группы должен начинаться со строчной латинской буквы";
+            return false;
+        }
+        for (char ch : key) {
+            const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+            if (!ok) {
+                err = "ключ группы: строчная латиница, цифры, «_» и «-»";
+                return false;
+            }
+        }
+        return true;
+    };
+
+    auto validateEmails = [](const Json::Value &emails, std::string &err) {
+        if (!emails.isArray()) {
+            err = "emails должен быть массивом адресов";
+            return false;
+        }
+        for (const auto &mail : emails) {
+            const std::string address = mail.asString();
+            const auto at = address.find('@');
+            if (!mail.isString() || at == std::string::npos || at == 0 || at + 1 >= address.size() ||
+                address.find(' ') != std::string::npos) {
+                err = "некорректный адрес: «" + address + "»";
+                return false;
+            }
+        }
+        return true;
+    };
+
+    app().registerHandler(
+        "/api/admin/contact-groups",
+        [adminEnabled, contactGroupsSelect, jsonContactGroups, validateGroupKey, validateEmails](
+            const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
+            currentActor = actorOf(req);
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            if (req->method() == Get) {
+                PGresult *res = PQexec(conn, (contactGroupsSelect + " ORDER BY g.key").c_str());
+                if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                    const std::string msg = PQerrorMessage(conn);
+                    PQclear(res);
+                    PQfinish(conn);
+                    sendError(cb, k500InternalServerError, "LIST_FAILED", msg);
+                    return;
+                }
+                Json::Value out;
+                out["items"] = jsonContactGroups(res);
+                PQclear(res);
+                PQfinish(conn);
+                cb(jsonResponse(out));
+                return;
+            }
+
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                PQfinish(conn);
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string key = (*body).get("key", "").asString();
+            const std::string title = (*body).get("title", "").asString();
+            std::string err;
+            if (!validateGroupKey(key, err) || !validateEmails((*body)["emails"], err) || title.empty()) {
+                PQfinish(conn);
+                if (title.empty()) err = "title обязателен";
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            const std::string emailsJson = Json::writeString(wb, (*body)["emails"]);
+            const char *values[] = {key.c_str(), title.c_str(), emailsJson.c_str()};
+            PGresult *res = PQexecParams(
+                conn,
+                "INSERT INTO contact_groups (key, title, emails)"
+                " VALUES ($1, $2, (SELECT coalesce(array_agg(value::text), '{}')"
+                "                  FROM json_array_elements_text($3::json)))"
+                " ON CONFLICT (key) DO NOTHING RETURNING id",
+                3, nullptr, values, nullptr, nullptr, 0);
+            if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                sendError(cb, k500InternalServerError, "CREATE_FAILED", msg);
+                return;
+            }
+            if (PQntuples(res) == 0) {
+                PQclear(res);
+                PQfinish(conn);
+                sendError(cb, k409Conflict, "GROUP_EXISTS", "группа с ключом «" + key + "» уже есть");
+                return;
+            }
+            const std::string newId = PQgetvalue(res, 0, 0);
+            PQclear(res);
+            PQfinish(conn);
+            rep::log::event(rep::log::Level::Info, rep::log::Action::ChangeContactGroup, requestActor(req),
+                            "группа адресатов создана: " + key);
+            Json::Value out;
+            out["id"] = static_cast<Json::Int64>(std::stoll(newId));
+            out["key"] = key;
+            out["title"] = title;
+            out["emails"] = (*body)["emails"];
+            cb(jsonResponse(out));
+        },
+        {Get, Post});
+
+    app().registerHandler(
+        "/api/admin/contact-groups/{id}",
+        [adminEnabled, validateEmails](const HttpRequestPtr &req,
+                                       std::function<void(const HttpResponsePtr &)> &&cb,
+                                       const std::string &id) {
+            currentActor = actorOf(req);
+            if (!adminEnabled) {
+                sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
+                return;
+            }
+            PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
+            if (PQstatus(conn) != CONNECTION_OK) {
+                const std::string msg = PQerrorMessage(conn);
+                PQfinish(conn);
+                sendError(cb, k503ServiceUnavailable, "DB_UNAVAILABLE", msg);
+                return;
+            }
+            if (req->method() == Delete) {
+                // группу, которая стоит в подписке, удалять нельзя: подписка осталась бы без адресов
+                const char *v[] = {id.c_str()};
+                PGresult *used = PQexecParams(
+                    conn,
+                    "SELECT s.title FROM report_subscriptions s JOIN contact_groups g ON g.key = ANY(s.recipient_groups)"
+                    " WHERE g.id = $1 ORDER BY s.id",
+                    1, nullptr, v, nullptr, nullptr, 0);
+                std::string list;
+                if (PQresultStatus(used) == PGRES_TUPLES_OK) {
+                    for (int i = 0; i < PQntuples(used); ++i) {
+                        list += (list.empty() ? "" : ", ") + std::string(PQgetvalue(used, i, 0));
+                    }
+                }
+                PQclear(used);
+                if (!list.empty()) {
+                    PQfinish(conn);
+                    sendError(cb, k409Conflict, "GROUP_IN_USE",
+                              "группа используется в подписках: " + list);
+                    return;
+                }
+                PGresult *res = PQexecParams(conn, "DELETE FROM contact_groups WHERE id = $1::bigint RETURNING key",
+                                             1, nullptr, v, nullptr, nullptr, 0);
+                const bool ok = PQresultStatus(res) == PGRES_TUPLES_OK;
+                const bool found = ok && PQntuples(res) == 1;
+                const std::string key = found ? PQgetvalue(res, 0, 0) : "";
+                const std::string msg = ok ? "" : PQerrorMessage(conn);
+                PQclear(res);
+                PQfinish(conn);
+                if (!found) {
+                    sendError(cb, k404NotFound, "GROUP_NOT_FOUND", msg.empty() ? "группа не найдена" : msg);
+                    return;
+                }
+                rep::log::event(rep::log::Level::Info, rep::log::Action::ChangeContactGroup, requestActor(req),
+                                "группа адресатов удалена: " + key);
+                Json::Value out;
+                out["deleted"] = true;
+                cb(jsonResponse(out));
+                return;
+            }
+
+            const auto body = req->getJsonObject();
+            if (!body || !body->isObject()) {
+                PQfinish(conn);
+                sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
+                return;
+            }
+            const std::string title = (*body).get("title", "").asString();
+            std::string err;
+            if (title.empty()) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "title обязателен");
+                return;
+            }
+            if (!validateEmails((*body)["emails"], err)) {
+                PQfinish(conn);
+                sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", err);
+                return;
+            }
+            Json::StreamWriterBuilder wb;
+            wb["indentation"] = "";
+            const std::string emailsJson = Json::writeString(wb, (*body)["emails"]);
+            const char *values[] = {id.c_str(), title.c_str(), emailsJson.c_str()};
+            PGresult *res = PQexecParams(
+                conn,
+                "UPDATE contact_groups SET title = $2,"
+                " emails = (SELECT coalesce(array_agg(value::text), '{}')"
+                "           FROM json_array_elements_text($3::json)),"
+                " updated_at = now() WHERE id = $1::bigint RETURNING key, emails::text",
+                3, nullptr, values, nullptr, nullptr, 0);
+            const bool ok = PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1;
+            const std::string msg = ok ? "" : PQerrorMessage(conn);
+            const std::string key = ok ? PQgetvalue(res, 0, 0) : "";
+            PQclear(res);
+            PQfinish(conn);
+            if (!ok) {
+                sendError(cb, k404NotFound, "GROUP_NOT_FOUND", msg.empty() ? "группа не найдена" : msg);
+                return;
+            }
+            rep::log::event(rep::log::Level::Info, rep::log::Action::ChangeContactGroup, requestActor(req),
+                            "группа адресатов изменена: " + key);
+            Json::Value out;
+            out["updated"] = true;
+            out["key"] = key;
+            cb(jsonResponse(out));
+        },
+        {Put, Delete});
 
     app().registerHandler(
         "/api/admin/subscriptions",
@@ -5089,25 +5369,37 @@ int main() {
             wb["indentation"] = "";
             const std::string paramsJson = Json::writeString(wb, (*body)["params"]);
             Json::StreamWriterBuilder rb;
-            const std::string recipientsJson = Json::writeString(rb, (*body)["recipients"]);
+            // поле может отсутствовать (например, подписка только на группу) — пишем пустой массив,
+            // иначе json_array_elements_text получит null (ADR-179)
+            Json::Value recipientsValue = (*body)["recipients"];
+            if (!recipientsValue.isArray()) recipientsValue = Json::Value(Json::arrayValue);
+            const std::string recipientsJson = Json::writeString(rb, recipientsValue);
             const std::string timezone = (*body).get("timezone", "UTC").asString();
             const std::time_t next = nextRunInZone(conn, cron, timezone, std::time(nullptr));
             const std::string nextText = std::to_string(next);
             const std::string format = (*body).get("format", "csv").asString();
             const bool enabled = (*body).get("enabled", true).asBool();
 
+            // пустой массив адресов допустим, если выбраны группы (ADR-179): array_agg вернул бы NULL
+            Json::Value groupsValue = (*body)["recipientGroups"];
+            if (!groupsValue.isArray()) groupsValue = Json::Value(Json::arrayValue);
+            const std::string groupsJson = Json::writeString(rb, groupsValue);
             const char *sql =
                 "INSERT INTO report_subscriptions (report_id, title, cron, params, format, recipients, enabled,"
-                " next_run_at, timezone)"
-                " VALUES ($1, $2, $3, $4::jsonb, $5, (SELECT array_agg(value::text) FROM json_array_elements_text($6::json)),"
-                "         $7, to_timestamp($8), $9) RETURNING id";
+                " next_run_at, timezone, recipient_groups)"
+                " VALUES ($1, $2, $3, $4::jsonb, $5,"
+                "         (SELECT coalesce(array_agg(value::text), '{}') FROM json_array_elements_text($6::json)),"
+                "         $7, to_timestamp($8), $9,"
+                "         (SELECT coalesce(array_agg(value::text), '{}') FROM json_array_elements_text($10::json)))"
+                " RETURNING id";
             const std::string values[] = {(*body).get("reportId", "").asString(),
                                           (*body).get("title", (*body).get("reportId", "")).asString(),
                                           (*body).get("cron", "").asString(), paramsJson, format,
-                                          recipientsJson, enabled ? "true" : "false", nextText, timezone};
-            const char *params[9];
-            for (int i = 0; i < 9; ++i) params[i] = values[i].c_str();
-            PGresult *res = PQexecParams(conn, sql, 9, nullptr, params, nullptr, nullptr, 0);
+                                          recipientsJson, enabled ? "true" : "false", nextText, timezone,
+                                          groupsJson};
+            const char *params[10];
+            for (int i = 0; i < 10; ++i) params[i] = values[i].c_str();
+            PGresult *res = PQexecParams(conn, sql, 10, nullptr, params, nullptr, nullptr, 0);
             if (PQresultStatus(res) != PGRES_TUPLES_OK) {
                 const std::string msg = PQerrorMessage(conn);
                 PQclear(res);
@@ -5179,7 +5471,9 @@ int main() {
             Json::StreamWriterBuilder wb;
             wb["indentation"] = "";
             const std::string paramsJson = Json::writeString(wb, (*body)["params"]);
-            const std::string recipientsJson = Json::writeString(wb, (*body)["recipients"]);
+            Json::Value recipientsValue = (*body)["recipients"];
+            if (!recipientsValue.isArray()) recipientsValue = Json::Value(Json::arrayValue);
+            const std::string recipientsJson = Json::writeString(wb, recipientsValue);
             const std::string timezone = (*body).get("timezone", "UTC").asString();
             const std::time_t next = nextRunInZone(conn, cron, timezone, std::time(nullptr));
             const std::string nextText = std::to_string(next);
@@ -5192,16 +5486,22 @@ int main() {
                                           recipientsJson,
                                           (*body).get("enabled", true).asBool() ? "true" : "false",
                                           nextText,
-                                          timezone};
-            const char *params[10];
-            for (int i = 0; i < 10; ++i) params[i] = values[i].c_str();
+                                          timezone,
+                                          Json::writeString(wb, (*body)["recipientGroups"].isArray()
+                                                                    ? (*body)["recipientGroups"]
+                                                                    : Json::Value(Json::arrayValue))};
+            const char *params[11];
+            for (int i = 0; i < 11; ++i) params[i] = values[i].c_str();
             const char *sql =
                 "UPDATE report_subscriptions SET report_id = $2, title = $3, cron = $4, params = $5::jsonb,"
-                " format = $6, recipients = (SELECT array_agg(value::text) FROM json_array_elements_text($7::json)),"
+                " format = $6, recipients = (SELECT coalesce(array_agg(value::text), '{}')"
+                "   FROM json_array_elements_text($7::json)),"
                 " enabled = $8::boolean, next_run_at = to_timestamp($9), timezone = $10,"
+                " recipient_groups = (SELECT coalesce(array_agg(value::text), '{}')"
+                "   FROM json_array_elements_text($11::json)),"
                 " retry_count = 0, retry_at = NULL, updated_at = now()"
                 " WHERE id = $1 RETURNING id";
-            PGresult *res = PQexecParams(conn, sql, 10, nullptr, params, nullptr, nullptr, 0);
+            PGresult *res = PQexecParams(conn, sql, 11, nullptr, params, nullptr, nullptr, 0);
             const bool ok = PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1;
             const std::string msg = ok ? "" : PQerrorMessage(conn);
             PQclear(res);
@@ -5875,7 +6175,10 @@ const std::string from = req->getParameter("from");
         const char *values[] = {idText.c_str()};
         PGresult *res = PQexecParams(
             conn,
-            "SELECT report_id, title, cron, params::text, recipients::text, format, timezone, retry_count"
+            "SELECT report_id, title, cron, params::text, recipients::text, format, timezone, retry_count,"
+            // адреса из групп адресатов (ADR-179): подписка хранит ключи, состав берём здесь
+            " coalesce((SELECT array_agg(DISTINCT e)::text FROM contact_groups g, unnest(g.emails) e"
+            "           WHERE g.key = ANY(recipient_groups)), '{}')"
             " FROM report_subscriptions WHERE id = $1",
             1, nullptr, values, nullptr, nullptr, 0);
         if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
@@ -5888,7 +6191,11 @@ const std::string from = req->getParameter("from");
         const std::string title = PQgetvalue(res, 0, 1);
         const std::string cronExpr = PQgetvalue(res, 0, 2);
         const std::string paramsText = PQgetvalue(res, 0, 3);
-        const auto recipients = parseTextArray(PQgetvalue(res, 0, 4));
+        // адреса подписки + адреса её групп, без повторов: человек мог попасть в обе части
+        std::vector<std::string> recipients = parseTextArray(PQgetvalue(res, 0, 4));
+        for (const auto &mail : parseTextArray(PQgetvalue(res, 0, 8))) {
+            if (std::find(recipients.begin(), recipients.end(), mail) == recipients.end()) recipients.push_back(mail);
+        }
         const std::string format = PQgetvalue(res, 0, 5);
         const std::string timezone = PQgetvalue(res, 0, 6);
         const int retryCount = std::atoi(PQgetvalue(res, 0, 7));

@@ -168,5 +168,9 @@ else
   echo "пропуск: нет SPNEGO на :8098 или тикета /tmp/rep-krb/ccache (поднять: ./scripts/dev-kerberos.sh)"
 fi
 
+# Группы адресатов (ADR-179): подписка без адресов, только с группой, отправляется всем
+step "Группы адресатов: отправка на группу"
+"$ROOT/scripts/check-groups.sh" || fail "проверка групп адресатов не прошла"
+
 echo
 echo "ALL CHECKS PASSED"

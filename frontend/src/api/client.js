@@ -205,6 +205,14 @@ export const api = {
     request(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
 
+  // группы адресатов рассылки (ADR-179): в подписке указывается ключ группы
+  contactGroups: () => request('/api/admin/contact-groups'),
+  createContactGroup: (payload) =>
+    request('/api/admin/contact-groups', { method: 'POST', body: JSON.stringify(payload) }),
+  updateContactGroup: (id, payload) =>
+    request(`/api/admin/contact-groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteContactGroup: (id) =>
+    request(`/api/admin/contact-groups/${id}`, { method: 'DELETE' }),
   // справочник ролей доступа к отчётам (ADR-102)
   accessRoles: () => request('/api/admin/access-roles'),
   createAccessRole: (payload) =>

@@ -3601,7 +3601,7 @@ test('админка: разделы — вкладки одной страни�
   await page.waitForTimeout(1500)
 
   const tabs = await page.locator('.shell-tab').allInnerTexts()
-  expect(tabs).toEqual(['Шаблоны', 'Пользователи', 'Роли', 'Рассылка', 'Журнал'])
+  expect(tabs).toEqual(['Шаблоны', 'Пользователи', 'Роли', 'Рассылка', 'Адресаты', 'Журнал'])
 
   // шаблоны по умолчанию: сайдбар с отчётами на месте, раскладка не поехала
   expect(await page.locator('.sidebar').count()).toBe(1)
@@ -3651,7 +3651,7 @@ test('роли — отдельная вкладка, пользователи �
 
   const tabs = await page.locator('.shell-tab').allInnerTexts()
   console.log('вкладки:', JSON.stringify(tabs))
-  expect(tabs).toEqual(['Шаблоны', 'Пользователи', 'Роли', 'Рассылка', 'Журнал'])
+  expect(tabs).toEqual(['Шаблоны', 'Пользователи', 'Роли', 'Рассылка', 'Адресаты', 'Журнал'])
 
   // в таблице ролей видно ключ, название, число пользователей и отчётов
   const rows = await page.locator('.roles-page tbody tr').count()
@@ -3976,4 +3976,72 @@ test('рассылка: поля формы не выходят за подло�
       .filter((d) => d > 0)
   })
   expect(left).toEqual([])
+})
+
+test('адресаты: группа, подписка и подсчёт получателей (ADR-179)', async ({ page, request }) => {
+  // уборка прошлых прогонов
+  const groups = await (await request.get('/api/admin/contact-groups')).json()
+  for (const g of groups.items.filter((x) => x.key.startsWith('e2e-'))) {
+    await request.delete(`/api/admin/contact-groups/${g.id}`)
+  }
+
+  await page.goto('/reports/admin.html#contacts')
+  await page.waitForSelector('[data-groups-table]', { timeout: 20000 })
+  await page.waitForTimeout(1200)
+
+  const tabs = await page.locator('.shell-tab').allInnerTexts()
+  console.log('вкладки:', JSON.stringify(tabs))
+  expect(tabs).toContain('Адресаты')
+
+  // создаём группу из двух адресов
+  await page.locator('[data-open-create]').click()
+  await page.waitForSelector('.dialog', { timeout: 5000 })
+  await page.locator('[data-form-key]').fill('e2e-group')
+  await page.locator('[data-form-title]').fill('Группа для теста')
+  await page.locator('[data-form-emails]').fill('a1@example.test\na2@example.test')
+  await page.locator('[data-form-submit]').click()
+  await page.waitForTimeout(1200)
+  const row = page.locator('tr[data-group="e2e-group"]')
+  await expect(row).toHaveCount(1)
+  console.log('строка группы:', (await row.innerText()).replace(/\n/g, ' | '))
+  expect(await row.innerText()).toContain('2')
+
+  // фильтр по адресу находит группу
+  await page.locator('[data-filter-q]').fill('a2@example')
+  await page.waitForTimeout(300)
+  expect(await page.locator('tr[data-group="e2e-group"]').count()).toBe(1)
+  await page.locator('[data-reset-filters]').click()
+
+  // в рассылке группа видна как чекбокс, подписка сохраняется без отдельных адресов
+  await page.locator('.shell-tab', { hasText: 'Рассылка' }).click()
+  await page.waitForSelector('form.form', { timeout: 10000 })
+  await page.waitForTimeout(1200)
+  await page.locator('form.form select').first().selectOption({ index: 1 })
+  await page.locator('form.form input[placeholder="как подписывать письмо"]').fill('E2E подписка на группу')
+  await page.locator('[data-group-check][value="e2e-group"]').check()
+  await page.waitForTimeout(300)
+  const count = await page.locator('[data-recipients-count]').innerText()
+  console.log('получателей:', count)
+  expect(count).toContain('2')
+  await page.locator('form.form').getByRole('button', { name: 'Сохранить' }).click()
+  await page.waitForTimeout(1500)
+
+  const subs = await (await request.get('/api/admin/subscriptions')).json()
+  const created = subs.items.find((s) => s.title === 'E2E подписка на группу')
+  console.log('подписка:', JSON.stringify({ recipients: created.recipients, groups: created.recipientGroups }))
+  expect(created.recipientGroups).toContain('e2e-group')
+  expect(created.recipients).toEqual([])
+
+  // группу, которая стоит в подписке, удалить нельзя
+  const del = await request.delete(`/api/admin/contact-groups/${groups.items.length ? '' : ''}`)
+  const gid = (await (await request.get('/api/admin/contact-groups')).json()).items.find((g) => g.key === 'e2e-group').id
+  const conflict = await request.delete(`/api/admin/contact-groups/${gid}`)
+  console.log('удаление занятой группы:', conflict.status())
+  expect(conflict.status()).toBe(409)
+
+
+  // уборка: подписка, потом группа
+  await request.delete(`/api/admin/subscriptions/${created.id}`)
+  const ok = await request.delete(`/api/admin/contact-groups/${gid}`)
+  expect(ok.ok()).toBeTruthy()
 })
