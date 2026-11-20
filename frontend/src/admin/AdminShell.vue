@@ -32,6 +32,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import AdminApp from './AdminApp.vue'
 import UsersApp from './UsersApp.vue'
+import RolesApp from './RolesApp.vue'
 import SubscriptionsApp from './SubscriptionsApp.vue'
 import AuditApp from './AuditApp.vue'
 
@@ -42,6 +43,7 @@ const props = defineProps({
 const tabs = [
   { key: 'templates', label: 'Шаблоны' },
   { key: 'users', label: 'Пользователи' },
+  { key: 'roles', label: 'Роли' },
   { key: 'subscriptions', label: 'Рассылка' },
   { key: 'audit', label: 'Журнал' }
 ]
@@ -49,7 +51,13 @@ const keys = tabs.map((t) => t.key)
 const active = ref('templates')
 
 // Компоненты держим в shallowRef: Vue не должен делать их «реактивными»
-const views = { templates: AdminApp, users: UsersApp, subscriptions: SubscriptionsApp, audit: AuditApp }
+const views = {
+  templates: AdminApp,
+  users: UsersApp,
+  roles: RolesApp,
+  subscriptions: SubscriptionsApp,
+  audit: AuditApp
+}
 const current = shallowRef(AdminApp)
 
 function fromHash() {

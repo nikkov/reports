@@ -2386,7 +2386,9 @@ int main() {
             runQuery(
                 db,
                 "SELECT id, title, char_length(body::text) AS size, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated, "
-                "(draft IS NOT NULL) AS has_draft, to_char(draft_updated_at, 'YYYY-MM-DD HH24:MI') AS draft_at "
+                "(draft IS NOT NULL) AS has_draft, to_char(draft_updated_at, 'YYYY-MM-DD HH24:MI') AS draft_at, "
+                // роли доступа нужны вкладке «Роли»: видно, какие отчёты закрыты ключом (ADR-171)
+                "COALESCE(body->'accessRoles', '[]'::jsonb)::text AS access_roles "
                 "FROM report_templates WHERE is_delete = false ORDER BY id",
                 {},
                 [cb](const orm::Result &res) {
@@ -2399,6 +2401,16 @@ int main() {
                         item["updated"] = row["updated"].as<std::string>();
                         item["hasDraft"] = row["has_draft"].as<bool>();
                         if (!row["draft_at"].isNull()) item["draftAt"] = row["draft_at"].as<std::string>();
+                        if (!row["access_roles"].isNull()) {
+                            Json::CharReaderBuilder reader;
+                            Json::Value roles;
+                            std::string errs;
+                            const std::string raw = row["access_roles"].as<std::string>();
+                            std::istringstream in(raw);
+                            if (Json::parseFromStream(reader, in, &roles, &errs) && roles.isArray()) {
+                                item["accessRoles"] = roles;
+                            }
+                        }
                         list.append(item);
                     }
                     cb(jsonResponse(list));

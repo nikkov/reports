@@ -64,26 +64,6 @@
     </table>
     <p v-else class="muted">Пользователей нет.</p>
 
-    <section class="roles-admin">
-      <h2>Роли доступа</h2>
-      <p class="muted small">
-        Роли указываются в шаблоне отчёта (<code>accessRoles</code>) и выдаются пользователям.
-        Пустой список у отчёта — доступ всем авторизованным; администратор видит всё.
-      </p>
-      <ul class="role-list">
-        <li v-for="r in roles" :key="r.id">
-          <b>{{ r.key }}</b> — {{ r.title }}
-          <button type="button" class="tool danger" :disabled="saving" @click="removeRole(r)">Удалить</button>
-        </li>
-        <li v-if="!roles.length" class="muted small">ролей пока нет</li>
-      </ul>
-      <form class="role-new" @submit.prevent="addRole">
-        <input v-model.trim="newRole.key" placeholder="finance" autocomplete="off" />
-        <input v-model.trim="newRole.title" placeholder="Финансы" autocomplete="off" />
-        <button type="submit" class="tool primary" :disabled="saving">Добавить роль</button>
-      </form>
-    </section>
-
     <form class="form" @submit.prevent="create">
       <h2>Новый пользователь</h2>
       <label>
@@ -141,7 +121,6 @@ const me = props.session?.login || ''
 
 const form = reactive({ login: '', role: 'viewer', password: '', roles: [] })
 const roles = ref([])
-const newRole = reactive({ key: '', title: '' })
 
 function formatDate(value) {
   if (!value) return '—'
@@ -161,37 +140,6 @@ async function load() {
 async function loadRoles() {
   try {
     roles.value = (await api.accessRoles()).items || []
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
-async function addRole() {
-  saving.value = true
-  error.value = null
-  notice.value = null
-  try {
-    await api.createAccessRole({ key: newRole.key.trim(), title: newRole.title.trim() })
-    notice.value = `Роль ${newRole.key} добавлена`
-    newRole.key = ''
-    newRole.title = ''
-    await loadRoles()
-    await load()
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    saving.value = false
-  }
-}
-
-async function removeRole(role) {
-  if (!window.confirm(`Удалить роль «${role.key}»? Она снимется у всех пользователей.`)) return
-  error.value = null
-  try {
-    await api.deleteAccessRole(role.id)
-    notice.value = `Роль ${role.key} удалена`
-    await loadRoles()
-    await load()
   } catch (e) {
     error.value = e.message
   }
@@ -406,24 +354,11 @@ select {
 }
 
 /* Роли доступа (ADR-102) */
-.roles-admin {
-  margin: 18px 0 8px;
-}
-.role-list {
-  list-style: none;
-  padding: 0;
-  margin: 8px 0;
-}
 .role-list li {
   display: flex;
   gap: 10px;
   align-items: center;
   padding: 4px 0;
-}
-.role-new {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 .role-new input {
   min-width: 180px;

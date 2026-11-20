@@ -3601,7 +3601,7 @@ test('админка: разделы — вкладки одной страни�
   await page.waitForTimeout(1500)
 
   const tabs = await page.locator('.shell-tab').allInnerTexts()
-  expect(tabs).toEqual(['Шаблоны', 'Пользователи', 'Рассылка', 'Журнал'])
+  expect(tabs).toEqual(['Шаблоны', 'Пользователи', 'Роли', 'Рассылка', 'Журнал'])
 
   // шаблоны по умолчанию: сайдбар с отчётами на месте, раскладка не поехала
   expect(await page.locator('.sidebar').count()).toBe(1)
@@ -3642,4 +3642,51 @@ test('админка: разделы — вкладки одной страни�
 
   // переключатель темы один — в полосе вкладок
   expect(await page.locator('.theme-toggle').count()).toBe(1)
+})
+
+test('роли — отдельная вкладка, пользователи — своя (ADR-171)', async ({ page }) => {
+  await page.goto('/reports/admin.html#roles')
+  await page.waitForSelector('.roles-page', { timeout: 20000 })
+  await page.waitForTimeout(1500)
+
+  const tabs = await page.locator('.shell-tab').allInnerTexts()
+  console.log('вкладки:', JSON.stringify(tabs))
+  expect(tabs).toEqual(['Шаблоны', 'Пользователи', 'Роли', 'Рассылка', 'Журнал'])
+
+  // в таблице ролей видно ключ, название, число пользователей и отчётов
+  const rows = await page.locator('.roles-page tbody tr').count()
+  console.log('ролей в таблице:', rows)
+  expect(rows).toBeGreaterThanOrEqual(1)
+  const finance = page.locator('tr[data-role="finance"]')
+  console.log('finance:', (await finance.innerText()).replace(/\n/g, ' | '))
+
+  // создаём роль
+  await page.locator('[data-new-role-key]').fill('e2e-role')
+  await page.locator('[data-new-role-title]').fill('Роль для теста')
+  await page.locator('[data-add-role]').click()
+  await page.waitForTimeout(1200)
+  const created = page.locator('tr[data-role="e2e-role"]')
+  await expect(created).toHaveCount(1)
+
+  // переименовываем
+  await created.getByRole('button', { name: 'Переименовать' }).click()
+  await created.locator('input.inline-input').fill('Роль для теста (изм.)')
+  await created.getByRole('button', { name: 'Сохранить' }).click()
+  await page.waitForTimeout(1200)
+  expect(await page.locator('tr[data-role="e2e-role"]').innerText()).toContain('изм.')
+
+  // удаляем (подтверждение в диалоге)
+  page.once('dialog', (d) => d.accept())
+  await page.locator('tr[data-role="e2e-role"]').getByRole('button', { name: 'Удалить' }).click()
+  await page.waitForTimeout(1200)
+  await expect(page.locator('tr[data-role="e2e-role"]')).toHaveCount(0)
+
+  // во вкладке «Пользователи» секции ролей больше нет — только выдача ролей в таблице
+  await page.locator('.shell-tab', { hasText: 'Пользователи' }).click()
+  await page.waitForTimeout(1200)
+  expect(await page.locator('.roles-admin').count()).toBe(0)
+  expect(await page.locator('.users h1').innerText()).toBe('Пользователи')
+
+  await page.goto('/reports/admin.html#roles')
+  await page.waitForTimeout(1200)
 })
