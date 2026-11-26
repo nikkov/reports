@@ -1055,6 +1055,35 @@ function checkGaugeZones(block, base, errors) {
           }
         }
       }
+      // Сортировка таблицы (ADR-183): правила ссылаются на поле данных или заголовок
+      // вычисляемой колонки; неизвестное имя — ошибка, иначе сортировка молча не работала бы
+      if (block.sort !== undefined) {
+        const list = block.sort
+        if (!Array.isArray(list) || list.length < 1 || list.length > 4) {
+          errors.push({ path: `${base}.sort`, message: 'sort: от 1 до 4 правил' })
+        } else {
+          list.forEach((item, i) => {
+            const path = `${base}.sort.${i}`
+            if (!item || typeof item !== 'object' || Array.isArray(item)) {
+              errors.push({ path, message: 'элемент — объект {field, dir}' })
+              return
+            }
+            if (typeof item.field !== 'string' || !item.field) {
+              errors.push({ path: `${path}.field`, message: 'нужно имя поля' })
+              return
+            }
+            if (!tableNames.has(item.field)) {
+              errors.push({
+                path: `${path}.field`,
+                message: `колонки «${item.field}» нет в таблице: укажите поле данных или заголовок вычисляемой колонки`
+              })
+            }
+            if (item.dir !== undefined && item.dir !== 'asc' && item.dir !== 'desc') {
+              errors.push({ path: `${path}.dir`, message: 'направление: asc или desc' })
+            }
+          })
+        }
+      }
       checkRules(block.rules, `${base}.rules`, tableNames, errors, warnings)
       checkStyles(block.styles, `${base}.styles`, new Set(block.columns.filter((c) => c.field).map((c) => c.field)), errors, warnings, template?.styles?.palette || {})
 

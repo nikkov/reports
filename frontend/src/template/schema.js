@@ -837,6 +837,32 @@ export default {
           },
           "description": "порядок деталей при раскрытии группы (только с aggregate)"
         },
+        "sort": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "description": "сортировка строк таблицы: первое правило — главное (ADR-183). Поле — данные или заголовок вычисляемой колонки",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dir": {
+                "type": "string",
+                "enum": [
+                  "asc",
+                  "desc"
+                ]
+              }
+            }
+          }
+        },
         "aggregate": {
           "type": "object",
           "additionalProperties": false,

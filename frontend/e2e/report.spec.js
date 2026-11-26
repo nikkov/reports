@@ -4099,3 +4099,35 @@ test('широкий отчёт: pageWidth 2200 и таблица без обр�
   // таблица из восьми колонок должна помещаться целиком, без горизонтальной прокрутки
   expect(geo.tableOverflow).toBeLessThanOrEqual(1)
 })
+
+test('сортировка по колонкам из шаблона (ADR-183)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=sorting')
+  await page.waitForSelector('.rt-table', { timeout: 30000 })
+  await page.waitForTimeout(2500)
+
+  const tables = await page.evaluate(() =>
+    [...document.querySelectorAll('.rt-table')].map((t) =>
+      [...t.querySelectorAll('tbody tr')].slice(0, 6).map((r) =>
+        [...r.querySelectorAll('td')].map((c) => c.innerText.trim()).filter(Boolean)
+      )
+    )
+  )
+
+  // первая таблица: группа «Восток» (первая по алфавиту), суммы по убыванию
+  const first = tables[0]
+  console.log('первая таблица:', JSON.stringify(first.slice(0, 4)))
+  expect(first[0][0]).toContain('Восток')
+  const sums = first.slice(1, 5).map((row) => Number(String(row[1] || row[0]).replace(/\s|\u00a0/g, '')))
+  const nums = sums.filter((n) => Number.isFinite(n))
+  expect(nums.length).toBeGreaterThanOrEqual(3)
+  for (let i = 1; i < nums.length; i++) expect(nums[i]).toBeLessThanOrEqual(nums[i - 1])
+
+  // вторая таблица: вычисляемая колонка «Рентабельность» по убыванию
+  const percents = tables[1]
+    .map((row) => String(row[row.length - 1]).replace('%', '').replace(',', '.').trim())
+    .map(Number)
+    .filter((n) => Number.isFinite(n))
+  console.log('рентабельность:', JSON.stringify(percents))
+  expect(percents.length).toBeGreaterThanOrEqual(4)
+  for (let i = 1; i < percents.length; i++) expect(percents[i]).toBeLessThanOrEqual(percents[i - 1])
+})

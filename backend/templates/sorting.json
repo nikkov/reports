@@ -1,0 +1,139 @@
+{
+  "version": 2,
+  "id": "sorting",
+  "title": "Сортировка по колонкам",
+  "description": "Сортировка задаётся в шаблоне полем sort: до четырёх правил, первое — главное. Можно сортировать по полю данных и по вычисляемой колонке (по её заголовку).",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, s.category, s.product, s.amount, s.profit FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date LIMIT 60"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Первая таблица: \"sort\": [{\"field\":\"region\",\"dir\":\"asc\"},{\"field\":\"amount\",\"dir\":\"desc\"}] — регионы по алфавиту, внутри региона суммы по убыванию. Вторая таблица сортируется по вычисляемой колонке «Рентабельность» (правило ссылается на её заголовок). SQL в обоих наборах идёт без ORDER BY: порядок задаёт шаблон."
+    },
+    {
+      "type": "table",
+      "title": "Регион по алфавиту, суммы по убыванию",
+      "dataKey": "sales",
+      "span": 6,
+      "height": 420,
+      "sort": [
+        {
+          "field": "region",
+          "dir": "asc"
+        },
+        {
+          "field": "amount",
+          "dir": "desc"
+        }
+      ],
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "format": "number"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "format": "number"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Рентабельность по убыванию (вычисляемая колонка)",
+      "dataKey": "sales",
+      "span": 6,
+      "height": 420,
+      "sort": [
+        {
+          "field": "Рентабельность",
+          "dir": "desc"
+        }
+      ],
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "format": "number"
+        },
+        {
+          "title": "Рентабельность",
+          "expression": "profit / amount",
+          "format": "percent"
+        }
+      ]
+    }
+  ],
+  "folder": "Оформление",
+  "tags": [
+    "сортировка",
+    "таблица"
+  ]
+}

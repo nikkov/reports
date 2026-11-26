@@ -76,6 +76,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import ReportTable from '../components/ReportTable.vue'
 import { buildTableModel, evaluateRowExpression } from '../engine/group.js'
+import { sortRows } from '../engine/sort.js'
 import { analyzeExpression } from '../engine/expr.js'
 import { evaluate } from '../engine/expr.js'
 
@@ -205,22 +206,26 @@ const columns = computed(() =>
   })
 )
 
+// Сортировка из шаблона (ADR-183): применяется к строкам до группировки, поэтому
+// порядок групп и подытогов тоже подчиняется правилам. Пустые значения — в конце.
+const sourceRows = computed(() => sortRows(props.rows, props.block.columns || [], props.block.sort))
+
 function flatView() {
   const cols = leafCols.value
   const total = {}
   for (const col of cols) {
     if (col.aggregate && col.field) {
       let sum = 0
-      for (const r of props.rows) {
+      for (const r of sourceRows.value) {
         const v = Number(r[col.field])
         if (Number.isFinite(v)) sum += v
       }
-      total[col.field] = { sum, count: props.rows.length }
+      total[col.field] = { sum, count: sourceRows.value.length }
     }
   }
 
   // вычисляемые колонки считаются и в плоском режиме: агрегат по одной строке = её значение
-  const values = props.rows.map((r) =>
+  const values = sourceRows.value.map((r) =>
     cols.map((c) => (c.expression ? evaluateRowExpression(c.expression, r) : c.field ? r[c.field] : null))
   )
   const out = values.map((v) => ({ kind: 'detail', level: -1, groupPath: [], values: v }))
@@ -246,7 +251,7 @@ function flatView() {
 }
 
 function groupedView() {
-  const model = buildTableModel(props.rows, leafCols.value, {
+  const model = buildTableModel(sourceRows.value, leafCols.value, {
     collapsed: collapsed.value.size ? collapsed.value : undefined,
     grandTotal: props.block.grandTotal !== false,
     nullLabel: props.block.nullText || '(пусто)',

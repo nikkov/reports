@@ -1797,6 +1797,50 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         }
                     }
                 }
+                // Сортировка таблицы (ADR-183): поле данных или заголовок вычисляемой колонки
+                if (block.isMember("sort") && !block["sort"].isNull()) {
+                    const Json::Value &sort = block["sort"];
+                    if (!sort.isArray() || sort.size() < 1 || sort.size() > 4) {
+                        addError(r, base + ".sort", "sort: от 1 до 4 правил");
+                    } else {
+                        // имена, которые видит пользователь: поля листьев и заголовки выражений
+                        std::set<std::string> names;
+                        std::function<void(const Json::Value &)> collect = [&](const Json::Value &col) {
+                            if (col["children"].isArray()) {
+                                for (const auto &child : col["children"]) collect(child);
+                                return;
+                            }
+                            const std::string f = asString(col["field"]);
+                            if (!f.empty()) names.insert(f);
+                            if (!asString(col["expression"]).empty() && !asString(col["title"]).empty()) {
+                                names.insert(asString(col["title"]));
+                            }
+                        };
+                        for (const auto &col : block["columns"]) collect(col);
+                        for (Json::ArrayIndex i = 0; i < sort.size(); ++i) {
+                            const Json::Value &item = sort[i];
+                            const std::string path = base + ".sort." + std::to_string(i);
+                            if (!item.isObject()) {
+                                addError(r, path, "элемент — объект {field, dir}");
+                                continue;
+                            }
+                            const std::string field = asString(item["field"]);
+                            if (field.empty()) {
+                                addError(r, path + ".field", "нужно имя поля");
+                            } else if (!names.count(field)) {
+                                addError(r, path + ".field",
+                                         "колонки «" + field +
+                                             "» нет в таблице: укажите поле данных или заголовок вычисляемой колонки");
+                            }
+                            if (!item["dir"].isNull()) {
+                                const std::string dir = asString(item["dir"]);
+                                if (dir != "asc" && dir != "desc") {
+                                    addError(r, path + ".dir", "направление: asc или desc");
+                                }
+                            }
+                        }
+                    }
+                }
                 checkDrill(r, block, base, true, false);
             } else {
                 checkChartBlock(r, block, base);
