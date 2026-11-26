@@ -4047,3 +4047,30 @@ test('адресаты: группа, подписка и подсчёт пол�
   const ok = await request.delete(`/api/admin/contact-groups/${gid}`)
   expect(ok.ok()).toBeTruthy()
 })
+
+test('ширина страницы отчёта задаётся шаблоном (ADR-181)', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 900 })
+
+  await page.goto('/reports/report.html?report=page-width')
+  await page.waitForSelector('.blocks', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+  const wide = await page.evaluate(() => {
+    const el = document.querySelector('.page')
+    return { width: Math.round(el.getBoundingClientRect().width), max: getComputedStyle(el).maxWidth }
+  })
+  console.log('page-width:', JSON.stringify(wide))
+
+  // у обычного отчёта по-прежнему 1400
+  await page.goto('/reports/report.html?report=sales-by-region')
+  await page.waitForSelector('.blocks', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+  const normal = await page.evaluate(() => {
+    const el = document.querySelector('.page')
+    return { width: Math.round(el.getBoundingClientRect().width), max: getComputedStyle(el).maxWidth }
+  })
+  console.log('sales-by-region:', JSON.stringify(normal))
+
+  expect(wide.max).toBe('1800px')
+  expect(wide.width).toBe(1800)
+  expect(normal.max).toBe('1400px')
+})

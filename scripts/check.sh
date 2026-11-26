@@ -126,8 +126,20 @@ if [ -f "$ROOT/frontend/package.json" ]; then
       # сервер отдаёт страницы сам (ADR-79): сборка должна лежать рядом с бинарником
       rm -rf "$ROOT/backend/build/web"
       cp -a "$ROOT/frontend/dist" "$ROOT/backend/build/web"
+      # REST-демо для e2e (ADR-104): если сервис не запущен, поднимаем его сами и гасим после
+      REST_PID=""
+      if ! curl -s -m 1 -o /dev/null "http://127.0.0.1:8099/api/health"; then
+        echo "e2e: поднимаю REST-демо на :8099 (scripts/rest-demo.mjs)"
+        node "$ROOT/scripts/rest-demo.mjs" >/tmp/rep-rest-demo.log 2>&1 &
+        REST_PID=$!
+        for _ in $(seq 1 40); do
+          curl -s -m 1 -o /dev/null "http://127.0.0.1:8099/api/health" && break
+          sleep 0.25
+        done
+      fi
       npm run --silent golden
       npm run --silent e2e
+      [ -n "$REST_PID" ] && kill "$REST_PID" 2>/dev/null || true
     else
       echo "skip e2e (нужен backend:8080 — он же отдаёт статику; включить: REP_E2E=1 ./scripts/check.sh)"
     fi

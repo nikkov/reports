@@ -1,6 +1,6 @@
 <template>
   <!-- Киоск (ADR-164): ?kiosk=1 убирает шапку, параметры и кнопки — табло на стене цеха -->
-  <div class="page" :class="{ kiosk: kioskMode }">
+  <div class="page" :class="{ kiosk: kioskMode }" :style="pageStyle">
     <header class="head">
       <h1>{{ template?.title || reportId }}</h1>
       <div class="head-right">
@@ -137,12 +137,23 @@ const params = new URLSearchParams(location.search)
 const reportId = params.get('report') || 'sales-summary'
 // Киоск (ADR-164): табло без шапки и органов управления; включается ссылкой ?kiosk=1
 const kioskMode = params.get('kiosk') === '1' || params.get('kiosk') === 'true'
+
 // Просмотр черновика (ADR-82): данные и справочники считаются по телу черновика,
 // а не по опубликованной версии. Иначе новый отчёт (опубликован каркас) падал
 // с «в шаблоне не задан datasets» и «нет source.dataset».
 const draftMode = params.get('draft') === '1'
 
 const template = ref(null)
+
+// Ширина страницы из шаблона (ADR-181): число пикселей или "full" — вся ширина окна.
+// Значение уже проверено валидатором, поэтому здесь только подстановка; без pageWidth
+// остаётся прежние 1400 px.
+const pageStyle = computed(() => {
+  const width = template.value?.pageWidth
+  if (width === 'full') return { maxWidth: 'none' }
+  if (typeof width === 'number') return { maxWidth: `${width}px` }
+  return {}
+})
 const rows = ref([])
 const paramValues = reactive({})
 
@@ -748,6 +759,10 @@ body {
   color: var(--rep-text);
 }
 .page {
+  /* ширина задаётся шаблоном (ADR-181): pageWidth — пиксели или full; по умолчанию 1400.
+     border-box, чтобы max-width означал реальную ширину, включая отступы */
+  box-sizing: border-box;
+  width: 100%;
   max-width: 1400px;
   margin: 0 auto;
   padding: 18px 24px 40px;

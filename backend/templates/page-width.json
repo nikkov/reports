@@ -1,0 +1,112 @@
+{
+  "version": 2,
+  "id": "page-width",
+  "title": "Ширина страницы",
+  "description": "Отчёт задаёт ширину страницы в шаблоне (pageWidth): 1800 px — шире обычных 1400. Сравните с «Продажи по региону» при открытом окне пошире.",
+  "pageWidth": 1800,
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, s.category, s.product, s.amount, s.profit, s.order_date FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date ORDER BY r.name, s.category, s.product, s.id LIMIT 25"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Ширина этой страницы задана в шаблоне: \"pageWidth\": 1800. Обычный отчёт занимает до 1400 px, поэтому здесь таблица шире и колонки не жмутся. Значение можно поставить от 640 до 3840 или строкой \"full\" — тогда отчёт займёт всю ширину окна."
+    },
+    {
+      "type": "table",
+      "title": "Продажи: регион, категория, продукт",
+      "dataKey": "sales",
+      "span": 12,
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "title": "Рентабельность",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent"
+        },
+        {
+          "field": "order_date",
+          "title": "Дата заказа",
+          "type": "date"
+        }
+      ]
+    }
+  ],
+  "folder": "Оформление",
+  "tags": [
+    "ширина",
+    "layout"
+  ]
+}

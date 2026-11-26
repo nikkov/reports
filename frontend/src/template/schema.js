@@ -32,6 +32,19 @@ export default {
     "description": {
       "type": "string"
     },
+    "pageWidth": {
+      "description": "ширина страницы отчёта: пиксели (640…3840) или full — вся ширина окна (ADR-181). По умолчанию 1400",
+      "oneOf": [
+        {
+          "const": "full"
+        },
+        {
+          "type": "integer",
+          "minimum": 640,
+          "maximum": 3840
+        }
+      ]
+    },
     "params": {
       "type": "array",
       "items": {

@@ -752,6 +752,18 @@ ValidationResult validateTemplateJson(const Json::Value &root,
 
     if (asString(root["title"]).empty()) addError(r, "title", "title обязателен");
 
+    // Ширина страницы (ADR-181): пиксели 640…3840 или "full" — вся ширина окна
+    if (root.isMember("pageWidth") && !root["pageWidth"].isNull()) {
+        const auto &width = root["pageWidth"];
+        if (width.isString()) {
+            if (width.asString() != "full") {
+                addError(r, "pageWidth", "pageWidth: число 640…3840 или \"full\"");
+            }
+        } else if (!width.isInt() || width.asInt() < 640 || width.asInt() > 3840) {
+            addError(r, "pageWidth", "pageWidth: число 640…3840 или \"full\"");
+        }
+    }
+
     if (!root["blocks"].isArray() || root["blocks"].empty()) {
         addError(r, "blocks", "blocks должен быть непустым массивом");
     }
