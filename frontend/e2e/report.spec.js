@@ -4074,3 +4074,28 @@ test('ширина страницы отчёта задаётся шаблоно
   expect(wide.width).toBe(1800)
   expect(normal.max).toBe('1400px')
 })
+
+test('широкий отчёт: pageWidth 2200 и таблица без обрезки (ADR-182)', async ({ page }) => {
+  await page.setViewportSize({ width: 2400, height: 1100 })
+  await page.goto('/reports/report.html?report=wide-dashboard')
+  await page.waitForSelector('.blocks', { timeout: 30000 })
+  await page.waitForTimeout(2500)
+
+  const geo = await page.evaluate(() => {
+    const page = document.querySelector('.page')
+    const kpis = document.querySelectorAll('.kpi')
+    const table = document.querySelector('.rt-table, .block table')
+    return {
+      width: Math.round(page.getBoundingClientRect().width),
+      max: getComputedStyle(page).maxWidth,
+      kpis: kpis.length,
+      tableOverflow: table ? table.scrollWidth - table.clientWidth : -1
+    }
+  })
+  console.log('широкий отчёт:', JSON.stringify(geo))
+  expect(geo.max).toBe('2200px')
+  expect(geo.width).toBe(2200)
+  expect(geo.kpis).toBe(5)
+  // таблица из восьми колонок должна помещаться целиком, без горизонтальной прокрутки
+  expect(geo.tableOverflow).toBeLessThanOrEqual(1)
+})

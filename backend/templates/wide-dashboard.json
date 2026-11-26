@@ -1,0 +1,212 @@
+{
+  "version": 2,
+  "id": "wide-dashboard",
+  "title": "Широкий отчёт: продажи по регионам",
+  "description": "Пример увеличенной ширины страницы: pageWidth 2200. На такой ширине помещаются таблица из девяти колонок и диаграмма в одной строке, а четыре KPI-карточки не сжимаются.",
+  "pageWidth": 2200,
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, s.category, s.product, s.customer, sum(s.qty) AS qty, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS orders FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name, s.category, s.product, s.customer ORDER BY 6 DESC LIMIT 40"
+    },
+    "totals": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT sum(amount) AS amount, sum(profit) AS profit, count(*) AS orders, sum(qty) AS qty, sum(amount) / nullif(count(*), 0) AS avg_check, sum(profit)::numeric / nullif(sum(amount), 0) * 100 AS margin FROM reports_examples.sales WHERE order_date >= :from::date AND order_date <= :to::date"
+    },
+    "by_region": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, sum(s.amount) AS amount, sum(s.profit) AS profit FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name ORDER BY 2 DESC"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Отчёт задаёт ширину страницы в шаблоне: \"pageWidth\": 2200. При обычных 1400 px таблица и диаграмма вставали бы друг под друга, а KPI сжимались бы в две карточки на строку."
+    },
+    {
+      "type": "kpi",
+      "dataKey": "totals",
+      "span": 12,
+      "height": 170,
+      "items": [
+        {
+          "title": "Выручка",
+          "valueField": "amount",
+          "unit": "₽",
+          "decimals": 0
+        },
+        {
+          "title": "Прибыль",
+          "valueField": "profit",
+          "unit": "₽",
+          "decimals": 0
+        },
+        {
+          "title": "Заказов",
+          "valueField": "orders",
+          "decimals": 0
+        },
+        {
+          "title": "Средний чек",
+          "valueField": "avg_check",
+          "unit": "₽",
+          "decimals": 0
+        },
+        {
+          "title": "Рентабельность",
+          "valueField": "margin",
+          "unit": "%",
+          "decimals": 1
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Деталь: регион, категория, продукт, клиент",
+      "dataKey": "sales",
+      "span": 8,
+      "height": 420,
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true
+        },
+        {
+          "field": "product",
+          "title": "Продукт"
+        },
+        {
+          "field": "customer",
+          "title": "Клиент"
+        },
+        {
+          "field": "qty",
+          "title": "Штук",
+          "type": "int",
+          "format": "number"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма",
+          "type": "int",
+          "format": "number"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль",
+          "type": "int",
+          "format": "number"
+        },
+        {
+          "title": "Рентабельность",
+          "expression": "profit / amount",
+          "format": "percent"
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "title": "Сумма по регионам",
+      "dataKey": "by_region",
+      "chartType": "bar",
+      "orientation": "horizontal",
+      "showValues": true,
+      "xField": "region",
+      "yField": "amount",
+      "span": 4,
+      "height": 420
+    },
+    {
+      "type": "chart",
+      "title": "Структура выручки",
+      "dataKey": "by_region",
+      "chartType": "pie",
+      "donut": true,
+      "centerField": "amount",
+      "xField": "region",
+      "yField": "amount",
+      "span": 4,
+      "height": 300,
+      "card": true
+    },
+    {
+      "type": "chart",
+      "title": "Прибыль по регионам",
+      "dataKey": "by_region",
+      "chartType": "line",
+      "xField": "region",
+      "yField": "profit",
+      "span": 4,
+      "height": 300,
+      "card": true
+    },
+    {
+      "type": "text",
+      "span": 4,
+      "card": true,
+      "text": "На ширине 2200 px в строку помещаются три блока по четыре колонки, а таблица и две диаграммы делят экран 7 + 5. Значение pageWidth можно поставить от 640 до 3840 или задать \"full\" — тогда отчёт займёт всё окно целиком."
+    }
+  ],
+  "folder": "Оформление",
+  "tags": [
+    "ширина",
+    "дашборд"
+  ]
+}
