@@ -4104,7 +4104,7 @@ int main() {
             fetchDatasetRows(
                 *snapshot, dsKey, bag, dataDb, connRegistry, restCache, maxRows,
                 [done, leaves, bag, sheetTitle, groupColumns, subtotalLevels, grandLabelText, subtotalLabelText, grandTotal,
-                 collapsible, reportId, grandLabelText, subtotalLabelText](const rep::DatasetRows &rows) {
+                 collapsible, reportId](const rep::DatasetRows &rows) {
                     std::fprintf(stderr, "export: %s — rows %zu, leaves %zu, cols %zu\n", reportId.c_str(),
                                  rows.rows.size(), leaves.size(), rows.columns.size());
                     rep::ExportSheet sheet;
