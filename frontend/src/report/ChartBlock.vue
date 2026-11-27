@@ -37,6 +37,10 @@ const props = defineProps({
 // ECharts не понимает var(--rep-*): цвета читаем из CSS при построении опций (ADR-156)
 const cssColors = ref(themeColors())
 
+// Приглушённый цвет темы для подписей внутри graphic (границы шкалы, подпись кольца):
+// ECharts не понимает var(), поэтому резолвим (ADR-186)
+const mutedColor = () => cssColorValue('var(--rep-text-muted)') || cssColors.value.muted
+
 // Подписи осей, легенды и значения: шаблон главнее темы (ADR-156), но если цвет в шаблоне
 // не задан, берём цвет темы — иначе ECharts рисует подписи своим тёмно-серым, и в тёмной
 // теме они не видны на тёмном фоне (ADR-184).
@@ -152,8 +156,8 @@ function buildOption() {
       ],
       graphic: showLimits
         ? [
-            { type: 'text', left: '8%', bottom: 4, style: { text: fmt(model.min), fontSize: 11, fill: 'var(--rep-text-muted)' } },
-            { type: 'text', right: '8%', bottom: 4, style: { text: fmt(model.max), fontSize: 11, fill: 'var(--rep-text-muted)' } }
+            { type: 'text', left: '8%', bottom: 4, style: { text: fmt(model.min), fontSize: 11, fill: mutedColor() } },
+            { type: 'text', right: '8%', bottom: 4, style: { text: fmt(model.max), fontSize: 11, fill: mutedColor() } }
           ]
         : undefined
     }
@@ -353,7 +357,7 @@ function buildOption() {
               style: {
                 text: centerSub,
                 fontSize: 12,
-                fill: 'var(--rep-text-muted)',
+                fill: mutedColor(),
                 textAlign: 'center'
               }
             }

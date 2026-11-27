@@ -4168,13 +4168,18 @@ test('тёмная тема: подписи осей и легенды свет�
         .map((a) => (Array.isArray(a.axisLabel) ? a.axisLabel[0]?.color : a.axisLabel?.color))
         .filter(Boolean)
       const legendColors = (opt.legend || []).map((l) => l.textStyle?.color).filter(Boolean)
-      return { type: c.block?.chartType, axisColors, legendColors }
+      // подписи границ шкалы и центр кольца рисуются через graphic — там тоже бывает var()
+      const graphicFills = (opt.graphic || [])
+        .flatMap((g) => g.elements || [g])
+        .map((e) => e.style?.fill)
+        .filter(Boolean)
+      return { type: c.block?.chartType, axisColors, legendColors, graphicFills }
     })
     return { themeText, charts }
   })
   console.log('тема:', data.themeText, JSON.stringify(data.charts))
 
-  const all = data.charts.flatMap((c) => [...c.axisColors, ...c.legendColors])
+  const all = data.charts.flatMap((c) => [...c.axisColors, ...c.legendColors, ...c.graphicFills])
   expect(all.length).toBeGreaterThanOrEqual(3)
   for (const color of all) {
     // в ECharts не должно попадать «var(--rep-*)»: он рисует такое чёрным
