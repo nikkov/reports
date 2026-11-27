@@ -72,6 +72,15 @@ void auditEvent(const std::string &actor, const std::string &action, const std::
 // Пишем отдельным коротким соединением: событий немного (админские действия),
 // а блокирующая вставка не требует ни цикла событий, ни захвата колбэков.
 // Логин текущего пользователя (пусто — системное/анонимное событие).
+std::string requestActor(const HttpRequestPtr &req) {
+    if (!req) return "system";
+    if (const auto attrs = req->attributes()) {
+        const std::string login = attrs->get<std::string>("session_login");
+        if (!login.empty()) return login;
+    }
+    return "anonymous";
+}
+
 std::string actorOf(const HttpRequestPtr &req) {
     if (req && req->attributes()->find("session_login")) {
         return req->attributes()->get<std::string>("session_login");

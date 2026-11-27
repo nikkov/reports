@@ -36,6 +36,7 @@ struct AppContext {
     std::map<std::string, std::string> *templatesRaw = nullptr;
     std::map<std::string, TemplateInfo> *draftsParsed = nullptr;
     std::map<std::string, std::string> *draftsRaw = nullptr;
+    std::map<std::string, std::string> *draftsErrors = nullptr; // ошибки разбора черновика
 
     rep::ResultCache *resultCache = nullptr;        // кэш результатов наборов (REP_CACHE_TTL_SECONDS)
     std::atomic<std::uint64_t> *templatesVersion = nullptr; // версия шаблонов: инвалидация кэшей

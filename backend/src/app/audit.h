@@ -20,6 +20,9 @@ struct PurgeResult {
 // Логин текущего пользователя (пусто — системное/анонимное событие).
 std::string actorOf(const drogon::HttpRequestPtr &req);
 
+// Имя для журнала: логин из атрибутов запроса, иначе "anonymous"/"system" (ADR-128).
+std::string requestActor(const drogon::HttpRequestPtr &req);
+
 // Совместимость со старыми вызовами: строка «template.create» превращается в enum-действие,
 // объект и ip уходят в контекст события (ADR-109).
 void auditEvent(const std::string &actor, const std::string &action, const std::string &objectType,
