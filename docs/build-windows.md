@@ -149,7 +149,7 @@ drogon. Найдите процесс: `Get-NetTCPConnection -LocalPort 8080 | S
 | в каждом из этих файлов есть ветка `_WIN32` | иначе обёртка односторонняя |
 | `ws2_32`, `WIN32_LEAN_AND_MEAN`, `NOMINMAX` в `backend/CMakeLists.txt` | без Winsock не линкуются сокеты, без `NOMINMAX` ломаются `std::min/max` |
 | есть `backend/conan/profiles/windows-msvc2022`, `scripts/build.ps1`, `CMakePresets.json` | без них сборка не начинается |
-| `execinfo.h` в `main.cc` внутри `#if !defined(_WIN32)` | `backtrace` есть только в glibc |
+| `execinfo.h` в `main.cc` и `app/http.cc` внутри `#if defined(__linux__)` | `backtrace` есть только в glibc; `app/http.cc` — платформенная обёртка диагностики мьютекса (ADR-193) |
 
 Негативный тест проверки: положите в `backend/src` файл с `#include <unistd.h>` — скрипт должен
 упасть и назвать файл.
@@ -157,7 +157,8 @@ drogon. Найдите процесс: `Get-NetTCPConnection -LocalPort 8080 | S
 ## Чек-лист приёмки на Windows
 
 1. `.\scriptsuild.ps1` — сборка и тесты; в конце строка `All tests passed`.
-2. `.ackenduild-windowsep.exe` поднимается на `:8080`; `curl http://127.0.0.1:8080/reports/api/health`
+2. `.ackenduild-windows
+ep.exe` поднимается на `:8080`; `curl http://127.0.0.1:8080/reports/api/health`
    отвечает `"version"` из `VERSION` и `"db": true`.
 3. Шаблоны загружены: `psql -c "select count(*) from reports.report_templates"` — счётчик
    совпадает с локальным.
