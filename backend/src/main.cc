@@ -62,6 +62,8 @@
 #include "app/auth_routes.h"
 #include "app/system_routes.h"
 #include "app/admin_reports.h"
+#include "app/sse.h"
+#include "app/template_store.h"
 #include "app/template_types.h"
 #include "app/template_parse.h"
 
@@ -83,55 +85,8 @@ using rep::app::runQuery;
 // Одно SSE-соединение на зрителя: сервер сам пишет в потоке, когда шаблон
 // опубликован или откатан, и раз в 15 с шлёт комментарий-пульс, чтобы прокси
 // не закрывали простой. Клиент переподключается сам (EventSource).
-namespace {
-
-struct SseClient {
-    std::shared_ptr<drogon::ResponseStream> stream;
-};
-
-std::mutex sseMutex;
-std::map<std::string, std::map<uint64_t, std::shared_ptr<drogon::ResponseStream>>> sseClients;
-std::atomic<uint64_t> sseNextId{1};
-std::atomic<bool> sseHeartbeatStarted{false};
-
-void sseWrite(const std::shared_ptr<drogon::ResponseStream> &stream, const std::string &payload) {
-    if (!stream) return;
-    stream->send(payload);
-}
-
-// пульс: держит соединение живым и заодно убирает отвалившихся клиентов
-void sseHeartbeat() {
-    std::lock_guard<std::mutex> lock(sseMutex);
-    for (auto report = sseClients.begin(); report != sseClients.end();) {
-        for (auto client = report->second.begin(); client != report->second.end();) {
-            if (!client->second->send(": ping\n\n")) {
-                client = report->second.erase(client);
-            } else {
-                ++client;
-            }
-        }
-        if (report->second.empty()) {
-            report = sseClients.erase(report);
-        } else {
-            ++report;
-        }
-    }
-}
-
-} // namespace
-
-void notifyChange(const std::string &reportId) {
-    std::vector<std::shared_ptr<drogon::ResponseStream>> targets;
-    {
-        std::lock_guard<std::mutex> lock(sseMutex);
-        const auto it = sseClients.find(reportId);
-        if (it == sseClients.end()) return;
-        for (const auto &kv : it->second) targets.push_back(kv.second);
-    }
-    const std::string payload =
-        "event: change\ndata: {\"reportId\":\"" + reportId + "\"}\n\n";
-    for (const auto &stream : targets) sseWrite(stream, payload);
-}
+// SSE вынесен в app/sse (ADR-193)
+using rep::app::sse::notifyChange;
 
 
 
@@ -1366,6 +1321,8 @@ int main() {
     ctx.logRetentionDays = logRetentionDays;
     ctx.readOnlyRole = static_cast<bool>(dbRo);
     ctx.adminEnabled = adminEnabled;
+    ctx.resultCache = &resultCache;
+    ctx.templatesVersion = &templatesVersion;
     (void)ctx; // модулей маршрутов ещё нет: подключатся на следующем этапе
 
     // Единый выбор шаблона (черновик или опубликованный) и набора данных. Пять обработчиков
@@ -1482,54 +1439,13 @@ int main() {
         return true;
     };
 
-    // Атомарная замена шаблона в памяти: сначала разбор, потом запись под мьютексом.
-    auto applyTemplateInMemory = [&templates, &templatesRaw, &templatesMutex, &templatesVersion,
-                                  &resultCache](const std::string &id, const std::string &raw,
-                                                const std::string &title) {
-        // тело могло быть сохранено в старой версии формата (файл, старый ряд в БД):
-        // в память кладём уже мигрированное, чтобы клиент видел актуальный формат
-        std::string body = raw;
-        {
-            Json::CharReaderBuilder rb;
-            Json::Value doc;
-            std::string parseErr;
-            std::istringstream in(raw);
-            if (Json::parseFromStream(rb, in, &doc, &parseErr)) {
-                const auto migration = rep::migrateTemplate(doc);
-                if (!migration.ok) return false;
-                if (!migration.steps.empty()) {
-                    Json::StreamWriterBuilder wb;
-                    wb["indentation"] = "  ";
-                    body = Json::writeString(wb, doc);
-                }
-            }
-        }
-        TemplateInfo info;
-        if (!parseTemplate(body, id, info)) return false;
-        info.id = id;
-        info.title = title;
-        {
-            std::lock_guard<TracedMutex> lock(templatesMutex);
-            templates[id] = info;
-            templatesRaw[id] = body;
-        }
-        notifyChange(id); // экраны с включённым live узнают об изменении сразу
-        // новый шаблон — новые данные: старые результаты больше не валидны
-        templatesVersion.fetch_add(1);
-        resultCache.clear();
-        return true;
+    // Память шаблонов — app/template_store.cc (ADR-193); обёртки сохраняют прежние вызовы
+    auto applyTemplateInMemory = [&ctx](const std::string &id, const std::string &raw,
+                                        const std::string &title) {
+        return rep::app::applyTemplate(ctx, id, raw, title);
     };
 
-    auto dropTemplateFromMemory = [&templates, &templatesRaw, &templatesMutex, &templatesVersion,
-                                   &resultCache](const std::string &id) {
-        {
-            std::lock_guard<TracedMutex> lock(templatesMutex);
-            templates.erase(id);
-            templatesRaw.erase(id);
-        }
-        templatesVersion.fetch_add(1);
-        resultCache.clear();
-    };
+    auto dropTemplateFromMemory = [&ctx](const std::string &id) { rep::app::dropTemplate(ctx, id); };
 
     // Сырой шаблон для редактора: с SQL справочников (публичный /api/reports/{id} его вырезает).
     // admin/reports/{id} и /deleted — в app/admin_reports.cc (ADR-193)
@@ -5152,18 +5068,12 @@ const std::string from = req->getParameter("from");
                 return;
             }
 
-            const uint64_t clientId = sseNextId++;
+            const uint64_t clientId = rep::app::sse::nextClientId();
             auto resp = HttpResponse::newAsyncStreamResponse(
                 [reportId, clientId](ResponseStreamPtr stream) {
-                    auto shared = std::shared_ptr<drogon::ResponseStream>(std::move(stream));
-                    sseWrite(shared, ": connected\n\n");
-                    {
-                        std::lock_guard<std::mutex> lock(sseMutex);
-                        sseClients[reportId][clientId] = shared;
-                    }
-                    if (!sseHeartbeatStarted.exchange(true)) {
-                        app().getLoop()->runEvery(15.0, sseHeartbeat);
-                    }
+                    rep::app::sse::registerClient(
+                        reportId, clientId, std::shared_ptr<drogon::ResponseStream>(std::move(stream)));
+                    rep::app::sse::startHeartbeat();
                 },
                 true);
             resp->setContentTypeString("text/event-stream; charset=utf-8");

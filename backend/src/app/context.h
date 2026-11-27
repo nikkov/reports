@@ -4,6 +4,8 @@
 // получает AppContext и берёт из него нужное.
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -34,6 +36,9 @@ struct AppContext {
     std::map<std::string, std::string> *templatesRaw = nullptr;
     std::map<std::string, TemplateInfo> *draftsParsed = nullptr;
     std::map<std::string, std::string> *draftsRaw = nullptr;
+
+    rep::ResultCache *resultCache = nullptr;        // кэш результатов наборов (REP_CACHE_TTL_SECONDS)
+    std::atomic<std::uint64_t> *templatesVersion = nullptr; // версия шаблонов: инвалидация кэшей
 
     std::size_t maxRows = 50000;   // потолок строк на клиенте (REP_MAX_ROWS)
     bool authEnabled = true;       // REP_AUTH=0 — работа без аутентификации
