@@ -215,3 +215,21 @@ bool compileDataset(const std::string &datasetSql, const std::map<std::string, s
 }
 
 } // namespace rep
+
+namespace rep {
+
+int effectiveQueryTimeoutMs(const std::string &kind, int statementTimeoutMs, int restTimeoutMs,
+                            int envDefaultMs) {
+    // Источник сам себе выставляет предел: SQL — statement_timeout, REST — timeoutMs.
+    const int sourceMs = kind == "sql" ? statementTimeoutMs : restTimeoutMs;
+    int base = envDefaultMs > 0 ? envDefaultMs : 6000;
+    if (sourceMs > 0) {
+        // запас на передачу ответа и разбор: приложение ждёт чуть дольше источника,
+        // иначе ошибка приходит от нас, а не от базы, и причина сбоя теряется
+        const int withMargin = sourceMs + 1500;
+        if (withMargin > base) base = withMargin;
+    }
+    return base < 1000 ? 1000 : base;
+}
+
+}  // namespace rep

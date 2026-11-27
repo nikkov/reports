@@ -610,7 +610,8 @@ export default {
         "timeoutMs": {
           "type": "integer",
           "minimum": 100,
-          "maximum": 30000
+          "maximum": 600000,
+          "description": "таймаут ответа REST-источника, мс (ADR-194): до 10 минут; приложение ждёт не меньше"
         },
         "cacheSeconds": {
           "type": "integer",

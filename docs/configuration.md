@@ -267,4 +267,4 @@ export REP_SMTP_HOST=smtp.corp.local REP_SMTP_PORT=587 REP_SMTP_TLS=1
 
 | Переменная | По умолчанию | Смысл |
 |---|---|---|
-| `REP_DATASET_TIMEOUT_MS` | `6000` | Сколько ждать ответа внешнего источника (SQL-наборы с `connection`, кроме `default`) |
+| `REP_DATASET_TIMEOUT_MS` | `6000` | Нижняя граница ожидания внешнего источника (SQL-наборы с `connection`, кроме `default`). Если в шаблоне задан `statementTimeoutMs` или `timeoutMs`, приложение ждёт `настройка + 1500` мс — ADR-194 |

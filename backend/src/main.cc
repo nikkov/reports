@@ -700,11 +700,17 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
     const std::string sourceKey = ds.connection;
     int queryTimeoutMs = 0;
     if (externalSource) {
-        queryTimeoutMs = 6000;
+        // Прикладное ожидание не короче предела самого источника (ADR-194): иначе
+        // statementTimeoutMs/timeoutMs из шаблона не успевает сработать
+        int envDefaultMs = 6000;
         try {
-            queryTimeoutMs = std::max(1000, std::stoi(rep::envOr("REP_DATASET_TIMEOUT_MS", "6000")));
+            envDefaultMs = std::stoi(rep::envOr("REP_DATASET_TIMEOUT_MS", "6000"));
         } catch (const std::exception &) {
         }
+        const auto specIt0 = tpl.connections.find(sourceKey);
+        const int statementMs = specIt0 == tpl.connections.end() ? 0 : specIt0->second.statementTimeoutMs;
+        const int restMs = specIt0 == tpl.connections.end() ? 0 : specIt0->second.timeoutMs;
+        queryTimeoutMs = rep::effectiveQueryTimeoutMs(ds.kind, statementMs, restMs, envDefaultMs);
     }
 
     // DSN — ключ карантина и проверки: имя источника общее у разных шаблонов (ADR-126)

@@ -70,3 +70,19 @@ TEST_CASE("compileNamedParams: ::timestamp проверяет формат") {
     empty.set("from", "");
     REQUIRE(rep::compileNamedParams("SELECT :from::timestamp", empty, compiled, values, err));
 }
+
+TEST_CASE("effectiveQueryTimeoutMs: настройка источника главнее общей переменной (ADR-194)") {
+    // без настройки источника — общая переменная
+    REQUIRE(rep::effectiveQueryTimeoutMs("sql", 0, 0, 6000) == 6000);
+    // statement_timeout 20 с: приложение ждёт не 6 с, а 21,5 с
+    REQUIRE(rep::effectiveQueryTimeoutMs("sql", 20000, 0, 6000) == 21500);
+    // REST-источник с timeoutMs 30 с
+    REQUIRE(rep::effectiveQueryTimeoutMs("rest", 0, 30000, 6000) == 31500);
+    // join идёт по правилам REST-стороны
+    REQUIRE(rep::effectiveQueryTimeoutMs("join", 0, 10000, 6000) == 11500);
+    // общая переменная больше источника — берём её
+    REQUIRE(rep::effectiveQueryTimeoutMs("sql", 5000, 0, 30000) == 30000);
+    // нижняя граница — 1 с
+    REQUIRE(rep::effectiveQueryTimeoutMs("sql", 0, 0, 0) == 6000);
+    REQUIRE(rep::effectiveQueryTimeoutMs("sql", 0, 0, 10) == 1000);
+}

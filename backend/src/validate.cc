@@ -955,6 +955,12 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                                      "sslmode: disable, allow, prefer, require, verify-ca или verify-full");
                         }
                     }
+                    if (conn.isMember("timeoutMs")) {
+                        const auto &value = conn["timeoutMs"];
+                        if (!value.isInt() || value.asInt() < 100 || value.asInt() > 600000) {
+                            addError(r, base + ".timeoutMs", "timeoutMs — целое 100…600000 (мс)");
+                        }
+                    }
                     if (conn.isMember("connectTimeout")) {
                         const auto &value = conn["connectTimeout"];
                         if (!value.isInt() || value.asInt() < 1 || value.asInt() > 120) {

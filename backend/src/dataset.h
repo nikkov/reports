@@ -19,6 +19,13 @@ struct DatasetQuery {
 bool compileDataset(const std::string &datasetSql, const std::map<std::string, std::string> &datasetParams,
                     const ParamBag &bag, DatasetQuery &out, std::string &err);
 
+// Сколько ждать ответа внешнего источника на уровне приложения (ADR-194).
+// Настройка источника главнее общей переменной: если шаблон разрешает запросу 20 с,
+// приложение не должно сдаваться через 6 с — иначе statementTimeoutMs бессмыслен.
+// kind: "sql" (statementTimeoutMs) или "rest"/"join" (timeoutMs). Возвращает мс, >= 1000.
+int effectiveQueryTimeoutMs(const std::string &kind, int statementTimeoutMs, int restTimeoutMs,
+                            int envDefaultMs);
+
 // ':name' → $N с проверкой типа по касту (::date, ::int, ::timestamp).
 // Литералы ('...', "..." и $$...$$) и комментарии не разбираются: ':' внутри них —
 // часть текста, а не параметр (иначе to_char(..., 'HH24:MI') просил параметр MI).
