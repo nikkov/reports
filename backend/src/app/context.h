@@ -42,6 +42,7 @@ struct AppContext {
     std::string proxyHeader;       // заголовок с логином от доверенного прокси (ADR-54)
     int logRetentionDays = 90;     // глубина хранения журналов (REP_LOG_RETENTION_DAYS)
     bool readOnlyRole = false;     // данные читаются под отдельной ролью (ADR-33)
+    bool adminEnabled = false;     // REP_ADMIN=1 — включена админка
 
     // Снимок шаблона под мьютексом: обработчики не должны держать замок на всё время работы.
     std::shared_ptr<TemplateInfo> templateSnapshot(const std::string &id) const {
