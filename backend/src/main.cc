@@ -55,99 +55,25 @@
 #include "rest_client.h"
 #include "base_path.h"
 #include "static_web.h"
+#include "app/http.h"
+#include "app/context.h"
+#include "app/db.h"
+#include "app/audit.h"
+#include "app/template_types.h"
 
 namespace fs = std::filesystem;
 
-namespace {
-// Диагностика взаимной блокировки (ADR-152): при REP_DEBUG_MUTEX=1 печатаем захват и
-// освобождение мьютекса шаблонов с идентификатором потока — видно, кто держит его вечно.
-struct TracedMutex {
-    // обычный мьютекс: причина дедлока найдена и устранена (ADR-153). При REP_DEBUG_MUTEX=1
-    // в stderr пишется последовательность захватов со стеком — для поиска будущих ошибок
-    std::mutex m;
-    static bool enabled() {
-        static const bool on = rep::envOr("REP_DEBUG_MUTEX", "0") == "1";
-        return on;
-    }
-    static std::size_t tid() {
-        return std::hash<std::thread::id>{}(std::this_thread::get_id());
-    }
-    static void dumpStack(const char *tag, void *self, std::size_t threadId) {
-#ifdef __linux__
-        void *frames[8];
-        const int n = ::backtrace(frames, 8);
-        char **syms = ::backtrace_symbols(frames, n);
-        std::fprintf(stderr, "MUTEX %s %p tid %zu", tag, self, threadId);
-        for (int i = 0; syms && i < n; ++i) std::fprintf(stderr, " | %s", syms[i]);
-        std::fprintf(stderr, "\n");
-        if (syms) std::free(syms);
-#else
-        std::fprintf(stderr, "MUTEX %s %p tid %zu\n", tag, self, threadId);
-#endif
-    }
-    // повторный вход в тот же поток — вечный дедлок на обычном мьютексе (ADR-153).
-    // Сообщаем об этом ДО lock(), чтобы случай было видно в журнале, а не после зависания
-    static bool &held() {
-        thread_local bool holds = false;
-        return holds;
-    }
-    void lock() {
-        if (enabled() && held()) {
-            std::fprintf(stderr, "MUTEX REENTER %p tid %zu — повторный захват, будет дедлок\n",
-                         static_cast<void *>(this), tid());
-            dumpStack("reenter", static_cast<void *>(this), tid());
-        }
-        if (enabled()) dumpStack("wait", static_cast<void *>(this), tid());
-        m.lock();
-        held() = true;
-        if (enabled()) dumpStack("lock", static_cast<void *>(this), tid());
-    }
-    void unlock() {
-        if (enabled()) std::fprintf(stderr, "MUTEX free %p tid %zu\n", static_cast<void *>(this), tid());
-        held() = false;
-        m.unlock();
-    }
-};
-}  // namespace
 using namespace drogon;
 
-namespace {
-
-// Логин запроса, который обрабатывается в этом потоке. sendError не получает req
-// (181 вызов), а в журнале нужно видеть, кто получил ошибку (ADR-128).
-thread_local std::string currentActor;
-
-Json::Value errorBody(const std::string &code, const std::string &message) {
-    Json::Value body;
-    body["error"]["code"] = code;
-    body["error"]["message"] = message;
-    return body;
-}
-
-HttpResponsePtr jsonResponse(const Json::Value &body, HttpStatusCode status = k200OK) {
-    auto resp = HttpResponse::newHttpResponse();
-    resp->setStatusCode(status);
-    resp->setContentTypeCode(CT_APPLICATION_JSON);
-    resp->setBody(Json::FastWriter().write(body));
-    resp->addHeader("Cache-Control", "no-store");
-    return resp;
-}
-
-void sendError(const std::function<void(const HttpResponsePtr &)> &cb, HttpStatusCode status,
-               const std::string &code, const std::string &message) {
-    // Каждая ошибка API попадает в журнал (ADR-127): 5xx — error, остальные — warning,
-    // 401 — debug (нет сессии — обычное дело при первом открытии страницы)
-    const int numeric = static_cast<int>(status);
-    rep::log::Level level = rep::log::Level::Warning;
-    if (numeric >= 500) {
-        level = rep::log::Level::Error;
-    } else if (numeric == 401) {
-        level = rep::log::Level::Debug;
-    }
-    rep::log::event(level, rep::log::Action::Other, currentActor,
-                    "ошибка API " + std::to_string(numeric) + " " + code + ": " + message);
-    cb(jsonResponse(errorBody(code, message), status));
-}
+// HTTP-обвязка вынесена в app/http (ADR-193): имена остаются прежними, чтобы
+// порядка полутора сотен вызовов в этом файле не пришлось переписывать
+using rep::http::errorBody;
+using rep::http::jsonResponse;
+using rep::http::sendError;
+using rep::http::TracedMutex;
+using rep::app::describeError;
+using rep::app::requestIp;
+using rep::app::runQuery;
 
 // --- Обновление по событию (ADR-44) -------------------------------------
 // Одно SSE-соединение на зрителя: сервер сам пишет в потоке, когда шаблон
@@ -205,134 +131,13 @@ void notifyChange(const std::string &reportId) {
 
 
 
-// Совместимость со старыми вызовами: админские действия пишутся через единую функцию
-// логирования (ADR-109), а не отдельным механизмом. Строка «template.create» превращается
-// в enum-действие, ip и объект уходят в контекст.
-namespace {
+// Журнал действий вынесен в app/audit (ADR-193)
+using rep::app::actorOf;
+using rep::app::auditEvent;
+using rep::app::purgeOldLogs;
+using rep::app::PurgeResult;
+using rep::app::writeAuditRow;
 
-rep::log::Level legacyLevel(const std::string &action) {
-    if (action == "auth.login_failed" || action == "subscription.given_up") {
-        return rep::log::Level::Warning;
-    }
-    return rep::log::Level::Info;
-}
-
-rep::log::Action legacyAction(const std::string &action) {
-    if (action.rfind("template.", 0) == 0) {
-        return action == "template.publish" ? rep::log::Action::PublishTemplate
-                                            : rep::log::Action::ChangeTemplate;
-    }
-    if (action == "auth.login" || action == "auth.login_failed") return rep::log::Action::Login;
-    if (action == "user.create" || action == "user.autocreate") return rep::log::Action::CreateUser;
-    if (action == "user.delete") return rep::log::Action::DeleteUser;
-    if (action == "user.update") return rep::log::Action::ChangeUser;
-    if (action.rfind("role.", 0) == 0) return rep::log::Action::ChangeRoles;
-    if (action.rfind("subscription.", 0) == 0) {
-        return action == "subscription.run" || action == "subscription.given_up"
-                   ? rep::log::Action::RunSubscription
-                   : rep::log::Action::ChangeSubscription;
-    }
-    return rep::log::Action::Other;
-}
-
-}  // namespace
-
-void auditEvent(const std::string &actor, const std::string &action, const std::string &objectType,
-                const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
-    Json::Value ctx(Json::objectValue);
-    // в журнале остаётся прежняя строка действия (template.update) — её видят админка
-    // и фильтры; enum используется в stdout JSON
-    ctx["legacy_action"] = action;
-    ctx["object_type"] = objectType;
-    ctx["object_id"] = objectId;
-    if (!ip.empty()) ctx["ip"] = ip;
-    if (!detailsJson.empty() && detailsJson != "{}") {
-        Json::CharReaderBuilder builder;
-        Json::Value details;
-        std::string errs;
-        std::istringstream in(detailsJson);
-        if (Json::parseFromStream(builder, in, &details, &errs)) ctx["details"] = details;
-    }
-    rep::log::event(legacyLevel(action), legacyAction(action), actor == "system" ? "" : actor,
-                    action, ctx);
-}
-
-// --- Аудит действий (ADR-52) ---------------------------------------------
-// Пишем отдельным коротким соединением: событий немного (админские действия),
-// а блокирующая вставка не требует ни цикла событий, ни захвата колбэков.
-// Логин текущего пользователя (пусто — системное/анонимное событие).
-std::string actorOf(const HttpRequestPtr &req) {
-    if (req && req->attributes()->find("session_login")) {
-        return req->attributes()->get<std::string>("session_login");
-    }
-    return std::string();
-}
-
-// Непосредственная запись строки журнала — используется приёмником логов (ADR-109).
-void writeAuditRow(const std::string &actor, const std::string &action, const std::string &objectType,
-                   const std::string &objectId, const std::string &detailsJson, const std::string &ip) {
-    PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
-    if (PQstatus(conn) != CONNECTION_OK) {
-        REP_LOG_WARN(AuditFailed, "") << "аудит: нет соединения с БД: " << PQerrorMessage(conn);
-        PQfinish(conn);
-        return;
-    }
-    const char *values[] = {actor.c_str(), action.c_str(), objectType.c_str(), objectId.c_str(),
-                            detailsJson.c_str(), ip.c_str()};
-    PGresult *res = PQexecParams(
-        conn,
-        "INSERT INTO audit_log (actor, action, object_type, object_id, details, ip)"
-        " VALUES ($1, $2, $3, $4, $5::jsonb, NULLIF($6, ''))",
-        6, nullptr, values, nullptr, nullptr, 0);
-    if (PQresultStatus(res) != PGRES_COMMAND_OK) LOG_WARN << "аудит: " << PQerrorMessage(conn);
-    PQclear(res);
-    PQfinish(conn);
-}
-
-// Ретеншен журналов (ADR-59): удаляем записи старше N дней. Журналы только растут,
-// поэтому глубина хранения — настройка, а не «когда-нибудь почистим руками».
-struct PurgeResult {
-    bool ok = false;
-    long audit = 0;
-    long runs = 0;
-    std::string error;
-};
-
-PurgeResult purgeOldLogs(int days) {
-    PurgeResult out;
-    if (days <= 0) {
-        out.ok = true;
-        return out;
-    }
-    PGconn *conn = PQconnectdb(rep::connInfoFromEnv().c_str());
-    if (PQstatus(conn) != CONNECTION_OK) {
-        out.error = std::string(PQerrorMessage(conn));
-        PQfinish(conn);
-        return out;
-    }
-    const std::string daysText = std::to_string(days);
-    const char *values[] = {daysText.c_str()};
-    const auto run = [&](const char *sql) -> long {
-        PGresult *res = PQexecParams(conn, sql, 1, nullptr, values, nullptr, nullptr, 0);
-        long affected = -1;
-        if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-            affected = std::strtol(PQcmdTuples(res), nullptr, 10);
-        } else {
-            out.error = std::string(PQerrorMessage(conn));
-        }
-        PQclear(res);
-        return affected;
-    };
-    // журнал действий и журнал рассылки — обе таблицы с датой начала
-    const long audit = run("DELETE FROM audit_log WHERE at < now() - ($1::int || ' days')::interval");
-    const long runs = run("DELETE FROM subscription_runs WHERE started_at < now() - ($1::int || ' days')::interval");
-    PQfinish(conn);
-    if (audit < 0 || runs < 0) return out;
-    out.ok = true;
-    out.audit = audit;
-    out.runs = runs;
-    return out;
-}
 
 // Часовой пояс подписки (ADR-60). Локальное «наивное» время считаем в C++,
 // а пересчёт местное ↔ UTC отдаём PostgreSQL: только база знает переходы на летнее
@@ -428,11 +233,6 @@ std::string requestActor(const HttpRequestPtr &req) {
     return "anonymous";
 }
 
-std::string requestIp(const HttpRequestPtr &req) {
-    if (!req) return "";
-    return req->peerAddr().toIp();
-}
-
 // Тип колонки для клиента: берём из метаданных запроса, иначе — по виду значения (ADR: см. 1.2).
 std::string columnType(const std::string &name,
                        const std::map<std::string, std::string> &declared,
@@ -460,52 +260,10 @@ Json::Value fieldToJson(const orm::Field &f, const std::string &type) {
     return Json::Value(v);
 }
 
-struct DatasetInfo {
-    std::string sql;
-    std::map<std::string, std::string> params; // имя параметра запроса → "$param" шаблона
-    std::string connection;                    // ключ connections; пусто — источник сервера (ADR-76)
-    // ADR-104: вид набора — sql (по умолчанию), rest или join
-    std::string kind = "sql";
-    rep::RestSpec rest;
-    rep::JoinSpec join;
-};
-
-struct TemplateInfo {
-    std::string id;
-    std::string title;
-    std::string datasetSql;                             // SQL первого набора (совместимость)
-    std::map<std::string, std::string> datasetParams;
-    std::map<std::string, DatasetInfo> datasets;        // все наборы шаблона (ADR-36)
-    std::string datasetConnection;                      // соединение первого набора
-    std::map<std::string, rep::ConnSpec> connections;   // источники данных шаблона (ADR-76)
-};
-
-
-
-// Итог выбора шаблона и набора данных: один тип на все обработчики (data/aggregate/
-// group/text/экспорт), чтобы не держать пять копий одного и того же выбора (ADR-105).
-struct ResolvedDataset {
-    std::shared_ptr<TemplateInfo> tpl;
-    std::string key;
-    std::string kind = "sql";
-    std::string sql;
-    std::string connection;
-    std::map<std::string, std::string> params;
-    int status = 0;
-    std::string code;
-    std::string message;
-};
-
-// Текст ошибки из std::exception_ptr (для ответов админки).
-std::string describeError(const std::exception_ptr &e) {
-    std::string msg = "ошибка выполнения";
-    try {
-        if (e) std::rethrow_exception(e);
-    } catch (const std::exception &ex) {
-        msg = ex.what();
-    }
-    return msg;
-}
+// Типы шаблона и набора вынесены в app/template_types.h (ADR-193)
+using rep::app::DatasetInfo;
+using rep::app::TemplateInfo;
+using rep::app::ResolvedDataset;
 
 bool parseTemplate(const std::string &text, const std::string &fallbackId, TemplateInfo &out) {
     Json::Value root;
@@ -584,38 +342,6 @@ bool loadTemplateFile(const fs::path &file, TemplateInfo &out) {
     ss << in.rdbuf();
     return parseTemplate(ss.str(), file.stem().string(), out);
 }
-
-// timeoutMs > 0 — через это время запрос считается зависшим и отвечает ошибкой (ADR-125).
-// Нужен для внешних источников: если база не существует, drogon бесконечно переподключается,
-// колбэки не вызываются, и запрос пользователя висит без ответа.
-void runQuery(const orm::DbClientPtr &db, const std::string &sql,
-              const std::vector<std::string> &values,
-              std::function<void(const orm::Result &)> onOk,
-              std::function<void(const std::exception_ptr &)> onErr,
-              int timeoutMs = 0) {
-    auto binder = *db << sql;
-    for (const auto &v : values) binder << v;
-    binder << orm::Mode::NonBlocking;
-    auto done = std::make_shared<std::atomic<bool>>(false);
-    if (timeoutMs > 0) {
-        drogon::app().getLoop()->runAfter(
-            static_cast<double>(timeoutMs) / 1000.0, [done, onErr, timeoutMs]() {
-                if (done->exchange(true)) return;
-                onErr(std::make_exception_ptr(std::runtime_error(
-                    "источник не ответил за " + std::to_string(timeoutMs) +
-                    " мс: проверьте host, port и database соединения, а также доступность сервера")));
-            });
-    }
-    binder >> [done, onOk](const orm::Result &res) {
-        if (!done->exchange(true)) onOk(res);
-    };
-    binder >> [done, onErr](const std::exception_ptr &e) {
-        if (!done->exchange(true)) onErr(e);
-    };
-    binder.exec();
-}
-
-}  // namespace
 
 // --- Наборы данных любого вида (ADR-104) -------------------------------------------------
 // SQL, REST и join приводятся к одному контейнеру строк, поэтому данные, агрегация,
@@ -1683,6 +1409,23 @@ int main() {
     const int restCacheTtl = std::stoi(rep::envOr("REP_REST_CACHE_TTL_SECONDS", "0"));
     rep::RestCache restCache(restCacheEntries, restCacheTtl);
 
+    // Общее состояние сервера: модули маршрутов получают его одним объектом (ADR-193).
+    // Пока это «мостик»: main() продолжает работать со своими переменными, а новые файлы
+    // берут их через контекст.
+    rep::app::AppContext ctx;
+    ctx.db = db;
+    ctx.dataDb = dataDb;
+    ctx.conn = &connRegistry;
+    ctx.rest = &restCache;
+    ctx.templatesMutex = &templatesMutex;
+    ctx.templates = &templates;
+    ctx.templatesRaw = &templatesRaw;
+    ctx.draftsParsed = &draftsParsed;
+    ctx.draftsRaw = &draftsRaw;
+    ctx.maxRows = maxRows;
+    ctx.authEnabled = authEnabled;
+    (void)ctx; // модулей маршрутов ещё нет: подключатся на следующем этапе
+
     // Единый выбор шаблона (черновик или опубликованный) и набора данных. Пять обработчиков
     // раньше держали по копии этого кода, из-за чего при правках один набор менялся, а другой
     // оставался со старой проверкой (дефект /text в 2.0.0) — теперь выбор один на всех.
@@ -1906,7 +1649,7 @@ int main() {
         "/api/admin/reports/deleted",
         [db, adminEnabled](const HttpRequestPtr &req,
                            std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -1989,7 +1732,7 @@ int main() {
         [db, adminEnabled, &applyTemplateInMemory, &prepareTemplate](const HttpRequestPtr &req,
                                                                     std::function<void(const HttpResponsePtr &)> &&cb,
                                                                     const std::string &id) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -2041,7 +1784,7 @@ int main() {
     app().registerHandler(
         "/api/admin/datasources",
         [&connRegistry](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             Json::Value out;
             Json::Value items(Json::arrayValue);
             for (const auto &failure : connRegistry.failures()) {
@@ -2066,7 +1809,7 @@ int main() {
         "/api/admin/assets",
         [db, adminEnabled, assetMaxBytes](const HttpRequestPtr &req,
                                           std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -2106,7 +1849,7 @@ int main() {
             }
             if (name.empty()) name = "рисунок";
             const std::string id = rep::assets::newAssetId();
-            const std::string actor = currentActor;
+            const std::string actor = rep::http::actorRef();
             runQuery(db,
                      "INSERT INTO report_assets (id, name, mime, size, width, height, bytes, created_by) "
                      "VALUES ($1, $2, $3, $4, $5, $6, decode($7, 'hex'), $8)",
@@ -2136,7 +1879,7 @@ int main() {
         "/api/admin/assets",
         [db, adminEnabled](const HttpRequestPtr &req,
                            std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -2176,7 +1919,7 @@ int main() {
         [db, adminEnabled, &templatesRaw, &templatesMutex](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb,
             const std::string &id) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -2208,7 +1951,7 @@ int main() {
                              return;
                          }
                          rep::log::event(rep::log::Level::Info, rep::log::Action::DeleteAsset,
-                                         currentActor, "рисунок " + id);
+                                         rep::http::actorRef(), "рисунок " + id);
                          Json::Value out;
                          out["deleted"] = id;
                          cb(jsonResponse(out));
@@ -2263,12 +2006,12 @@ int main() {
     app().registerHandler(
         "/api/admin/datasources/reset",
         [&connRegistry](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             const auto body = req->getJsonObject();
             const std::string label = body && body->isObject() ? (*body).get("label", "").asString() : "";
             if (!label.empty()) {
                 const bool clearedOne = connRegistry.clearFailure(label);
-                rep::log::event(rep::log::Level::Info, rep::log::Action::Other, currentActor,
+                rep::log::event(rep::log::Level::Info, rep::log::Action::Other, rep::http::actorRef(),
                                 "сброшен карантин источника: " + label);
                 Json::Value one;
                 one["cleared"] = clearedOne ? 1 : 0;
@@ -2276,7 +2019,7 @@ int main() {
                 return;
             }
             const size_t cleared = connRegistry.clearFailures();
-            rep::log::event(rep::log::Level::Info, rep::log::Action::Other, currentActor,
+            rep::log::event(rep::log::Level::Info, rep::log::Action::Other, rep::http::actorRef(),
                             "сброшен карантин источников: " + std::to_string(cleared));
             Json::Value out;
             out["cleared"] = static_cast<Json::UInt64>(cleared);
@@ -2290,7 +2033,7 @@ int main() {
         "/api/admin/datasets/check",
         [db, &connRegistry, &templates, adminGuard](const HttpRequestPtr &req,
                                                     std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             if (!adminGuard(cb)) return;
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
@@ -2425,7 +2168,7 @@ int main() {
         "/api/reports",
         [db, adminEnabled, maxTemplateBytes, &validateTemplate, &prepareTemplate, &applyTemplateInMemory](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена: запустите сервис с REP_ADMIN=1");
                 return;
@@ -2947,7 +2690,7 @@ int main() {
     // --- Аутентификация и роли (ADR-34) -------------------------------------
     auto unauthorized = [](const std::string &msg) {
         // 401 в журнале уровня debug: нет сессии — обычное дело при первом открытии (ADR-130)
-        rep::log::event(rep::log::Level::Debug, rep::log::Action::Other, currentActor,
+        rep::log::event(rep::log::Level::Debug, rep::log::Action::Other, rep::http::actorRef(),
                         "ошибка API 401 UNAUTHORIZED: " + msg);
         auto resp = HttpResponse::newHttpResponse();
         Json::Value body;
@@ -2962,7 +2705,7 @@ int main() {
     };
     auto forbidden = [](const std::string &msg) {
         // 403 пишется с логином: в этот момент он уже известен (ADR-130)
-        rep::log::event(rep::log::Level::Warning, rep::log::Action::Other, currentActor,
+        rep::log::event(rep::log::Level::Warning, rep::log::Action::Other, rep::http::actorRef(),
                         "ошибка API 403 FORBIDDEN: " + msg);
         auto resp = HttpResponse::newHttpResponse();
         Json::Value body;
@@ -3060,7 +2803,7 @@ int main() {
             [basePath](const HttpRequestPtr &req, AdviceCallback &&respond, AdviceChainCallback &&next) {
                 // каждый запрос начинается с чистого логина: иначе ошибка анонимного запроса
                 // досталась бы предыдущему пользователю из этого потока
-                currentActor.clear();
+                rep::http::actorRef().clear();
                 const std::string path = req->path();
                 if (path == "/" || path == basePath) {
                     auto redirect = HttpResponse::newRedirectionResponse(basePath + "/");
@@ -3123,7 +2866,7 @@ int main() {
                             req->attributes()->insert("session_role", role);
                             req->attributes()->insert("session_login", login);
                             req->attributes()->insert("session_source", std::string("proxy"));
-                            currentActor = login; // 403 из advice тоже должен знать логин
+                            rep::http::setActor(login); // 403 из advice тоже должен знать логин
                             next();
                         });
                     return;
@@ -3151,7 +2894,7 @@ int main() {
                         }
                         req->attributes()->insert("session_role", role);
                         req->attributes()->insert("session_login", res[0]["login"].as<std::string>());
-                        currentActor = res[0]["login"].as<std::string>();
+                        rep::http::setActor(res[0]["login"].as<std::string>());
                         next();
                     },
                     [&unauthorized, respond](const std::exception_ptr &) {
@@ -3226,7 +2969,7 @@ int main() {
         "/api/auth/login",
         [db, authMode, sessionTtlHours](const HttpRequestPtr &req,
                                         std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (authMode == rep::AuthMode::Off) {
                 sendError(cb, k404NotFound, "AUTH_DISABLED", "аутентификация выключена (REP_AUTH=0)");
                 return;
@@ -3295,7 +3038,7 @@ int main() {
     app().registerHandler(
         "/api/auth/logout",
         [db, authMode](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (authMode == rep::AuthMode::Proxy) {
                 sendError(cb, k400BadRequest, "AUTH_ON_PROXY", "выход выполняет реверс-прокси");
                 return;
@@ -3324,7 +3067,7 @@ int main() {
     app().registerHandler(
         "/api/auth/me",
         [db, authMode, proxyHeader](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (authMode == rep::AuthMode::Off) {
                 Json::Value out;
                 out["auth"] = false;
@@ -3398,7 +3141,7 @@ int main() {
          &restCache, maxRows, &resolveDataset](
             const HttpRequestPtr &req,
                                               std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -3661,7 +3404,7 @@ int main() {
         [dataDb, &templates, &templatesMutex, &connRegistry, &draftsParsed, &draftAllowed, &restCache,
          maxRows, &resolveDataset](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -3790,7 +3533,7 @@ int main() {
          &restCache, &resolveDataset](
             const HttpRequestPtr &req,
                                                        std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // ошибки этого запроса в журнале — с логином
+            rep::http::setActor(actorOf(req)); // ошибки этого запроса в журнале — с логином
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -4366,7 +4109,7 @@ int main() {
     app().registerHandler(
         "/api/report/export.xlsx",
         [buildXlsx, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -4419,7 +4162,7 @@ int main() {
     app().registerHandler(
         "/api/report/export.csv",
         [&buildCsv, authEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");
@@ -4479,7 +4222,7 @@ int main() {
         "/api/admin/users",
         [adminEnabled, userJson, rolesByUser, saveUserRoles, reloadAccessRoles](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -4781,7 +4524,7 @@ int main() {
         "/api/admin/access-roles",
         [adminEnabled, reloadAccessRoles](const HttpRequestPtr &req,
                                           std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -5156,7 +4899,7 @@ int main() {
         "/api/admin/contact-groups",
         [adminEnabled, contactGroupsSelect, jsonContactGroups, validateGroupKey, validateEmails](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -5243,7 +4986,7 @@ int main() {
         [adminEnabled, validateEmails](const HttpRequestPtr &req,
                                        std::function<void(const HttpResponsePtr &)> &&cb,
                                        const std::string &id) {
-            currentActor = actorOf(req);
+            rep::http::setActor(actorOf(req));
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -5347,7 +5090,7 @@ int main() {
         "/api/admin/subscriptions",
         [adminEnabled, &templates, &templatesMutex, subscriptionSelect, jsonSubscriptions,
          validateSubscription](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -5552,7 +5295,7 @@ int main() {
     app().registerHandler(
         "/api/admin/audit",
         [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -5641,7 +5384,7 @@ const std::string from = req->getParameter("from");
     app().registerHandler(
         "/api/admin/audit/export.csv",
         [adminEnabled](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             if (!adminEnabled) {
                 sendError(cb, k404NotFound, "ADMIN_DISABLED", "админка выключена");
                 return;
@@ -5754,7 +5497,7 @@ const std::string from = req->getParameter("from");
     app().registerHandler(
         "/api/report/events",
         [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             const std::string reportId = req->getParameter("report");
             if (reportId.empty()) {
                 sendError(cb, k422UnprocessableEntity, "INVALID_PARAMS", "нужен параметр report");
@@ -5984,7 +5727,7 @@ const std::string from = req->getParameter("from");
             const HttpRequestPtr &req,
                                                  std::function<void(const HttpResponsePtr &)> &&cb,
                                                  const std::string &reportId, const std::string &param) {
-            currentActor = actorOf(req); // логин в записях об ошибках (ADR-128)
+            rep::http::setActor(actorOf(req)); // логин в записях об ошибках (ADR-128)
             // draft=1 — справочники считаются по черновику (ADR-82)
             const bool wantDraft = req->getParameter("draft") == "1";
             if (wantDraft && !draftAllowed(req)) {
@@ -6068,7 +5811,7 @@ const std::string from = req->getParameter("from");
         [dataDb, &registry, &templates, &templatesMutex, maxRows, &resultCache, &templatesVersion,
          &connRegistry, &draftsParsed, &draftsRaw, &draftAllowed, &restCache, &resolveDataset](
             const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&cb) {
-            currentActor = actorOf(req); // ошибки этого запроса в журнале — с логином
+            rep::http::setActor(actorOf(req)); // ошибки этого запроса в журнале — с логином
             const auto body = req->getJsonObject();
             if (!body || !body->isObject()) {
                 sendError(cb, k400BadRequest, "INVALID_PARAMS", "ожидался JSON-объект");

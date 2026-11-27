@@ -86,7 +86,7 @@ if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
 
-add_executable(rep src/main.cc src/xlsx_export.cc src/group_rows.cc src/assets.cc)
+add_executable(rep src/main.cc src/xlsx_export.cc src/group_rows.cc src/assets.cc src/app/http.cc src/app/db.cc src/app/audit.cc)
 target_compile_definitions(rep PRIVATE REP_VERSION="${REP_VERSION}")
 target_link_libraries(rep PRIVATE rep_core libxlsxwriter::libxlsxwriter)
 # имена функций в backtrace диагностики мьютекса (ADR-153)

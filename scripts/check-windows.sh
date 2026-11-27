@@ -15,7 +15,8 @@ echo "Windows/MSVC: платформенные обёртки"
 
 # 1. Платформенно-зависимый код разрешён только в этих файлах: они содержат
 #    #ifdef _WIN32 и подставляют Winsock, _putenv_s, _mkgmtime, gmtime_s.
-ALLOWED="net.cc net.h env.cc logging.cc main.cc"
+ALLOWED="net.cc net.h env.cc logging.cc main.cc http.cc"
+# http.cc — вынесенная диагностика мьютекса (ADR-193): execinfo.h под __linux__, остальное в #else
 POSIX="unistd\.h|sys/socket\.h|arpa/inet\.h|netinet/in\.h|sys/time\.h|pthread\.h|execinfo\.h|sys/wait\.h"
 raw=$(grep -rEn "$POSIX|\btimegm\(|\bgmtime_r\(|\blocaltime_r\(|\bstrptime\(|\bsetenv\(|\bpopen\(|\bdlopen\(" "$SRC" 2>/dev/null || true)
 hits=""
