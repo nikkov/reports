@@ -47,3 +47,43 @@ describe('названия строк итогов (ADR-188)', () => {
     expect(Number(grand.values[1])).toBe(35)
   })
 })
+
+describe('текст в строках итогов (ADR-190)', () => {
+  const cols2 = [
+    { field: 'region', title: 'Регион', group: true, subtotal: true },
+    { field: 'amount', title: 'Сумма', type: 'int', aggregate: 'sum' },
+    { title: 'Средний чек', expression: 'sum(amount) / sum(orders)', aggregateText: '—' },
+    { title: 'Комментарий', aggregate_text: 'Итого по {value}' }
+  ]
+  const rows2 = [
+    { region: 'Восток', amount: 10, orders: 2 },
+    { region: 'Восток', amount: 20, orders: 2 },
+    { region: 'Запад', amount: 5, orders: 1 }
+  ]
+
+  it('в подытоге и итоге печатается текст вместо агрегата', () => {
+    const model = buildTableModel(rows2, cols2, { grandTotal: true })
+    const sub = model.rows.find((r) => r.kind === 'subtotal')
+    const grand = model.rows.find((r) => r.kind === 'grandtotal')
+    expect(sub.values[2]).toBe('—')
+    expect(grand.values[2]).toBe('—')
+    // суммы в соседней колонке не пострадали
+    expect(Number(sub.values[1])).toBe(30)
+    expect(Number(grand.values[1])).toBe(35)
+  })
+
+  it('{value} в тексте подставляет группу, в общем итоге ячейка пустая', () => {
+    const model = buildTableModel(rows2, cols2, { grandTotal: true })
+    const sub = model.rows.find((r) => r.kind === 'subtotal')
+    const grand = model.rows.find((r) => r.kind === 'grandtotal')
+    expect(sub.values[3]).toBe('Итого по Восток')
+    expect(grand.values[3]).toBe('')
+  })
+
+  it('в детальных строках текст не появляется: работает выражение', () => {
+    const model = buildTableModel(rows2, cols2, { grandTotal: true })
+    const detail = model.rows.find((r) => r.kind === 'detail' && r.values[0] === 'Восток')
+    expect(Number(detail.values[2])).toBe(5)
+    expect(detail.values[3]).toBeNull()
+  })
+})

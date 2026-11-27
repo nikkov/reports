@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdio>
 
 #include <algorithm>
 #include <string>
@@ -244,4 +245,46 @@ TEST_CASE("buildGroupedSheet: подпись без {value} — значение
     std::vector<std::string> labels;
     for (const auto &r : sheet.rows) labels.push_back(r[0]);
     REQUIRE(std::find(labels.begin(), labels.end(), "Подытог Восток") != labels.end());
+}
+
+TEST_CASE("buildGroupedSheet: текст в колонке вместо суммы (ADR-190)") {
+    rep::ExportSheet sheet;
+    sheet.title = "T";
+    sheet.columns = {{"Регион", "", false},
+                     {"Сумма", "# ##0", true},
+                     {"Средний чек", "", false},
+                     {"Комментарий", "", false}};
+    sheet.rows = {{"Восток", "10", "5", ""}, {"Восток", "20", "10", ""}, {"Запад", "5", "5", ""}};
+
+    rep::GroupLayout layout;
+    layout.groupColumns = {0};
+    layout.subtotalLevels = {0};
+    layout.measureColumns = {1};
+    layout.grandTotal = true;
+    layout.subtotalLabel = "Итого {value}";
+    layout.grandLabel = "Всего";
+    layout.aggregateTexts[2] = "—";
+    layout.aggregateTexts[3] = "Итого по {value}";
+
+    rep::buildGroupedSheet(sheet, layout);
+
+    bool sawSub = false;
+    bool sawGrand = false;
+    for (std::size_t i = 0; i < sheet.rows.size(); ++i) {
+        if (sheet.rowKind[i] == 1) { // подытог
+            sawSub = true;
+            const bool east = sheet.rows[i][0] == "Итого Восток";
+            REQUIRE(sheet.rows[i][1] == (east ? "30" : "5"));
+            REQUIRE(sheet.rows[i][2] == "—");
+            REQUIRE(sheet.rows[i][3] == (east ? "Итого по Восток" : "Итого по Запад"));
+        }
+        if (sheet.rowKind[i] == 2) { // общий итог
+            sawGrand = true;
+            REQUIRE(sheet.rows[i][1] == "35");
+            REQUIRE(sheet.rows[i][2] == "—");
+            REQUIRE(sheet.rows[i][3].empty()); // {value} без группы — пусто
+        }
+    }
+    REQUIRE(sawSub);
+    REQUIRE(sawGrand);
 }

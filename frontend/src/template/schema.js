@@ -704,6 +704,18 @@ export default {
             "countDistinct"
           ]
         },
+        "aggregateText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "текст в строках итогов вместо суммы; {value} — значение группы (ADR-190)"
+        },
+        "aggregate_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "синоним aggregateText (ADR-190)"
+        },
         "expression": {
           "type": "string",
           "minLength": 1

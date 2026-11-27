@@ -4052,6 +4052,7 @@ int main() {
             bool numeric;
             std::string numFmt;
             bool aggregated;
+            std::string aggregateText; // текст в строках итогов вместо суммы (ADR-190)
         };
         std::vector<Leaf> leaves;
         std::vector<std::size_t> groupColumns;
@@ -4064,16 +4065,23 @@ int main() {
                 return;
             }
             const std::string fmt = col["format"].isString() ? col["format"].asString() : "";
-            const bool aggregated = col.isMember("aggregate");
-            const bool numeric = fmt == "number" || fmt == "integer" || fmt == "percent" ||
-                                 fmt == "currency" || aggregated;
+            // aggregateText (или aggregate_text) — в строках итогов печатается текст, а не сумма (ADR-190)
+            const std::string aggregateText = col.isMember("aggregateText") && col["aggregateText"].isString()
+                                                  ? col["aggregateText"].asString()
+                                                  : col.isMember("aggregate_text") && col["aggregate_text"].isString()
+                                                        ? col["aggregate_text"].asString()
+                                                        : "";
+            const bool aggregated = col.isMember("aggregate") && aggregateText.empty();
+            const bool numeric = aggregateText.empty() &&
+                                 (fmt == "number" || fmt == "integer" || fmt == "percent" ||
+                                  fmt == "currency" || aggregated);
             const std::string numFmt = fmt == "percent" ? "0.00%" : numeric ? "# ##0" : "";
             if (col["group"].asBool()) {
                 if (col["subtotal"].asBool()) subtotalLevels.push_back(static_cast<int>(groupColumns.size()));
                 groupColumns.push_back(leaves.size());
             }
             leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(), numeric, numFmt,
-                              aggregated});
+                              aggregated, aggregateText});
         };
         const std::string sheetTitle = tpl.get("title", "").asString();
         // на экране общий итог включён по умолчанию (ADR-1); в книге — так же
@@ -4124,6 +4132,9 @@ int main() {
                         if (!subtotalLabelText.empty()) layout.subtotalLabel = subtotalLabelText;
                         for (std::size_t c = 0; c < leaves.size(); ++c) {
                             if (leaves[c].aggregated) layout.measureColumns.push_back(c);
+                            if (!leaves[c].aggregateText.empty()) {
+                                layout.aggregateTexts[c] = leaves[c].aggregateText;
+                            }
                         }
                         rep::buildGroupedSheet(sheet, layout);
                     }
@@ -4209,6 +4220,7 @@ int main() {
                 if (!subtotalLabelText.empty()) layout.subtotalLabel = subtotalLabelText;
                 for (std::size_t c = 0; c < leaves.size(); ++c) {
                     if (leaves[c].aggregated) layout.measureColumns.push_back(c);
+                    if (!leaves[c].aggregateText.empty()) layout.aggregateTexts[c] = leaves[c].aggregateText;
                 }
                 rep::buildGroupedSheet(sheet, layout);
                 done(200, "", sheet, "");

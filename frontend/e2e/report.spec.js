@@ -570,6 +570,9 @@ async function waitRows(page) {
 }
 
 test('все шаблоны из списка открываются и отдают строки', async ({ page, request }) => {
+  // Обход всех шаблонов (их больше шести десятков) в 30 с не укладывается: общий таймаут теста
+  // должен быть больше, чем ожидание одного отчёта (ADR-191)
+  test.setTimeout(180000)
   const list = await (await request.get('/api/reports')).json()
   expect(list.length).toBeGreaterThanOrEqual(7)
 
@@ -4288,4 +4291,28 @@ test('длинная подпись итога переносится, а не �
   // обрезки многоточием нет: подпись переносится, строка выросла
   expect(info[0].ellipsis).toBe(false)
   expect(info[0].height).toBeGreaterThan(26)
+})
+
+test('текст вместо агрегата в строках итогов (ADR-190)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=totals-text')
+  await page.waitForSelector('.rt-table tbody tr', { timeout: 30000 })
+  await page.waitForTimeout(1800)
+
+  const info = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.rt-table tbody tr')]
+    const detail = rows.find((r) => r.className.includes('detail'))
+    const sub = rows.find((r) => r.className.includes('subtotal'))
+    return {
+      detailAvg: detail ? detail.innerText.split('\t')[4] : null,
+      subCells: sub ? sub.innerText.split('\t').map((s) => s.replace(/▾/g, '').trim()) : null
+    }
+  })
+  console.log('строки:', JSON.stringify(info))
+
+  // в детальной строке средний чек считается выражением
+  expect(info.detailAvg).toMatch(/\d/)
+  // в подытоге: сумма, прочерк из aggregateText и текст с {value}
+  expect(info.subCells[2]).not.toBe('—')
+  expect(info.subCells[4]).toBe('—')
+  expect(info.subCells[5]).toBe(`Итого по категории: ${info.subCells[0].replace('Итого по категории: ', '')}`)
 })

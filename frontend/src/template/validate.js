@@ -1137,7 +1137,10 @@ function checkGaugeZones(block, base, errors) {
           }
           return
         }
-        if (!hasField && !hasExpr) {
+        // Колонка без данных допустима, если в итогах она печатает текст (ADR-190):
+        // в детальных строках такая ячейка остаётся пустой
+        const onlyText = col.aggregateText !== undefined || col.aggregate_text !== undefined
+        if (!hasField && !hasExpr && !onlyText) {
           errors.push({ path: cpath, message: 'нужно указать field или expression' })
         }
         if (hasField && hasExpr) {
@@ -1169,6 +1172,28 @@ function checkGaugeZones(block, base, errors) {
         }
         if (!col.group && col.aggregate && !hasField) {
           errors.push({ path: cpath, message: 'агрегат требует поля field' })
+        }
+        // Текст в строках итогов вместо суммы (ADR-190)
+        const aggText = col.aggregateText ?? col.aggregate_text
+        if (aggText !== undefined) {
+          const text = String(aggText)
+          if (!text.trim()) {
+            errors.push({ path: cpath, message: 'aggregateText не может быть пустым' })
+          } else if (text.length > 60) {
+            errors.push({ path: cpath, message: 'aggregateText: не длиннее 60 символов' })
+          }
+          if (col.group || col.subtotal) {
+            errors.push({
+              path: cpath,
+              message: 'aggregateText не для групповой колонки: подпись итога задаётся subtotalLabel'
+            })
+          }
+          if (col.aggregate) {
+            warnings.push({
+              path: cpath,
+              message: 'заданы и aggregate, и aggregateText: в итогах будет текст'
+            })
+          }
         }
         checkDatePattern(col.format, `${cpath}.format`, errors)
         if (col.format === 'percent' && hasField && !col.aggregate && !hasExpr) {

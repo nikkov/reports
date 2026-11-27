@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,8 @@ struct GroupLayout {
     std::string grandLabel = "ИТОГО";
     // подпись подытога: {value} заменяется ключом группы (ADR-188)
     std::string subtotalLabel = "Итого {value}";
+    // колонки, где в строках итогов нужен текст, а не сумма: индекс → шаблон (ADR-190)
+    std::map<std::size_t, std::string> aggregateTexts;
     std::string nullLabel = "(пусто)";
 };
 

@@ -193,7 +193,9 @@ void checkTableBlock(ValidationResult &r,
                 return;
             }
 
-            if (!hasField && !hasExpr) addError(r, cpath, "нужно указать field или expression");
+            // Колонка без данных допустима, если в итогах она печатает текст (ADR-190)
+            const bool onlyText = col.isMember("aggregateText") || col.isMember("aggregate_text");
+            if (!hasField && !hasExpr && !onlyText) addError(r, cpath, "нужно указать field или expression");
             if (hasField && hasExpr) addError(r, cpath, "нельзя указывать одновременно field и expression");
 
             const bool group = col["group"].asBool();
@@ -206,6 +208,24 @@ void checkTableBlock(ValidationResult &r,
             }
             if (!group && !col["aggregate"].isNull() && !hasField) {
                 addError(r, cpath, "агрегат требует поля field");
+            }
+            // Текст в строках итогов вместо суммы (ADR-190); aggregate_text — синоним
+            const bool hasAggText = col.isMember("aggregateText") || col.isMember("aggregate_text");
+            if (hasAggText) {
+                const std::string text = col.isMember("aggregateText") ? asString(col["aggregateText"])
+                                                                       : asString(col["aggregate_text"]);
+                if (text.empty()) {
+                    addError(r, cpath, "aggregateText не может быть пустым");
+                } else if (text.size() > 60) {
+                    addError(r, cpath, "aggregateText: не длиннее 60 символов");
+                }
+                if (group || col["subtotal"].asBool()) {
+                    addError(r, cpath,
+                             "aggregateText не для групповой колонки: подпись итога задаётся subtotalLabel");
+                }
+                if (!col["aggregate"].isNull()) {
+                    addWarning(r, cpath, "заданы и aggregate, и aggregateText: в итогах будет текст");
+                }
             }
             // Скрытая колонка (ADR-158): значение нужно для вычислений, ячейки на экране нет,
             // поэтому группой/подытогом она быть не может — подпись группы печатается в её ячейке

@@ -149,12 +149,19 @@ export function buildTableModel(rows, columns, opts = {}) {
         // детальная строка несёт своё значение (объединение покажет его на первой строке блока);
         // в строках итогов — только подпись в колонке своей группы
         values[i] = rowScope ? rowScope[col.field] : labelIndex === i ? subtotalText(node.key) : ''
+      } else if (!rowScope && (col.aggregateText || col.aggregate_text)) {
+        // В строке итога вместо агрегата или выражения — текст из шаблона (ADR-190);
+        // {value} — значение группы, в общем итоге его нет
+        const tpl = String(col.aggregateText ?? col.aggregate_text)
+        // {value} привязан к группе: в общем итоге ключа нет, и ячейка остаётся пустой
+        values[i] = tpl.includes('{value}') && (!node || !node.key) ? '' : tpl.split('{value}').join(node?.key ?? '')
       } else if (col.expression) {
         values[i] = acc
           ? evalExpression(col.expression, rowScope, acc)
           : evalExpression(col.expression, rowScope, rowAccumulator(col.expression, rowScope))
       } else if (rowScope) {
-        values[i] = rowScope[col.field]
+        // у колонки-«только текст» нет field: в детальной строке ячейка пустая (ADR-190)
+        values[i] = col.field ? rowScope[col.field] : null
       } else if (col.aggregate) {
         values[i] = aggValue(acc, col.aggregate, col.field)
       } else {

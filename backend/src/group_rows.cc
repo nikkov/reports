@@ -72,6 +72,21 @@ std::vector<std::string> summaryRow(const ExportSheet &sheet, const GroupLayout 
     return out;
 }
 
+// Колонки с aggregateText: в строках итогов вместо суммы пишется текст (ADR-190).
+// {value} заменяется ключом группы; в общем итоге ключа нет.
+void writeAggregateTexts(std::vector<std::string> &row, const GroupLayout &layout, const std::string &groupKey) {
+    for (const auto &kv : layout.aggregateTexts) {
+        if (kv.first >= row.size()) continue;
+        std::string text = kv.second;
+        const std::size_t at = text.find("{value}");
+        if (at != std::string::npos) {
+            // {value} привязан к группе: в общем итоге ключа нет — ячейка остаётся пустой
+            text = groupKey.empty() ? std::string() : text.replace(at, 7, groupKey);
+        }
+        row[kv.first] = text;
+    }
+}
+
 void accumulateRow(const std::vector<std::string> &row, const GroupLayout &layout, std::vector<long double> &sums) {
     for (std::size_t i = 0; i < layout.measureColumns.size(); ++i) {
         const std::size_t col = layout.measureColumns[i];
@@ -209,6 +224,7 @@ void buildGroupedSheet(ExportSheet &sheet, const GroupLayout &layout) {
             }
             auto summary = summaryRow(sheet, layout, level, sheet.rows[i], label);
             writeSums(summary, layout, sums);
+            writeAggregateTexts(summary, layout, groupText);
             rows.push_back(summary);
             kinds.push_back(static_cast<unsigned char>(RowKind::Subtotal));
             subtotalLevels.push_back(level);
@@ -226,6 +242,7 @@ void buildGroupedSheet(ExportSheet &sheet, const GroupLayout &layout) {
         }
         auto total = summaryRow(sheet, layout, -1, {}, layout.grandLabel);
         writeSums(total, layout, sums);
+        writeAggregateTexts(total, layout, "");
         sheet.rows.push_back(total);
         sheet.rowKind.push_back(static_cast<unsigned char>(RowKind::Grand));
         sheet.rowSubtotalLevel.push_back(-1);
