@@ -1,0 +1,130 @@
+{
+  "version": 2,
+  "id": "totals-custom",
+  "title": "Итоги: свои названия",
+  "description": "Два блока на одних данных: слева подписи из шаблона («Итого по категории: …», «Всего за период»), справа умолчания («Итого …», «ИТОГО»). Меняется только текст, суммы и группировка одинаковые.",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT coalesce(s.category, 'Без категории') AS category, r.name AS region, count(*) AS orders, sum(s.amount) AS amount FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY 1, 2 ORDER BY 1, 3 DESC"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Одинаковые данные и группировка — разные подписи итогов. Слева подписи заданы в шаблоне полями subtotalLabel и grandTotalLabel, справа не заданы и работают умолчания."
+    },
+    {
+      "type": "table",
+      "title": "Свои подписи",
+      "dataKey": "sales",
+      "span": 6,
+      "grandTotal": true,
+      "subtotalLabel": "Итого по категории: {value}",
+      "grandTotalLabel": "Всего за период",
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "orders",
+          "title": "Заказов",
+          "type": "int",
+          "aggregate": "sum"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма, руб.",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "По умолчанию",
+      "dataKey": "sales",
+      "span": 6,
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "orders",
+          "title": "Заказов",
+          "type": "int",
+          "aggregate": "sum"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма, руб.",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        }
+      ]
+    }
+  ],
+  "folder": "Оформление",
+  "tags": [
+    "итоги",
+    "пример"
+  ]
+}

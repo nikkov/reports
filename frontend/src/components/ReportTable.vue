@@ -903,6 +903,14 @@ function cellsAt(index) {
   padding: var(--rt-g-padding, 2px 8px);
   border-top: 2px solid color-mix(in srgb, var(--rt-border, var(--rep-focus)) 70%, transparent);
 }
+/* Подпись итога может быть длинной («Итого по категории: Без категории») — переносим её,
+   а не обрезаем многоточием; \n из шаблона тоже работает (ADR-187, ADR-188) */
+.rt-table tr.subtotal td,
+.rt-table tr.grandtotal td {
+  white-space: pre-line;
+  overflow: visible;
+  text-overflow: clip;
+}
 /* ячейки групп-предков внутри строки итога остаются обычными */
 .rt-table tr.subtotal td.inherit,
 .rt-table tr.grandtotal td.inherit {

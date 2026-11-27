@@ -4261,3 +4261,31 @@ test('свои названия строк итогов (ADR-188)', async ({ pag
   expect(info.grand).toBe('Итого за квартал')
   expect(info.hasDefault).toBe(false)
 })
+
+test('длинная подпись итога переносится, а не обрезается (ADR-188)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=totals-custom')
+  await page.waitForSelector('.rt-table tbody tr', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  const info = await page.evaluate(() => {
+    const tables = [...document.querySelectorAll('.rt-table')]
+    return tables.map((t) => {
+      const row = [...t.querySelectorAll('tbody tr.subtotal')].find((r) => /Без категории/.test(r.innerText))
+      const td = row?.querySelector('td')
+      if (!td) return null
+      return {
+        text: td.innerText.replace(/▾/g, '').trim(),
+        ellipsis: td.scrollWidth > td.clientWidth + 1,
+        height: Math.round(row.getBoundingClientRect().height)
+      }
+    })
+  })
+  console.log('подписи:', JSON.stringify(info))
+
+  // слева — своя длинная подпись, справа — умолчание
+  expect(info[0].text).toBe('Итого по категории: Без категории')
+  expect(info[1].text).toBe('Итого Без категории')
+  // обрезки многоточием нет: подпись переносится, строка выросла
+  expect(info[0].ellipsis).toBe(false)
+  expect(info[0].height).toBeGreaterThan(26)
+})
