@@ -828,6 +828,8 @@ body {
 .text {
   font-size: 14px;
   margin: 6px 0 12px;
+  /* в шаблоне текст может содержать \n — сохраняем переносы, а не схлопываем в пробел (ADR-187) */
+  white-space: pre-line;
 }
 .chart-box {
   background: var(--rep-surface);

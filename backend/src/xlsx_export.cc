@@ -100,12 +100,25 @@ bool writeXlsx(const std::string &path, const ExportSheet &sheet, std::string &e
     format_set_bold(header);
     format_set_bg_color(header, 0xF2F4F7);
     format_set_border(header, LXW_BORDER_THIN);
+    // Заголовок колонки может быть в несколько строк («Сумма,\nруб.»): включаем перенос
+    // и поднимаем строку шапки, иначе вторая строка обрежется (ADR-187)
+    format_set_text_wrap(header);
 
     // рисунки занимают верхние строки, таблица начинается под ними
     const int top = sheet.imageRows > 0 ? sheet.imageRows : 0;
+    int headerLines = 1;
     for (size_t c = 0; c < sheet.columns.size(); ++c) {
-        worksheet_write_string(ws, static_cast<lxw_row_t>(top), static_cast<lxw_col_t>(c),
-                               sheet.columns[c].title.c_str(), header);
+        const std::string &title = sheet.columns[c].title;
+        int lines = 1;
+        for (char ch : title) {
+            if (ch == '\n') ++lines;
+        }
+        if (lines > headerLines) headerLines = lines;
+        worksheet_write_string(ws, static_cast<lxw_row_t>(top), static_cast<lxw_col_t>(c), title.c_str(),
+                               header);
+    }
+    if (headerLines > 1) {
+        worksheet_set_row(ws, static_cast<lxw_row_t>(top), 15.0 * headerLines, nullptr);
     }
     worksheet_freeze_panes(ws, top + 1, 0);
     for (const auto &image : sheet.images) {

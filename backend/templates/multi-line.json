@@ -1,0 +1,102 @@
+{
+  "version": 2,
+  "id": "multi-line",
+  "title": "Многострочный текст",
+  "description": "Заголовки колонок и текстовые блоки понимают перенос строки \\n: заголовок «Сумма,\\nтыс. руб.» рисуется в две строки, текст-блок сохраняет разбивку на абзацы.",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, s.category, sum(s.amount) AS amount, sum(s.profit) AS profit FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name, s.category ORDER BY 1, 2"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Коммерческий отчёт\nза период {{from}} — {{to}}\n\nСтрока ниже — пример заголовков колонок в две строки: «Сумма,\\nтыс. руб.» и «Прибыль,\\nтыс. руб.». Перенос задаётся в шаблоне обычным \\n, высота шапки подстраивается сама."
+    },
+    {
+      "type": "table",
+      "title": "Продажи по регионам и категориям",
+      "dataKey": "sales",
+      "span": 12,
+      "grandTotal": true,
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория\nтовара"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма,\nруб.",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль,\nруб.",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "title": "Рентабельность,\n%",
+          "expression": "sum(profit) / sum(amount)",
+          "format": "percent"
+        }
+      ]
+    }
+  ],
+  "folder": "Оформление",
+  "tags": [
+    "текст",
+    "заголовки"
+  ]
+}

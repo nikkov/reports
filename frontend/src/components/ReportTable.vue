@@ -857,7 +857,8 @@ function cellsAt(index) {
   text-align: var(--rt-h-align, left);
   vertical-align: var(--rt-h-valign, middle);
   padding: var(--rt-h-padding, 2px 8px);
-  white-space: nowrap;
+  /* заголовок может быть в несколько строк: в шаблоне «Сумма,\nруб.» (ADR-187) */
+  white-space: pre-line;
   border-bottom: 1px solid var(--rt-border, var(--rep-accent-soft));
 }
 .rt-table td {

@@ -4192,3 +4192,31 @@ test('тёмная тема: подписи осей и легенды свет�
     for (const color of c.axisColors) expect(color.toLowerCase()).toBe(data.themeText.toLowerCase())
   }
 })
+
+test('многострочные заголовки колонок и текст (ADR-187)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=multi-line')
+  await page.waitForSelector('.rt-table', { timeout: 30000 })
+  await page.waitForTimeout(2000)
+
+  const info = await page.evaluate(() => {
+    const th = [...document.querySelectorAll('.rt-table thead th')]
+    const header = th.find((e) => e.innerText.includes('Сумма'))
+    const text = document.querySelector('.text')
+    return {
+      headerText: header?.innerText,
+      headerHeight: header ? Math.round(header.getBoundingClientRect().height) : 0,
+      headerLines: header ? header.innerText.split('\n').length : 0,
+      textLines: text ? text.innerText.split('\n').length : 0,
+      textWhiteSpace: text ? getComputedStyle(text).whiteSpace : ''
+    }
+  })
+  console.log('заголовок:', JSON.stringify(info))
+
+  // заголовок «Сумма, руб.» занимает две строки, шапка выросла
+  expect(info.headerText).toContain('\n')
+  expect(info.headerLines).toBe(2)
+  expect(info.headerHeight).toBeGreaterThan(30)
+  // текст-блок сохраняет переносы и пустые строки
+  expect(info.textWhiteSpace).toBe('pre-line')
+  expect(info.textLines).toBeGreaterThanOrEqual(4)
+})
