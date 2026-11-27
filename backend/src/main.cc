@@ -1451,46 +1451,19 @@ int main() {
     // клиент просто не отправил на проверку.
     // Миграция до текущей версии + полная проверка (ADR-45, ADR-51).
     // normalized (если передан) получает шаблон в актуальной версии — его и сохраняем.
+    // Проверка шаблона вынесена в app/template_parse.cc (ADR-193), обёртки сохраняют вызовы
     auto prepareTemplate = [maxTemplateBytes](const std::string &raw, const std::string &urlId,
                                               std::string *normalized, std::vector<std::string> *steps) {
-        rep::ValidationResult result;
-        if (raw.size() > maxTemplateBytes) {
-            result.errors.push_back({"(корень)", "шаблон больше " + std::to_string(maxTemplateBytes) + " байт"});
-            return result;
-        }
-        Json::CharReaderBuilder rb;
-        Json::Value root;
-        std::string parseErr;
-        std::istringstream in(raw);
-        if (!Json::parseFromStream(rb, in, &root, &parseErr)) {
-            result.errors.push_back({"(корень)", "шаблон не является JSON: " + parseErr});
-            return result;
-        }
-        const auto migration = rep::migrateTemplate(root);
-        if (!migration.ok) {
-            result.errors.push_back({"version", migration.error});
-            return result;
-        }
-        if (steps) *steps = migration.steps;
-        if (normalized) {
-            Json::StreamWriterBuilder wb;
-            wb["indentation"] = "  ";
-            *normalized = Json::writeString(wb, root);
-        }
-        return rep::validateTemplateJson(root, urlId);
+        return rep::app::prepareTemplateImpl(maxTemplateBytes, raw, urlId, normalized, steps);
     };
 
-    auto validateTemplateFull = [&prepareTemplate](const std::string &raw, const std::string &urlId) {
-        return prepareTemplate(raw, urlId, nullptr, nullptr);
+    auto validateTemplate = [maxTemplateBytes](const std::string &raw, const std::string &urlId,
+                                               std::string &err) {
+        return rep::app::validateTemplateText(maxTemplateBytes, raw, urlId, err);
     };
 
-    auto validateTemplate = [&validateTemplateFull](const std::string &raw, const std::string &urlId,
-                                                    std::string &err) {
-        const auto result = validateTemplateFull(raw, urlId);
-        if (result.ok()) return true;
-        const auto &first = result.errors.front();
-        err = first.path == "(корень)" ? first.message : first.path + ": " + first.message;
-        return false;
+    auto validateTemplateFull = [maxTemplateBytes](const std::string &raw, const std::string &urlId) {
+        return rep::app::validateTemplateFull(maxTemplateBytes, raw, urlId);
     };
 
     // --- Просмотр черновика (ADR-82) -------------------------------------------------
