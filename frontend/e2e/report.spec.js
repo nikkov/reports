@@ -573,7 +573,25 @@ test('все шаблоны из списка открываются и отда
   const list = await (await request.get('/api/reports')).json()
   expect(list.length).toBeGreaterThanOrEqual(7)
 
+  // Внешние стенды могут быть не подняты: REST-демо :8099 и SPNEGO :8098 живут отдельно
+  // от backend:8080. Без них соответствующие шаблоны законно показывают ошибку, и валить
+  // весь обход из-за этого нельзя — печатаем пропуск (ADR-185).
+  const probe = async (url) => {
+    try {
+      const res = await request.get(url, { timeout: 2000 })
+      return res.status() < 500
+    } catch {
+      return false
+    }
+  }
+  const hasRest = await probe('http://127.0.0.1:8099/api/health')
+  const hasSpnego = await probe('http://127.0.0.1:8098/api/negotiated')
+  if (!hasRest) console.log('пропуск REST-шаблонов: нет демо на :8099')
+  if (!hasSpnego) console.log('пропуск crm-kerberos: нет SPNEGO на :8098')
+
   for (const r of list) {
+    if (r.id === 'crm-kerberos' && !hasSpnego) continue
+    if (/^crm-/.test(r.id) && !hasRest) continue
     await page.goto(`/report.html?report=${r.id}`)
     await expect(page.locator('h1')).toHaveText(r.title)
     // отчёт с autoLoad: false ждёт нажатия «Обновить» — тест нажимает
@@ -4130,4 +4148,42 @@ test('сортировка по колонкам из шаблона (ADR-183)',
   console.log('рентабельность:', JSON.stringify(percents))
   expect(percents.length).toBeGreaterThanOrEqual(4)
   for (let i = 1; i < percents.length; i++) expect(percents[i]).toBeLessThanOrEqual(percents[i - 1])
+})
+
+test('тёмная тема: подписи осей и легенды светлые (ADR-184)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=production-dashboard')
+  await page.waitForSelector('.kpi', { timeout: 30000 })
+  await page.waitForTimeout(2000)
+
+  await page.locator('.theme-toggle').click()
+  await page.waitForTimeout(1500)
+  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
+
+  const data = await page.evaluate(() => {
+    const themeText = getComputedStyle(document.documentElement).getPropertyValue('--rep-table-text').trim()
+    const charts = (window.__charts || []).map((c) => {
+      const opt = c.instance.getOption()
+      const axes = [...(opt.xAxis || []), ...(opt.yAxis || [])]
+      const axisColors = axes
+        .map((a) => (Array.isArray(a.axisLabel) ? a.axisLabel[0]?.color : a.axisLabel?.color))
+        .filter(Boolean)
+      const legendColors = (opt.legend || []).map((l) => l.textStyle?.color).filter(Boolean)
+      return { type: c.block?.chartType, axisColors, legendColors }
+    })
+    return { themeText, charts }
+  })
+  console.log('тема:', data.themeText, JSON.stringify(data.charts))
+
+  const all = data.charts.flatMap((c) => [...c.axisColors, ...c.legendColors])
+  expect(all.length).toBeGreaterThanOrEqual(3)
+  for (const color of all) {
+    // в ECharts не должно попадать «var(--rep-*)»: он рисует такое чёрным
+    expect(String(color)).not.toContain('var(')
+    expect(color.toLowerCase()).not.toBe('#000')
+    expect(color.toLowerCase()).not.toBe('#000000')
+  }
+  // подписи совпадают с цветом текста темы
+  for (const c of data.charts) {
+    for (const color of c.axisColors) expect(color.toLowerCase()).toBe(data.themeText.toLowerCase())
+  }
 })

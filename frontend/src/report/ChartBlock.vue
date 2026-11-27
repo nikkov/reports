@@ -14,7 +14,7 @@
 <script setup>
 // Блок диаграммы (Ф3): данные берутся из того же движка агрегации, что и таблица.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { themeColors } from '../theme/index.js'
+import { cssColorValue, themeColors } from '../theme/index.js'
 import { hiddenLabels } from './legendFilter.js'
 import * as echarts from 'echarts'
 import RU from 'echarts/i18n/langRU'
@@ -34,17 +34,24 @@ const props = defineProps({
   styles: { type: Object, default: null }
 })
 
+// ECharts не понимает var(--rep-*): цвета читаем из CSS при построении опций (ADR-156)
+const cssColors = ref(themeColors())
+
+// Подписи осей, легенды и значения: шаблон главнее темы (ADR-156), но если цвет в шаблоне
+// не задан, берём цвет темы — иначе ECharts рисует подписи своим тёмно-серым, и в тёмной
+// теме они не видны на тёмном фоне (ADR-184).
 const textStyle = () => {
   const font = props.styles?.font
   const colors = props.styles?.colors
-  if (!font || !colors) return undefined
-  return { color: colors.text, fontFamily: font.family, fontSize: font.size }
+  // в шаблоне цвет может быть var(--rep-*): ECharts такое не понимает (ADR-184)
+  const out = { color: cssColorValue(colors?.text) || cssColors.value.text }
+  if (font?.family) out.fontFamily = font.family
+  if (font?.size) out.fontSize = font.size
+  return out
 }
 
 // Коридоры полосы (ADR-69): либо bands[], либо прежняя пара lowField/highField.
 // Цвет и подпись разрешаются здесь один раз — их читают и график, и подпись под ним.
-// ECharts не понимает var(--rep-*): цвета читаем из CSS при построении опций (ADR-156)
-const cssColors = ref(themeColors())
 // серии, скрытые кликом по легенде (ADR-161): имя серии = подпись маркера
 const hiddenNames = computed(() => hiddenLabels(props.block.dataKey))
 const BAND_DEFAULT_COLORS = computed(() => [
@@ -64,7 +71,7 @@ const bandSpecs = computed(() => {
     return {
       lowField: spec?.lowField,
       highField: spec?.highField,
-      color: palette[raw] || raw,
+      color: cssColorValue(palette[raw] || raw),
       name: spec?.name || `коридор ${i + 1}`
     }
   })
@@ -402,7 +409,8 @@ function buildOption() {
   const reference = props.block.reference
   const refValue = typeof reference === 'number' ? reference : reference?.value
   const refLabel = (typeof reference === 'object' && reference?.label) || ''
-  const refColor = (typeof reference === 'object' && reference?.color) || 'var(--rep-danger)'
+  // 'var(--rep-danger)' ECharts не понимает: резолвим в цвет текущей темы (ADR-184)
+  const refColor = cssColorValue((typeof reference === 'object' && reference?.color) || 'var(--rep-danger)')
   // Свой план у каждой полосы (ADR-161): опорные точки берутся из поля набора по категориям.
   const refField = props.block.referenceField
   const refPoints = refField
@@ -464,7 +472,9 @@ function buildOption() {
             symbol: 'none',
             silent: true,
             lineStyle: { color: refColor, type: 'dashed', width: 1.5 },
-            label: { formatter: (p) => fmt(p.value), color: refColor, position: 'end' },
+            // у опорной точки на полосе подпись не рисуем: она наезжала на название
+            // категории; значение плана видно в подсказке (ADR-184)
+            label: { show: false },
             data: refPoints
               .filter((p) => !hiddenNames.value.includes(String(p.name)))
               .map((p) => (horizontal ? { yAxis: p.name, xAxis: p.value } : { xAxis: p.name, yAxis: p.value }))

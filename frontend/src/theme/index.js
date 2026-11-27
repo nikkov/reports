@@ -82,3 +82,15 @@ export function themeColors() {
     warn: pick('--rep-warn')
   }
 }
+
+// ECharts не понимает CSS-переменные: `var(--rep-table-text)` он рисует чёрным.
+// Умолчания стилей таблицы (styles.js) как раз такие, поэтому перед передачей в ECharts
+// значение нужно превратить в реальный цвет текущей темы (ADR-156, ADR-184).
+export function cssColorValue(value) {
+  if (typeof value !== 'string') return value
+  const match = /^var\(\s*(--[^,)\s]+)\s*(?:,\s*([^)]+))?\)\s*$/.exec(value.trim())
+  if (!match) return value
+  if (typeof window === 'undefined') return match[2] ? match[2].trim() : ''
+  const resolved = getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim()
+  return resolved || (match[2] ? match[2].trim() : '')
+}
