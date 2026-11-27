@@ -7,6 +7,7 @@
 #include <string>
 
 #include "connections.h"
+#include "join.h"
 #include "rest_client.h"
 
 namespace rep {

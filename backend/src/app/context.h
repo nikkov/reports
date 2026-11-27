@@ -12,6 +12,7 @@
 
 #include "app/http.h"
 #include "app/template_types.h"
+#include "auth.h"
 #include "cache.h"
 #include "connections.h"
 #include "rest_client.h"
@@ -34,8 +35,13 @@ struct AppContext {
     std::map<std::string, TemplateInfo> *draftsParsed = nullptr;
     std::map<std::string, std::string> *draftsRaw = nullptr;
 
-    std::size_t maxRows = 50000;  // потолок строк на клиенте (REP_MAX_ROWS)
-    bool authEnabled = true;      // REP_AUTH=0 — работа без аутентификации
+    std::size_t maxRows = 50000;   // потолок строк на клиенте (REP_MAX_ROWS)
+    bool authEnabled = true;       // REP_AUTH=0 — работа без аутентификации
+    rep::AuthMode authMode = rep::AuthMode::Off; // режим: off / session / proxy
+    int sessionTtlHours = 12;      // время жизни сессии (REP_SESSION_TTL_HOURS)
+    std::string proxyHeader;       // заголовок с логином от доверенного прокси (ADR-54)
+    int logRetentionDays = 90;     // глубина хранения журналов (REP_LOG_RETENTION_DAYS)
+    bool readOnlyRole = false;     // данные читаются под отдельной ролью (ADR-33)
 
     // Снимок шаблона под мьютексом: обработчики не должны держать замок на всё время работы.
     std::shared_ptr<TemplateInfo> templateSnapshot(const std::string &id) const {
