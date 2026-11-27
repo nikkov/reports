@@ -40,7 +40,7 @@
     @drill="emit('drill', $event)"
     :rows="view.rows"
     :columns="columns"
-    :merges="view.merges"
+    :merges="visibleMerges"
     :group-count="view.groupCount"
     :height="height"
     :expanded="expandedIds"
@@ -60,7 +60,7 @@
     @drill="emit('drill', $event)"
     :rows="view.rows"
     :columns="columns"
-    :merges="view.merges"
+    :merges="visibleMerges"
     :group-count="view.groupCount"
     :height="height"
     :expanded="expandedIds"
@@ -170,12 +170,14 @@ const leaves = computed(() => {
   // Скрытая колонка (ADR-158): значение есть в строке (по нему считаются выражения и агрегаты),
   // но ни заголовка, ни ячейки на экране нет — поэтому в листья она не попадает.
   const walk = (col, path) => {
-    if (col.hidden) return
     if (Array.isArray(col.children)) {
       for (const child of col.children) walk(child, path.concat(col.title))
       return
     }
-    out.push({ col, headerPath: path })
+    // Скрытая негрупповая колонка значений в модели не нужна (выражения читают строку).
+    // Скрытая групповая — остаётся: по ней строятся группы и подытоги (ADR-191).
+    if (col.hidden && !col.group) return
+    out.push({ col, headerPath: path, hidden: !!col.hidden })
   }
   for (const col of props.block.columns) walk(col, [])
   return out
@@ -183,8 +185,11 @@ const leaves = computed(() => {
 
 const leafCols = computed(() => leaves.value.map((l) => l.col))
 
+// видимые листья: их и только их показывает таблица (ADR-191)
+const visibleLeaves = computed(() => leaves.value.map((l, i) => ({ l, i })).filter((x) => !x.l.hidden))
+
 const columns = computed(() =>
-  leaves.value.map((l, i) => {
+  visibleLeaves.value.map(({ l, i }) => {
     const styleColumn = props.styles?.columns?.[l.col.field]
     const numeric = !!(l.col.aggregate || l.col.expression || l.col.format === 'percent' ||
       (typeof l.col.format === 'object' && l.col.format?.style === 'percent'))
@@ -194,7 +199,7 @@ const columns = computed(() =>
       l.col.align ||
       (numeric && numericAlign !== 'inherit' ? numericAlign : numeric ? 'right' : 'left')
     return {
-      field: String(i), // индекс: по нему cellText достаёт значение
+      field: String(i), // индекс в модели (учитывает скрытые колонки): по нему cellText достаёт значение
       // ключ колонки: имя поля, а у вычисляемой колонки — заголовок (по нему её адресуют правила)
       columnKey: l.col.field || l.col.title,
       title: l.col.title,
@@ -283,6 +288,15 @@ const brokenExpr = computed(() => {
 })
 
 const view = computed(() => (leafCols.value.some((c) => c.group) ? groupedView() : flatView()))
+
+// Объединения пересчитываются на видимые колонки: скрытая колонка группировки
+// в thead не попадает, и индексы сдвигаются (ADR-191)
+const visibleMerges = computed(() => {
+  const pos = new Map(visibleLeaves.value.map(({ i }, k) => [i, k]))
+  return (view.value.merges || [])
+    .filter((m) => pos.has(m.col))
+    .map((m) => ({ ...m, col: pos.get(m.col) }))
+})
 
 // Для витрины: все группы раскрыты, кроме явно свёрнутых.
 const expandedIds = computed(() => {

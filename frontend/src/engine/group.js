@@ -125,6 +125,11 @@ export function buildTableModel(rows, columns, opts = {}) {
       ? subtotalLabel.split('{value}').join(value ?? '')
       : `${subtotalLabel} ${value ?? ''}`.trim()
 
+  // скрытые колонки группировки остаются в модели: по ним строятся группы и подытоги,
+  // но их ячейки не показываются, поэтому подпись итога уходит в первую видимую (ADR-191)
+  const firstVisible = columns.findIndex((c) => !c.hidden)
+  const labelTarget = (index) => (columns[index] && columns[index].hidden ? (firstVisible >= 0 ? firstVisible : 0) : index)
+
   const groupCols = columns.filter((c) => c.group)
   const groupFields = groupCols.map((c) => c.field)
   const subtotalLevels = new Set(
@@ -185,7 +190,7 @@ export function buildTableModel(rows, columns, opts = {}) {
     const row = makeRow('subtotal', level, node, acc, null, -1)
     // регион и другие предки остаются в своих колонках, иначе строка «висит» без группы
     for (let i = 0; i < level; i++) row.values[i] = node.path[i]
-    row.values[labelIndex >= 0 ? labelIndex : 0] = subtotalText(node.key)
+    row.values[labelTarget(labelIndex >= 0 ? labelIndex : 0)] = subtotalText(node.key)
     flat.push(row)
   }
 
@@ -206,7 +211,7 @@ export function buildTableModel(rows, columns, opts = {}) {
         const labelIndex = columns.findIndex((c) => c.group && c.field === groupFields[node.level])
         const row = makeRow('subtotal', node.level, node, null, serverRow, -1)
         for (let i = 0; i < node.level; i++) row.values[i] = node.path[i]
-        row.values[labelIndex >= 0 ? labelIndex : 0] = subtotalText(node.key)
+        row.values[labelTarget(labelIndex >= 0 ? labelIndex : 0)] = subtotalText(node.key)
         flat.push(row)
       } else if (visible) {
         pushSubtotal(node)
@@ -246,7 +251,7 @@ export function buildTableModel(rows, columns, opts = {}) {
   if (grandTotal) {
     const row = makeRow('grandtotal', -1, { key: '', path: [] }, rootAcc, null, -1)
     // «ИТОГО» в первой колонке — и в группированной, и в плоской таблице (как на экране)
-    row.values[0] = grandTotalLabel
+    row.values[labelTarget(0)] = grandTotalLabel
     flat.push(row)
   }
 

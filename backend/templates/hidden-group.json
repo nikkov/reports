@@ -1,0 +1,101 @@
+{
+  "version": 2,
+  "id": "hidden-group",
+  "title": "Скрытая колонка группировки",
+  "description": "Группировка по категории, но сама колонка скрыта: строки идут группами, подытоги подписаны в первой видимой колонке, общий итог — в ней же.",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT coalesce(s.category, 'Без категории') AS category, r.name AS region, count(*) AS orders, sum(s.amount) AS amount FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY 1, 2 ORDER BY 1, 3 DESC"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Колонка «Категория» скрыта (hidden: true), но группировка идёт по ней: строки сгруппированы, подытоги подписаны «Итого по категории: …» в первой видимой колонке, общий итог — «Всего за период»."
+    },
+    {
+      "type": "table",
+      "title": "Продажи",
+      "dataKey": "sales",
+      "span": 12,
+      "grandTotal": true,
+      "subtotalLabel": "Итого по категории: {value}",
+      "grandTotalLabel": "Всего за период",
+      "columns": [
+        {
+          "field": "category",
+          "title": "Категория",
+          "group": true,
+          "subtotal": true,
+          "hidden": true
+        },
+        {
+          "field": "region",
+          "title": "Регион"
+        },
+        {
+          "field": "orders",
+          "title": "Заказов",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма, руб.",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        }
+      ]
+    }
+  ],
+  "folder": "Оформление",
+  "tags": [
+    "группировка",
+    "скрытая колонка",
+    "пример"
+  ]
+}

@@ -1163,12 +1163,8 @@ function checkGaugeZones(block, base, errors) {
           if (!hasField) {
             errors.push({ path: cpath, message: 'у скрытой колонки должен быть field: значения нужны для вычислений' })
           }
-          if (col.group || col.subtotal) {
-            errors.push({
-              path: cpath,
-              message: 'скрытая колонка не может быть группой или подытогом — группировка выводится по видимым колонкам'
-            })
-          }
+          // Скрытая группа допустима (ADR-191): группировка и подытоги считаются по её значениям,
+          // а подпись итога выводится в первую видимую колонку строки
         }
         if (!col.group && col.aggregate && !hasField) {
           errors.push({ path: cpath, message: 'агрегат требует поля field' })

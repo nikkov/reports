@@ -571,7 +571,7 @@ async function waitRows(page) {
 
 test('все шаблоны из списка открываются и отдают строки', async ({ page, request }) => {
   // Обход всех шаблонов (их больше шести десятков) в 30 с не укладывается: общий таймаут теста
-  // должен быть больше, чем ожидание одного отчёта (ADR-191)
+  // должен быть больше, чем ожидание одного отчёта (ADR-192)
   test.setTimeout(180000)
   const list = await (await request.get('/api/reports')).json()
   expect(list.length).toBeGreaterThanOrEqual(7)
@@ -4315,4 +4315,27 @@ test('текст вместо агрегата в строках итогов (A
   expect(info.subCells[2]).not.toBe('—')
   expect(info.subCells[4]).toBe('—')
   expect(info.subCells[5]).toBe(`Итого по категории: ${info.subCells[0].replace('Итого по категории: ', '')}`)
+})
+
+test('скрытая колонка группировки (ADR-191)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=hidden-group')
+  await page.waitForSelector('.rt-table tbody tr', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  const info = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('.rt-table thead th')].map((t) => t.innerText.trim())
+    const rows = [...document.querySelectorAll('.rt-table tbody tr')]
+    const sub = rows.find((r) => r.className.includes('subtotal'))
+    return {
+      heads,
+      sub: sub ? sub.innerText.split('\t').map((x) => x.replace(/▾/g, '').trim()) : null
+    }
+  })
+  console.log('скрытая группа:', JSON.stringify(info))
+
+  // колонки группировки в шапке нет, остались данные
+  expect(info.heads).toEqual(['Регион', 'Заказов', 'Сумма, руб.'])
+  // подытог подписан в первой видимой колонке, суммы на месте
+  expect(info.sub[0]).toBe('Итого по категории: Аксессуары')
+  expect(Number(info.sub[1].replace(/\s/g, ''))).toBeGreaterThan(0)
 })

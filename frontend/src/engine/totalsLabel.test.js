@@ -87,3 +87,32 @@ describe('текст в строках итогов (ADR-190)', () => {
     expect(detail.values[3]).toBeNull()
   })
 })
+
+describe('скрытая колонка группировки (ADR-191)', () => {
+  const cols = [
+    { field: 'category', title: 'Категория', group: true, subtotal: true, hidden: true },
+    { field: 'region', title: 'Регион' },
+    { field: 'amount', title: 'Сумма', type: 'int', aggregate: 'sum' }
+  ]
+  const rows = [
+    { category: 'Аксессуары', region: 'Запад', amount: 10 },
+    { category: 'Аксессуары', region: 'Восток', amount: 20 },
+    { category: 'Мебель', region: 'Юг', amount: 5 }
+  ]
+
+  it('группы и подытоги считаются, подпись уходит в первую видимую колонку', () => {
+    const model = buildTableModel(rows, cols, { grandTotal: true })
+    const subs = model.rows.filter((r) => r.kind === 'subtotal')
+    expect(subs.length).toBe(2)
+    expect(subs[0].values[0]).toBe('') // скрытая категория
+    expect(subs[0].values[1]).toBe('Итого Аксессуары')
+    expect(Number(subs[0].values[2])).toBe(30)
+  })
+
+  it('общий итог тоже в первой видимой колонке', () => {
+    const model = buildTableModel(rows, cols, { grandTotal: true })
+    const grand = model.rows.find((r) => r.kind === 'grandtotal')
+    expect(grand.values[0]).toBe('')
+    expect(grand.values[1]).toBe('ИТОГО')
+  })
+})

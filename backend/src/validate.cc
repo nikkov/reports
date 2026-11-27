@@ -233,11 +233,7 @@ void checkTableBlock(ValidationResult &r,
                 if (!hasField) {
                     addError(r, cpath, "у скрытой колонки должен быть field: значения нужны для вычислений");
                 }
-                if (group || col["subtotal"].asBool()) {
-                    addError(r, cpath,
-                             "скрытая колонка не может быть группой или подытогом — группировка выводится "
-                             "по видимым колонкам");
-                }
+                // Скрытая группа допустима (ADR-191): группировка и подытоги считаются по её значениям
             }
             checkDateFormat(r, col["format"], cpath + ".format");
             if (hasField) leafFields.insert(asString(col["field"]));

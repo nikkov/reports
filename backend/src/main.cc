@@ -4053,13 +4053,16 @@ int main() {
             std::string numFmt;
             bool aggregated;
             std::string aggregateText; // текст в строках итогов вместо суммы (ADR-190)
+            bool hidden;               // скрытая колонка группировки (ADR-191)
         };
         std::vector<Leaf> leaves;
         std::vector<std::size_t> groupColumns;
         std::vector<int> subtotalLevels;
         std::function<void(const Json::Value &)> walk = [&](const Json::Value &col) {
-            // скрытая колонка (ADR-158) не попадает ни на экран, ни в книгу и ни в CSV
-            if (col["hidden"].asBool()) return;
+            // скрытая колонка (ADR-158) не попадает на экран и в файл. Если она групповая —
+            // остаётся в листе для группировки и подытогов и сжимается перед записью (ADR-191)
+            const bool hiddenCol = col["hidden"].asBool();
+            if (hiddenCol && !col["group"].asBool()) return;
             if (col["children"].isArray()) {
                 for (const auto &child : col["children"]) walk(child);
                 return;
@@ -4081,7 +4084,7 @@ int main() {
                 groupColumns.push_back(leaves.size());
             }
             leaves.push_back({col.get("field", "").asString(), col.get("title", "").asString(), numeric, numFmt,
-                              aggregated, aggregateText});
+                              aggregated, aggregateText, hiddenCol});
         };
         const std::string sheetTitle = tpl.get("title", "").asString();
         // на экране общий итог включён по умолчанию (ADR-1); в книге — так же
@@ -4107,7 +4110,7 @@ int main() {
                     rep::ExportSheet sheet;
                     sheet.title = sheetTitle;
                     for (const auto &leaf : leaves) {
-                        sheet.columns.push_back({leaf.title, leaf.numFmt, leaf.numeric});
+                        sheet.columns.push_back({leaf.title, leaf.numFmt, leaf.numeric, leaf.hidden});
                     }
                     for (const auto &kv : bag.values()) sheet.params.emplace_back(kv.first, kv.second);
                     std::map<std::string, size_t> index;
@@ -4183,7 +4186,7 @@ int main() {
                 rep::ExportSheet sheet;
                 sheet.title = sheetTitle;
                 for (const auto &leaf : leaves) {
-                    sheet.columns.push_back({leaf.title, leaf.numFmt, leaf.numeric});
+                    sheet.columns.push_back({leaf.title, leaf.numFmt, leaf.numeric, leaf.hidden});
                 }
                 for (const auto &kv : bag.values()) sheet.params.emplace_back(kv.first, kv.second);
 
@@ -4242,6 +4245,7 @@ int main() {
                        // CSV — машинный формат: строки итогов в него не идут (ADR-40, ADR-66)
                        rep::ExportSheet flat = sheet;
                        rep::dropSummaryRows(flat);
+                       rep::dropHiddenColumns(flat); // скрытые колонки в файл не идут (ADR-191)
                        done(200, "", rep::toCsv(flat), static_cast<int>(flat.rows.size()));
                    });
     };
@@ -4340,7 +4344,9 @@ int main() {
                                                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
                                                 ".xlsx";
                        std::string werr;
-                       if (!rep::writeXlsx(path, sheet, werr)) {
+                       rep::ExportSheet out = sheet;
+                       rep::dropHiddenColumns(out); // скрытые колонки в файл не идут (ADR-191)
+                       if (!rep::writeXlsx(path, out, werr)) {
                            done(500, "EXPORT_FAILED", werr, 0);
                            return;
                        }

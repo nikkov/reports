@@ -288,3 +288,44 @@ TEST_CASE("buildGroupedSheet: текст в колонке вместо сумм
     REQUIRE(sawSub);
     REQUIRE(sawGrand);
 }
+
+TEST_CASE("buildGroupedSheet: скрытая колонка группировки (ADR-191)") {
+    rep::ExportSheet sheet;
+    sheet.title = "T";
+    sheet.columns = {{"Категория", "", false, true}, // hidden
+                     {"Регион", "", false, false},
+                     {"Сумма", "# ##0", true, false}};
+    sheet.rows = {{"Аксессуары", "Запад", "10"}, {"Аксессуары", "Восток", "20"}, {"Мебель", "Юг", "5"}};
+
+    rep::GroupLayout layout;
+    layout.groupColumns = {0};
+    layout.subtotalLevels = {0};
+    layout.measureColumns = {2};
+    layout.grandTotal = true;
+    layout.subtotalLabel = "Итого по категории: {value}";
+    layout.grandLabel = "Всего";
+
+    rep::buildGroupedSheet(sheet, layout);
+
+    int subtotals = 0;
+    for (std::size_t i = 0; i < sheet.rows.size(); ++i) {
+        if (sheet.rowKind[i] == 1) {
+            ++subtotals;
+            // подпись уходит в первую видимую колонку: скрытая колонка 0 остаётся пустой
+            REQUIRE(sheet.rows[i][0].empty());
+            REQUIRE(sheet.rows[i][1].rfind("Итого по категории: ", 0) == 0);
+        }
+        if (sheet.rowKind[i] == 2) {
+            REQUIRE(sheet.rows[i][1] == "Всего");
+        }
+    }
+    REQUIRE(subtotals == 2);
+
+    // после сжатия скрытая колонка исчезает, подпись остаётся первой
+    rep::dropHiddenColumns(sheet);
+    REQUIRE(sheet.columns.size() == 2);
+    REQUIRE(sheet.columns[0].title == "Регион");
+    for (std::size_t i = 0; i < sheet.rows.size(); ++i) {
+        if (sheet.rowKind[i] == 1) REQUIRE(sheet.rows[i][0].rfind("Итого по категории: ", 0) == 0);
+    }
+}

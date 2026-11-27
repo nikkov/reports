@@ -40,6 +40,45 @@ std::string sheetName(const std::string &title) {
     return out;
 }
 
+void dropHiddenColumns(ExportSheet &sheet) {
+    std::vector<std::size_t> keep;   // старый индекс → новый
+    std::vector<int> shift(sheet.columns.size(), -1);
+    for (std::size_t c = 0; c < sheet.columns.size(); ++c) {
+        if (sheet.columns[c].hidden) continue;
+        shift[c] = static_cast<int>(keep.size());
+        keep.push_back(c);
+    }
+    if (keep.size() == sheet.columns.size()) return; // скрытых нет
+
+    std::vector<ExportColumn> cols;
+    cols.reserve(keep.size());
+    for (std::size_t c : keep) cols.push_back(sheet.columns[c]);
+    sheet.columns = std::move(cols);
+
+    for (auto &row : sheet.rows) {
+        std::vector<std::string> values;
+        values.reserve(keep.size());
+        for (std::size_t c : keep) values.push_back(c < row.size() ? row[c] : std::string());
+        row = std::move(values);
+    }
+
+    std::vector<ExportMerge> merges;
+    for (const auto &m : sheet.merges) {
+        if (m.col < 0 || m.col >= static_cast<int>(shift.size())) continue;
+        const int next = shift[static_cast<std::size_t>(m.col)];
+        if (next < 0) continue; // объединение по скрытой колонке не нужно
+        merges.push_back({next, m.firstRow, m.lastRow});
+    }
+    sheet.merges = std::move(merges);
+
+    for (auto &img : sheet.images) {
+        if (img.col >= 0 && img.col < static_cast<int>(shift.size())) {
+            const int next = shift[static_cast<std::size_t>(img.col)];
+            img.col = next < 0 ? 0 : next;
+        }
+    }
+}
+
 void applyGrouping(ExportSheet &sheet, const std::vector<std::size_t> &groupColumns) {
     if (groupColumns.empty() || sheet.rows.size() < 2) return;
 

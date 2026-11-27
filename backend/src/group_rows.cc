@@ -50,15 +50,27 @@ unsigned char kindAt(const ExportSheet &sheet, std::size_t row) {
     return sheet.rowKind.empty() ? static_cast<unsigned char>(RowKind::Detail) : sheet.rowKind[row];
 }
 
+// Первая видимая колонка: в неё уходит подпись итога, если колонка группировки скрыта (ADR-191)
+std::size_t firstVisibleColumn(const ExportSheet &sheet) {
+    for (std::size_t c = 0; c < sheet.columns.size(); ++c) {
+        if (!sheet.columns[c].hidden) return c;
+    }
+    return 0;
+}
+
 std::vector<std::string> summaryRow(const ExportSheet &sheet, const GroupLayout &layout, int level,
                                     const std::vector<std::string> &anchor, const std::string &label) {
     std::vector<std::string> out(sheet.columns.size());
+    const std::size_t visible = firstVisibleColumn(sheet);
+    const auto labelColumn = [&](std::size_t col) {
+        return col < sheet.columns.size() && sheet.columns[col].hidden ? visible : col;
+    };
     if (level < 0) {
         // общий итог: подпись в первой групповой колонке, а в плоской таблице — в первой (ADR-95)
         if (layout.groupColumns.empty()) {
             if (!out.empty()) out[0] = label;
         } else if (layout.groupColumns[0] < out.size()) {
-            out[layout.groupColumns[0]] = label;
+            out[labelColumn(layout.groupColumns[0])] = label;
         }
     } else {
         // предки сохраняют свои значения — строка итога «висит» в своей группе, а не без неё
@@ -67,7 +79,7 @@ std::vector<std::string> summaryRow(const ExportSheet &sheet, const GroupLayout 
             if (col < out.size()) out[col] = labelPart(anchor, layout, i, layout.nullLabel);
         }
         const std::size_t own = layout.groupColumns[static_cast<std::size_t>(level)];
-        if (own < out.size()) out[own] = label;
+        if (own < out.size()) out[labelColumn(own)] = label;
     }
     return out;
 }
