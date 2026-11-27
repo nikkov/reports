@@ -837,6 +837,18 @@ export default {
           },
           "description": "порядок деталей при раскрытии группы (только с aggregate)"
         },
+        "grandTotalLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "название строки общего итога (по умолчанию «ИТОГО») — ADR-188"
+        },
+        "subtotalLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "название строки подытога; {value} заменяется значением группы (по умолчанию «Итого {value}») — ADR-188"
+        },
         "sort": {
           "type": "array",
           "minItems": 1,

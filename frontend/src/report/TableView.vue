@@ -232,7 +232,7 @@ function flatView() {
 
   if (props.block.grandTotal !== false) {
     const totalValues = cols.map((c, i) => {
-      if (i === 0) return 'ИТОГО'
+      if (i === 0) return props.block.grandTotalLabel || 'ИТОГО'
       if (c.expression) {
         try {
           return evaluate(c.expression, {
@@ -255,6 +255,9 @@ function groupedView() {
     collapsed: collapsed.value.size ? collapsed.value : undefined,
     grandTotal: props.block.grandTotal !== false,
     nullLabel: props.block.nullText || '(пусто)',
+    // свои названия строк итогов из шаблона (ADR-188)
+    grandTotalLabel: props.block.grandTotalLabel,
+    subtotalLabel: props.block.subtotalLabel,
     details: details.value.size ? details.value : undefined
   })
   const ids = new Set()

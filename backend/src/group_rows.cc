@@ -198,8 +198,16 @@ void buildGroupedSheet(ExportSheet &sheet, const GroupLayout &layout) {
                 subtotalLevels.push_back(j < sheet.rowSubtotalLevel.size() ? sheet.rowSubtotalLevel[j] : -1);
                 ++j;
             }
-            auto summary = summaryRow(sheet, layout, level, sheet.rows[i],
-                                      "Итого " + labelPart(sheet.rows[i], layout, level, layout.nullLabel));
+            // подпись подытога из шаблона: «Итого {value}» → «Итого Север» (ADR-188)
+            const std::string groupText = labelPart(sheet.rows[i], layout, level, layout.nullLabel);
+            std::string label = layout.subtotalLabel;
+            const std::size_t at = label.find("{value}");
+            if (at == std::string::npos) {
+                label += " " + groupText;
+            } else {
+                label.replace(at, 7, groupText);
+            }
+            auto summary = summaryRow(sheet, layout, level, sheet.rows[i], label);
             writeSums(summary, layout, sums);
             rows.push_back(summary);
             kinds.push_back(static_cast<unsigned char>(RowKind::Subtotal));

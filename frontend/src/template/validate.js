@@ -1055,6 +1055,20 @@ function checkGaugeZones(block, base, errors) {
           }
         }
       }
+      // Названия строк итогов (ADR-188): пустые не допускаются, в подытоге полезно {value}
+      if (block.grandTotalLabel !== undefined && !String(block.grandTotalLabel).trim()) {
+        errors.push({ path: `${base}.grandTotalLabel`, message: 'название итога не может быть пустым' })
+      }
+      if (block.subtotalLabel !== undefined) {
+        if (!String(block.subtotalLabel).trim()) {
+          errors.push({ path: `${base}.subtotalLabel`, message: 'название подытога не может быть пустым' })
+        } else if (!String(block.subtotalLabel).includes('{value}')) {
+          warnings.push({
+            path: `${base}.subtotalLabel`,
+            message: 'в подписи нет {value}: значение группы будет добавлено в конец'
+          })
+        }
+      }
       // Сортировка таблицы (ADR-183): правила ссылаются на поле данных или заголовок
       // вычисляемой колонки; неизвестное имя — ошибка, иначе сортировка молча не работала бы
       if (block.sort !== undefined) {

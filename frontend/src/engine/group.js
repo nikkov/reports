@@ -111,6 +111,19 @@ export function buildTableModel(rows, columns, opts = {}) {
   const nullLabel = opts.nullLabel || '(пусто)'
   const collapsed = opts.collapsed
   const grandTotal = opts.grandTotal !== false
+  // Подписи строк итогов (ADR-188): шаблон может задать свои тексты.
+  // В subtotalLabel подставляется значение группы: «Итого: {value}».
+  const grandTotalLabel = typeof opts.grandTotalLabel === 'string' && opts.grandTotalLabel
+    ? opts.grandTotalLabel
+    : 'ИТОГО'
+  const subtotalLabel = typeof opts.subtotalLabel === 'string' && opts.subtotalLabel
+    ? opts.subtotalLabel
+    : 'Итого {value}'
+  // нет {value} — значение группы дописывается в конец (так же на сервере, ADR-188)
+  const subtotalText = (value) =>
+    subtotalLabel.includes('{value}')
+      ? subtotalLabel.split('{value}').join(value ?? '')
+      : `${subtotalLabel} ${value ?? ''}`.trim()
 
   const groupCols = columns.filter((c) => c.group)
   const groupFields = groupCols.map((c) => c.field)
@@ -135,7 +148,7 @@ export function buildTableModel(rows, columns, opts = {}) {
       if (col.group) {
         // детальная строка несёт своё значение (объединение покажет его на первой строке блока);
         // в строках итогов — только подпись в колонке своей группы
-        values[i] = rowScope ? rowScope[col.field] : labelIndex === i ? `Итого ${node.key}` : ''
+        values[i] = rowScope ? rowScope[col.field] : labelIndex === i ? subtotalText(node.key) : ''
       } else if (col.expression) {
         values[i] = acc
           ? evalExpression(col.expression, rowScope, acc)
@@ -165,7 +178,7 @@ export function buildTableModel(rows, columns, opts = {}) {
     const row = makeRow('subtotal', level, node, acc, null, -1)
     // регион и другие предки остаются в своих колонках, иначе строка «висит» без группы
     for (let i = 0; i < level; i++) row.values[i] = node.path[i]
-    row.values[labelIndex >= 0 ? labelIndex : 0] = `Итого ${node.key}`
+    row.values[labelIndex >= 0 ? labelIndex : 0] = subtotalText(node.key)
     flat.push(row)
   }
 
@@ -186,7 +199,7 @@ export function buildTableModel(rows, columns, opts = {}) {
         const labelIndex = columns.findIndex((c) => c.group && c.field === groupFields[node.level])
         const row = makeRow('subtotal', node.level, node, null, serverRow, -1)
         for (let i = 0; i < node.level; i++) row.values[i] = node.path[i]
-        row.values[labelIndex >= 0 ? labelIndex : 0] = `Итого ${node.key}`
+        row.values[labelIndex >= 0 ? labelIndex : 0] = subtotalText(node.key)
         flat.push(row)
       } else if (visible) {
         pushSubtotal(node)
@@ -226,7 +239,7 @@ export function buildTableModel(rows, columns, opts = {}) {
   if (grandTotal) {
     const row = makeRow('grandtotal', -1, { key: '', path: [] }, rootAcc, null, -1)
     // «ИТОГО» в первой колонке — и в группированной, и в плоской таблице (как на экране)
-    row.values[0] = 'ИТОГО'
+    row.values[0] = grandTotalLabel
     flat.push(row)
   }
 

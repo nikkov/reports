@@ -1,0 +1,104 @@
+{
+  "version": 2,
+  "id": "totals-labels",
+  "title": "Свои названия итогов",
+  "description": "Подписи строк подытогов и общего итога задаются в шаблоне: subtotalLabel с {value} («Всего по региону {value}») и grandTotalLabel («Итого за квартал»).",
+  "params": [
+    {
+      "name": "from",
+      "type": "date",
+      "label": "Период с",
+      "required": true,
+      "default": "2026-01-01",
+      "source": {
+        "kind": "date"
+      }
+    },
+    {
+      "name": "to",
+      "type": "date",
+      "label": "по",
+      "required": true,
+      "default": "2026-03-31",
+      "source": {
+        "kind": "date"
+      }
+    }
+  ],
+  "connections": {
+    "main": {
+      "kind": "postgres",
+      "host": "${PGHOST}",
+      "port": "${PGPORT}",
+      "database": "${PGDATABASE}",
+      "user": "${REP_RO_DB_USER}",
+      "passwordEnv": "REP_RO_DB_PASSWORD",
+      "schema": "reports_examples",
+      "sslmode": "prefer",
+      "connectTimeout": 5,
+      "statementTimeoutMs": 5000
+    }
+  },
+  "datasets": {
+    "sales": {
+      "connection": "main",
+      "params": {
+        "from": "$from",
+        "to": "$to"
+      },
+      "sql": "SELECT r.name AS region, coalesce(s.category, 'Без категории') AS category, sum(s.amount) AS amount, sum(s.profit) AS profit, count(*) AS orders FROM reports_examples.sales s JOIN reports_examples.regions r ON r.id = s.region_id WHERE s.order_date >= :from::date AND s.order_date <= :to::date GROUP BY r.name, s.category ORDER BY 1, 3 DESC"
+    }
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "span": 12,
+      "text": "Строки итогов названы по-своему: подытог — «Всего по региону <название>», общий — «Итого за квартал». Оба текста заданы в шаблоне, а не в коде."
+    },
+    {
+      "type": "table",
+      "title": "Продажи по регионам и категориям",
+      "dataKey": "sales",
+      "span": 12,
+      "grandTotal": true,
+      "grandTotalLabel": "Итого за квартал",
+      "subtotalLabel": "Всего по региону {value}",
+      "columns": [
+        {
+          "field": "region",
+          "title": "Регион",
+          "group": true,
+          "subtotal": true
+        },
+        {
+          "field": "category",
+          "title": "Категория"
+        },
+        {
+          "field": "orders",
+          "title": "Заказов",
+          "type": "int",
+          "aggregate": "sum"
+        },
+        {
+          "field": "amount",
+          "title": "Сумма, руб.",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        },
+        {
+          "field": "profit",
+          "title": "Прибыль, руб.",
+          "type": "int",
+          "aggregate": "sum",
+          "format": "number"
+        }
+      ]
+    }
+  ],
+  "folder": "Оформление",
+  "tags": [
+    "итоги"
+  ]
+}

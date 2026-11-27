@@ -4080,6 +4080,9 @@ int main() {
         const bool grandTotal = block.isNull() || block.get("grandTotal", true).asBool();
         // collapsible: false — группы в книге не сворачиваются (ADR-94)
         const bool collapsible = block.isNull() || block.get("collapsible", true).asBool();
+        // свои названия строк итогов из шаблона (ADR-188): пусто — умолчания
+        const std::string grandLabelText = block.isNull() ? "" : block.get("grandTotalLabel", "").asString();
+        const std::string subtotalLabelText = block.isNull() ? "" : block.get("subtotalLabel", "").asString();
         // листья блока — общие для SQL- и join-пути (были потеряны при правках, лист выходил пустым)
         for (const auto &col : block["columns"]) walk(col);
 
@@ -4089,8 +4092,8 @@ int main() {
             const std::string dsKey = rds.key;
             fetchDatasetRows(
                 *snapshot, dsKey, bag, dataDb, connRegistry, restCache, maxRows,
-                [done, leaves, bag, sheetTitle, groupColumns, subtotalLevels, grandTotal,
-                 collapsible, reportId](const rep::DatasetRows &rows) {
+                [done, leaves, bag, sheetTitle, groupColumns, subtotalLevels, grandLabelText, subtotalLabelText, grandTotal,
+                 collapsible, reportId, grandLabelText, subtotalLabelText](const rep::DatasetRows &rows) {
                     std::fprintf(stderr, "export: %s — rows %zu, leaves %zu, cols %zu\n", reportId.c_str(),
                                  rows.rows.size(), leaves.size(), rows.columns.size());
                     rep::ExportSheet sheet;
@@ -4117,6 +4120,8 @@ int main() {
                         layout.subtotalLevels = subtotalLevels;
                         layout.grandTotal = grandTotal;
                         layout.collapsible = collapsible;
+                        if (!grandLabelText.empty()) layout.grandLabel = grandLabelText;
+                        if (!subtotalLabelText.empty()) layout.subtotalLabel = subtotalLabelText;
                         for (std::size_t c = 0; c < leaves.size(); ++c) {
                             if (leaves[c].aggregated) layout.measureColumns.push_back(c);
                         }
@@ -4155,7 +4160,7 @@ int main() {
         static const std::map<std::string, std::string> noDeclared;
         runQuery(
             sheetClient, finalSql, query.values,
-            [done, leaves, bag, sheetTitle, groupColumns, subtotalLevels,
+            [done, leaves, bag, sheetTitle, groupColumns, subtotalLevels, grandLabelText, subtotalLabelText,
              grandTotal, collapsible](const orm::Result &res) {
                 const auto ncols = static_cast<size_t>(res.columns());
                 std::vector<std::string> names;
@@ -4200,6 +4205,8 @@ int main() {
                 layout.subtotalLevels = subtotalLevels;
                 layout.grandTotal = grandTotal;
                 layout.collapsible = collapsible;
+                if (!grandLabelText.empty()) layout.grandLabel = grandLabelText;
+                if (!subtotalLabelText.empty()) layout.subtotalLabel = subtotalLabelText;
                 for (std::size_t c = 0; c < leaves.size(); ++c) {
                     if (leaves[c].aggregated) layout.measureColumns.push_back(c);
                 }

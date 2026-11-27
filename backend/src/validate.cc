@@ -1797,6 +1797,26 @@ ValidationResult validateTemplateJson(const Json::Value &root,
                         }
                     }
                 }
+                // Названия строк итогов (ADR-188)
+                if (block.isMember("grandTotalLabel") && !block["grandTotalLabel"].isNull()) {
+                    const std::string v = asString(block["grandTotalLabel"]);
+                    if (v.empty()) {
+                        addError(r, base + ".grandTotalLabel", "название итога не может быть пустым");
+                    } else if (v.size() > 60) {
+                        addError(r, base + ".grandTotalLabel", "название итога: не длиннее 60 символов");
+                    }
+                }
+                if (block.isMember("subtotalLabel") && !block["subtotalLabel"].isNull()) {
+                    const std::string v = asString(block["subtotalLabel"]);
+                    if (v.empty()) {
+                        addError(r, base + ".subtotalLabel", "название подытога не может быть пустым");
+                    } else if (v.size() > 80) {
+                        addError(r, base + ".subtotalLabel", "название подытога: не длиннее 80 символов");
+                    } else if (v.find("{value}") == std::string::npos) {
+                        addWarning(r, base + ".subtotalLabel",
+                                   "в подписи нет {value}: значение группы будет добавлено в конец");
+                    }
+                }
                 // Сортировка таблицы (ADR-183): поле данных или заголовок вычисляемой колонки
                 if (block.isMember("sort") && !block["sort"].isNull()) {
                     const Json::Value &sort = block["sort"];

@@ -615,7 +615,8 @@ test('все шаблоны из списка открываются и отда
         async () =>
           (await page.locator('.rt-table tbody tr:not(.spacer) td').count()) +
           (await page.locator('.chart-box canvas').count()),
-        { timeout: 10000, message: `отчёт ${r.id}: ни таблицы, ни диаграммы` }
+        // таблица появляется после ответа демо-сервиса, а он под нагрузкой медленный (ADR-185)
+        { timeout: 30000, message: `отчёт ${r.id}: ни таблицы, ни диаграммы` }
       )
       .toBeGreaterThan(0)
   }
@@ -4219,4 +4220,44 @@ test('многострочные заголовки колонок и текст
   // текст-блок сохраняет переносы и пустые строки
   expect(info.textWhiteSpace).toBe('pre-line')
   expect(info.textLines).toBeGreaterThanOrEqual(4)
+})
+
+test('свои названия строк итогов (ADR-188)', async ({ page }) => {
+  await page.goto('/reports/report.html?report=totals-labels')
+  await page.waitForSelector('.rt-table tbody tr', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  // таблица виртуализирована: до общего итога нужно доскроллить
+  await page.evaluate(() => {
+    const el = [...document.querySelectorAll('div')].find((d) => {
+      const s = getComputedStyle(d)
+      return /auto|scroll/.test(s.overflowY) && d.scrollHeight > d.clientHeight + 50
+    })
+    if (el) el.scrollTop = el.scrollHeight
+  })
+  await page.waitForTimeout(800)
+
+  const info = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.rt-table tbody tr')]
+    const subs = rows
+      .filter((r) => r.className.includes('subtotal'))
+      .map((r) => r.innerText.split('\t')[0].replace(/▾/g, '').trim())
+    const grand = rows.find((r) => r.className.includes('grandtotal'))
+    // дефолтные подписи в строках итогов: ровно «ИТОГО» или «Итого <слово>»
+    const totalRows = rows.filter((r) => /subtotal|grandtotal/.test(r.className))
+    const labels = totalRows.map((r) => r.innerText.split('\t')[0].replace(/▾/g, '').trim())
+    return {
+      subs,
+      grand: grand ? grand.innerText.split('\t')[0].replace(/▾/g, '').trim() : null,
+      labels,
+      hasDefault: labels.some((l) => l === 'ИТОГО' || /^Итого \S+$/.test(l))
+    }
+  })
+  console.log('итоги:', JSON.stringify(info))
+
+  // подписи из шаблона, а не зашитые «Итого …» / «ИТОГО»
+  expect(info.subs.length).toBeGreaterThan(0)
+  expect(info.subs.every((s) => s.startsWith('Всего по региону'))).toBe(true)
+  expect(info.grand).toBe('Итого за квартал')
+  expect(info.hasDefault).toBe(false)
 })

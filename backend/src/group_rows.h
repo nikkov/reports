@@ -21,6 +21,8 @@ struct GroupLayout {
     // collapsible: false — группы всегда раскрыты и в книге: без outline-уровней (ADR-94)
     bool collapsible = true;
     std::string grandLabel = "ИТОГО";
+    // подпись подытога: {value} заменяется ключом группы (ADR-188)
+    std::string subtotalLabel = "Итого {value}";
     std::string nullLabel = "(пусто)";
 };
 

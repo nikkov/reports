@@ -216,3 +216,32 @@ TEST_CASE("buildGroupedSheet: без групп структуры книги н
     // уровни структуры не выставляются вовсе — иначе Excel показывает сворачивание строк
     for (int lvl : sheet.rowLevels) REQUIRE(lvl == 0);
 }
+
+TEST_CASE("buildGroupedSheet: свои названия строк итогов (ADR-188)") {
+    auto sheet = sheetWithRows({{"Восток", "Мебель", "10", "1"}, {"Восток", "Свет", "20", "2"}, {"Запад", "Свет", "5", "1"}});
+    auto layout = twoLevels();
+    layout.subtotalLabel = "Всего по региону {value}";
+    layout.grandLabel = "Итого за квартал";
+    rep::buildGroupedSheet(sheet, layout);
+
+    std::vector<std::string> labels;
+    for (const auto &r : sheet.rows) labels.push_back(r[0]);
+    REQUIRE(std::find(labels.begin(), labels.end(), "Всего по региону Восток") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "Всего по региону Запад") != labels.end());
+    REQUIRE(labels.back() == "Итого за квартал");
+
+    // сумма подытога не зависит от подписи
+    for (std::size_t i = 0; i < sheet.rows.size(); ++i) {
+        if (sheet.rows[i][0] == "Всего по региону Восток") REQUIRE(sheet.rows[i][2] == "30");
+    }
+}
+
+TEST_CASE("buildGroupedSheet: подпись без {value} — значение группы в конце (ADR-188)") {
+    auto sheet = sheetWithRows({{"Восток", "Мебель", "10", "1"}});
+    auto layout = twoLevels(false);
+    layout.subtotalLabel = "Подытог";
+    rep::buildGroupedSheet(sheet, layout);
+    std::vector<std::string> labels;
+    for (const auto &r : sheet.rows) labels.push_back(r[0]);
+    REQUIRE(std::find(labels.begin(), labels.end(), "Подытог Восток") != labels.end());
+}
