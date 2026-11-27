@@ -72,6 +72,7 @@ bool parseConnections(const Json::Value &connections, std::map<std::string, Conn
         if (it->isMember("connectTimeout")) spec.connectTimeout = (*it)["connectTimeout"].asInt();
         if (it->isMember("statementTimeoutMs")) {
             spec.statementTimeoutMs = (*it)["statementTimeoutMs"].asInt();
+            spec.statementTimeoutSet = true;
         }
         spec.baseUrl = it->get("baseUrl", "").asString();
         const Json::Value &auth = (*it)["auth"];
@@ -145,6 +146,18 @@ std::string expandEnvValue(const std::string &value, const std::string &key, std
     return expandEnv(value, key, error);
 }
 
+int ConnRegistry::effectiveStatementTimeoutMs(const ConnSpec &spec) {
+    // Положительное значение — заведомо задано (даже если флаг не выставлен вручную)
+    if (spec.statementTimeoutSet || spec.statementTimeoutMs > 0) return spec.statementTimeoutMs;
+    // Поле не задано: источник не должен висеть бесконечно, берём общий предел сервера
+    int fallback = 30000;
+    try {
+        fallback = std::stoi(rep::envOr("REP_STATEMENT_TIMEOUT_MS", "30000"));
+    } catch (const std::exception &) {
+    }
+    return fallback < 0 ? 0 : fallback;
+}
+
 std::string ConnRegistry::dsnFor(const ConnSpec &spec, std::string &error) {
     error.clear();
     if (spec.kind != "postgres") {
@@ -194,8 +207,9 @@ std::string ConnRegistry::dsnFor(const ConnSpec &spec, std::string &error) {
         }
         options += " -c search_path=" + schema;
     }
-    if (spec.statementTimeoutMs > 0) {
-        options += " -c statement_timeout=" + std::to_string(spec.statementTimeoutMs);
+    const int timeoutMs = ConnRegistry::effectiveStatementTimeoutMs(spec);
+    if (timeoutMs > 0) {
+        options += " -c statement_timeout=" + std::to_string(timeoutMs);
     }
 
     std::string dsn = "host=" + quote(host) + " port=" + quote(port) +

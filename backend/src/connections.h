@@ -43,7 +43,10 @@ struct ConnSpec {
     std::string schema;      // search_path сессии; пусто — как настроено в роли
     std::string sslMode;     // disable | prefer | require | verify-ca | verify-full
     int connectTimeout = 5;  // секунды
+    // 0 — без ограничения, но только если поле задано явно: при отсутствии в шаблоне
+    // подставляется REP_STATEMENT_TIMEOUT_MS (ADR-195)
     int statementTimeoutMs = 0;
+    bool statementTimeoutSet = false;
     // rest (ADR-104)
     std::string baseUrl;
     std::map<std::string, std::string> headers; // значения могут быть ${ENV} (секреты — только так)
@@ -87,6 +90,10 @@ public:
 
     // DSN для проверки прав и диагностики: пароль в него попадает, наружу не отдаётся.
     static std::string dsnFor(const ConnSpec &spec, std::string &error);
+
+    // Фактический statement_timeout источника: заданный в шаблоне, иначе общий
+    // REP_STATEMENT_TIMEOUT_MS (ADR-195). 0 — ограничения нет (задано явно).
+    static int effectiveStatementTimeoutMs(const ConnSpec &spec);
 
     size_t size();
 

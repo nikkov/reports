@@ -232,3 +232,36 @@ TEST_CASE("connections: срок карантина задан и положит
     // источник подхватывается без перезапуска сервера
     REQUIRE(rep::ConnRegistry::kFailureCooldownSeconds == 30);
 }
+
+TEST_CASE("statement_timeout источника: не задан — общий по умолчанию, 0 — без ограничения (ADR-195)") {
+    // поле отсутствует в шаблоне
+    rep::ConnSpec spec;
+    spec.host = "127.0.0.1";
+    spec.port = "5432";
+    spec.database = "reporting";
+    spec.user = "reporting_ro";
+    spec.passwordEnv = kEnvName;
+    EnvGuard guard("secret");
+    std::string err;
+    REQUIRE(rep::ConnRegistry::effectiveStatementTimeoutMs(spec) == 30000);
+    REQUIRE(rep::ConnRegistry::dsnFor(spec, err).find("statement_timeout=30000") != std::string::npos);
+
+    // явный 0 — ограничения нет, опция не добавляется
+    rep::ConnSpec none = spec;
+    none.statementTimeoutMs = 0;
+    none.statementTimeoutSet = true;
+    REQUIRE(rep::ConnRegistry::effectiveStatementTimeoutMs(none) == 0);
+    REQUIRE(rep::ConnRegistry::dsnFor(none, err).find("statement_timeout") == std::string::npos);
+
+    // явное значение — берётся оно
+    rep::ConnSpec twenty = spec;
+    twenty.statementTimeoutMs = 20000;
+    twenty.statementTimeoutSet = true;
+    REQUIRE(rep::ConnRegistry::effectiveStatementTimeoutMs(twenty) == 20000);
+    REQUIRE(rep::ConnRegistry::dsnFor(twenty, err).find("statement_timeout=20000") != std::string::npos);
+
+    // переменная окружения меняет умолчание
+    setenv("REP_STATEMENT_TIMEOUT_MS", "45000", 1);
+    REQUIRE(rep::ConnRegistry::effectiveStatementTimeoutMs(spec) == 45000);
+    unsetenv("REP_STATEMENT_TIMEOUT_MS");
+}

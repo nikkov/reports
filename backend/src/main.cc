@@ -708,7 +708,10 @@ void fetchDatasetRows(const TemplateInfo &tpl, const std::string &key, const rep
         } catch (const std::exception &) {
         }
         const auto specIt0 = tpl.connections.find(sourceKey);
-        const int statementMs = specIt0 == tpl.connections.end() ? 0 : specIt0->second.statementTimeoutMs;
+        // statement_timeout источника: заданный в шаблоне или общий по умолчанию (ADR-195)
+        const int statementMs = specIt0 == tpl.connections.end()
+                                    ? 0
+                                    : rep::ConnRegistry::effectiveStatementTimeoutMs(specIt0->second);
         const int restMs = specIt0 == tpl.connections.end() ? 0 : specIt0->second.timeoutMs;
         queryTimeoutMs = rep::effectiveQueryTimeoutMs(ds.kind, statementMs, restMs, envDefaultMs);
     }
